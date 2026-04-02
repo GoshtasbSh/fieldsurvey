@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KeyStone Field Survey Dashboard</title>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:       #0b0f19;
+  --panel:    #111827;
+  --card:     #1a2332;
+  --hover:    #1e293b;
+  --border:   rgba(255,255,255,0.06);
+  --border-h: rgba(255,255,255,0.12);
+  --text:     #f1f5f9;
+  --text2:    #94a3b8;
+  --muted:    #64748b;
+  --accent:   #3b82f6;
+  --accent-h: #2563eb;
+  --green:    #10b981;
+  --orange:   #f97316;
+  --red:      #ef4444;
+  --purple:   #8b5cf6;
+  --cyan:     #06b6d4;
+  --r:        10px;
+  --font:     'Inter',system-ui,-apple-system,sans-serif;
+  --mono:     'JetBrains Mono',monospace;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--muted);border-radius:3px}
+
+/* Layout */
+.app{display:flex;flex-direction:column;height:100vh}
+.header{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;z-index:100}
+.header-left{display:flex;align-items:center;gap:12px}
+.header-left svg{color:var(--accent)}
+.header h1{font-size:16px;font-weight:600;letter-spacing:-0.01em}
+.header h1 span{color:var(--text2);font-weight:400;margin-left:6px;font-size:13px}
+.header-right{display:flex;align-items:center;gap:8px}
+.main{display:flex;flex:1;overflow:hidden;position:relative}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:500 13px var(--font);cursor:pointer;transition:all .15s}
+.btn:hover{background:var(--hover);border-color:var(--border-h)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-accent:hover{background:var(--accent-h)}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
+.btn-icon{padding:7px;aspect-ratio:1}
+.btn svg{width:16px;height:16px}
+
+/* Sidebar */
+.sidebar{width:280px;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0;transition:width .3s ease,opacity .3s ease;z-index:50}
+.sidebar.collapsed{width:0;opacity:0;overflow:hidden}
+.sidebar-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+.sidebar-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+
+/* Layer toggles */
+.layer-row{display:flex;align-items:center;gap:10px;padding:6px 0}
+.layer-row label{flex:1;font-size:13px;color:var(--text2);cursor:pointer;user-select:none}
+.toggle{position:relative;width:36px;height:20px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle span{position:absolute;inset:0;background:var(--hover);border-radius:10px;cursor:pointer;transition:.2s;border:1px solid var(--border)}
+.toggle span::before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:var(--muted);border-radius:50%;transition:.2s}
+.toggle input:checked+span{background:var(--accent);border-color:var(--accent)}
+.toggle input:checked+span::before{transform:translateX(16px);background:#fff}
+
+/* Basemap selector */
+.basemap-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.basemap-opt{padding:8px;border-radius:8px;border:2px solid var(--border);background:var(--card);cursor:pointer;text-align:center;font-size:11px;font-weight:500;color:var(--text2);transition:all .15s}
+.basemap-opt:hover{border-color:var(--border-h);color:var(--text)}
+.basemap-opt.active{border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,0.08)}
+.basemap-opt .thumb{height:32px;border-radius:4px;margin-bottom:4px;background-size:cover;background-position:center}
+
+/* Legend */
+.legend-item{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;color:var(--text2);cursor:pointer;transition:opacity .15s}
+.legend-item:hover{color:var(--text)}
+.legend-item.dimmed{opacity:0.3}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.legend-count{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+/* Search */
+.search-box{position:relative}
+.search-box input{width:100%;padding:8px 12px 8px 34px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:13px var(--font);outline:none;transition:border .15s}
+.search-box input:focus{border-color:var(--accent)}
+.search-box input::placeholder{color:var(--muted)}
+.search-box svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--muted)}
+
+/* Map area */
+.map-area{flex:1;position:relative;display:flex;flex-direction:column}
+#map{flex:1}
+.maplibregl-popup{max-width:360px!important}
+.maplibregl-popup-content{background:var(--panel)!important;border:1px solid var(--border-h)!important;border-radius:var(--r)!important;padding:0!important;box-shadow:0 20px 40px rgba(0,0,0,.5)!important;color:var(--text)!important}
+.maplibregl-popup-tip{border-top-color:var(--panel)!important}
+.maplibregl-popup-close-button{color:var(--muted)!important;font-size:18px!important;padding:8px 10px!important;right:2px!important;top:2px!important}
+.maplibregl-popup-close-button:hover{color:var(--text)!important;background:none!important}
+
+/* Popup content */
+.popup-card{min-width:280px}
+.popup-header{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+.popup-header h3{font-size:14px;font-weight:600;margin-bottom:4px}
+.popup-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:.02em}
+.popup-body{padding:12px 16px}
+.popup-row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.popup-row:last-child{border:none}
+.popup-label{color:var(--muted);font-weight:500}
+.popup-value{color:var(--text);text-align:right;max-width:200px;word-wrap:break-word}
+
+/* Analysis panel */
+.analysis-panel{height:0;background:var(--panel);border-top:1px solid var(--border);transition:height .3s ease;overflow:hidden;flex-shrink:0}
+.analysis-panel.open{height:300px}
+.analysis-toggle{position:absolute;bottom:0;left:50%;transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:8px;padding:6px 16px;background:var(--panel);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font:500 12px var(--font);color:var(--text2);transition:all .15s}
+.analysis-toggle:hover{color:var(--text);background:var(--card)}
+.analysis-toggle svg{width:14px;height:14px;transition:transform .3s}
+.analysis-panel.open~.analysis-toggle svg{transform:rotate(180deg)}
+.analysis-inner{display:flex;height:100%;overflow:hidden}
+.analysis-tabs{display:flex;flex-direction:column;width:160px;padding:8px;border-right:1px solid var(--border);flex-shrink:0}
+.analysis-tab{padding:8px 12px;border-radius:6px;font-size:12px;font-weight:500;color:var(--text2);cursor:pointer;transition:.15s;text-align:left}
+.analysis-tab:hover{background:var(--hover);color:var(--text)}
+.analysis-tab.active{background:rgba(59,130,246,0.1);color:var(--accent)}
+.analysis-content{flex:1;overflow-y:auto;padding:16px}
+.analysis-pane{display:none}
+.analysis-pane.active{display:block}
+
+/* Stat cards */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px}
+.stat-card .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.stat-card .value{font-size:22px;font-weight:700;font-family:var(--mono)}
+.stat-card .sub{font-size:11px;color:var(--text2);margin-top:2px}
+
+/* Charts */
+.charts-row{display:flex;gap:16px;flex-wrap:wrap}
+.chart-box{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px;flex:1;min-width:250px}
+.chart-box h4{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
+.chart-box canvas{max-height:200px}
+
+/* Table */
+.data-table{width:100%;border-collapse:collapse;font-size:12px}
+.data-table th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel)}
+.data-table td{padding:7px 10px;border-bottom:1px solid var(--border)}
+.data-table tr:hover td{background:rgba(255,255,255,0.02)}
+
+/* Import modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--border-h);border-radius:16px;width:560px;max-height:80vh;overflow-y:auto;box-shadow:0 24px 48px rgba(0,0,0,.4)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid var(--border)}
+.modal-header h2{font-size:16px;font-weight:600}
+.modal-body{padding:20px 24px}
+.upload-zone{border:2px dashed var(--border);border-radius:var(--r);padding:28px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:16px}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:rgba(59,130,246,0.04)}
+.upload-zone h4{font-size:13px;font-weight:600;margin-bottom:4px}
+.upload-zone p{font-size:12px;color:var(--muted)}
+.upload-zone.success{border-color:var(--green);background:rgba(16,185,129,0.05)}
+.upload-zone.success h4{color:var(--green)}
+.upload-zone input{display:none}
+
+/* Loading */
+.loading-overlay{position:fixed;inset:0;background:var(--bg);z-index:2000;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .4s}
+.loading-overlay.hide{opacity:0;pointer-events:none}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-overlay p{color:var(--text2);font-size:13px}
+
+/* Responsive */
+@media(max-width:768px){
+  .sidebar{position:absolute;z-index:60;height:100%;box-shadow:8px 0 24px rgba(0,0,0,.3)}
+  .analysis-panel.open{height:220px}
+}
+
+/* Status filter checkboxes in sidebar */
+.status-filter{display:flex;flex-direction:column;gap:2px}
+
+/* Symbology controls */
+.sym-collapsed{display:none!important}
+.sym-color-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px;color:var(--text2)}
+.sym-color-row input[type="color"]{width:22px;height:18px;border:1px solid var(--border);border-radius:3px;background:none;cursor:pointer;padding:0;-webkit-appearance:none}
+.sym-color-row input[type="color"]::-webkit-color-swatch-wrapper{padding:1px}
+.sym-color-row input[type="color"]::-webkit-color-swatch{border:none;border-radius:2px}
+.sym-color-row .sym-label{flex:1}
+.sym-color-row .sym-count{font-family:var(--mono);color:var(--muted);font-size:10px}
+input[type="range"]{height:4px;-webkit-appearance:none;background:var(--hover);border-radius:2px;outline:none}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--panel)}
+
+/* Popup tabs */
+.popup-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--card)}
+.popup-tab{flex:1;padding:9px 12px;font-size:11px;font-weight:600;color:var(--muted);text-align:center;cursor:pointer;transition:all .15s;border-bottom:2px solid transparent;white-space:nowrap}
+.popup-tab:hover{color:var(--text2);background:rgba(255,255,255,0.02)}
+.popup-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(59,130,246,0.04)}
+.popup-pane{display:none}
+.popup-pane.active{display:block}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <button class="btn btn-icon" id="sidebar-toggle" title="Toggle sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+      <h1>KeyStone Survey<span>Field Dashboard</span></h1>
+    </div>
+    <div class="header-right">
+      <button class="btn" id="btn-import">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Import Data
+      </button>
+      <button class="btn btn-icon" id="btn-fullscreen" title="Fullscreen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+
+      <!-- Search -->
+      <div class="sidebar-section">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search-input" placeholder="Search address or street...">
+        </div>
+      </div>
+
+      <!-- Layers -->
+      <div class="sidebar-section">
+        <div class="sidebar-title">Layers</div>
+        <div class="layer-row">
+          <label for="layer-points">Survey Points</label>
+          <label class="toggle"><input type="checkbox" id="layer-points" checked><span></span></label>
+        </div>
+        <div class="layer-row">
+          <label for="layer-parcels">Parcels</label>
+          <label class="toggle"><input type="checkbox" id="layer-parcels" checked><span></span></label>
+        </div>
+        <div class="layer-row">
+          <label for="layer-3d">3D Extrusion</label>
+          <label class="toggle"><input type="checkbox" id="layer-3d"><span></span></label>
+        </div>
+        <div class="layer-row">
+          <label for="layer-heatmap">Heatmap</label>
+          <label class="toggle"><input type="checkbox" id="layer-heatmap"><span></span></label>
+        </div>
+        <div class="layer-row">
+          <label for="layer-clusters">Clusters</label>
+          <label class="toggle"><input type="checkbox" id="layer-clusters"><span></span></label>
+        </div>
+        <div class="layer-row">
+          <label for="layer-labels">Labels</label>
+          <label class="toggle"><input type="checkbox" id="layer-labels" checked><span></span></label>
+        </div>
+
+        <!-- Heatmap controls (shows when heatmap is on) -->
+        <div class="layer-legend" id="heatmap-legend" style="display:none;margin-top:10px;padding:8px 0">
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">HEATMAP: Survey Point Density</div>
+          <!-- Status filter -->
+          <div style="margin-bottom:8px">
+            <label style="font-size:11px;color:var(--text2)">Show Status</label>
+            <select id="heatmap-status-filter" style="width:100%;padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--card);color:var(--text);font:11px var(--font);outline:none;margin-top:3px">
+              <option value="all">All Statuses</option>
+              <option value="Completed">Completed only</option>
+              <option value="No Answer">No Answer only</option>
+              <option value="Inaccessible">Inaccessible only</option>
+              <option value="Not Interested">Not Interested only</option>
+              <option value="Left Info">Left Info only</option>
+              <option value="Vacant">Vacant only</option>
+              <option value="Follow Up">Follow Up only</option>
+            </select>
+          </div>
+          <!-- Radius -->
+          <div style="margin-bottom:6px">
+            <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;justify-content:space-between">
+              Radius <span id="heat-radius-val" style="font-family:var(--mono);color:var(--muted);font-size:10px">25</span>
+            </label>
+            <input type="range" id="heat-radius" min="5" max="60" value="25" style="width:100%;accent-color:var(--accent);margin-top:2px">
+          </div>
+          <!-- Intensity -->
+          <div style="margin-bottom:6px">
+            <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;justify-content:space-between">
+              Intensity <span id="heat-intensity-val" style="font-family:var(--mono);color:var(--muted);font-size:10px">1.5</span>
+            </label>
+            <input type="range" id="heat-intensity" min="5" max="40" value="15" style="width:100%;accent-color:var(--accent);margin-top:2px">
+          </div>
+          <!-- Opacity -->
+          <div style="margin-bottom:6px">
+            <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;justify-content:space-between">
+              Opacity <span id="heat-opacity-val" style="font-family:var(--mono);color:var(--muted);font-size:10px">0.70</span>
+            </label>
+            <input type="range" id="heat-opacity" min="10" max="100" value="70" style="width:100%;accent-color:var(--accent);margin-top:2px">
+          </div>
+          <!-- Gradient legend -->
+          <div style="display:flex;align-items:center;gap:4px;margin-top:6px">
+            <span style="font-size:10px;color:var(--text2)">Low</span>
+            <div id="heat-gradient-bar" style="flex:1;height:10px;border-radius:5px;background:linear-gradient(to right,rgba(0,0,0,0),#3b82f6,#06b6d4,#10b981,#f59e0b,#ef4444)"></div>
+            <span style="font-size:10px;color:var(--text2)">High</span>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">Kernel density of survey points per area</div>
+        </div>
+
+        <!-- Cluster controls (shows when clusters are on) -->
+        <div class="layer-legend" id="cluster-legend" style="display:none;margin-top:10px;padding:8px 0">
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">CLUSTERS: By Dominant Status</div>
+          <!-- Status filter -->
+          <div style="margin-bottom:8px">
+            <label style="font-size:11px;color:var(--text2)">Show Status</label>
+            <select id="cluster-status-filter" style="width:100%;padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--card);color:var(--text);font:11px var(--font);outline:none;margin-top:3px">
+              <option value="all">All Statuses (color by dominant)</option>
+              <option value="Completed">Completed only</option>
+              <option value="No Answer">No Answer only</option>
+              <option value="Inaccessible">Inaccessible only</option>
+              <option value="Not Interested">Not Interested only</option>
+              <option value="Left Info">Left Info only</option>
+              <option value="Vacant">Vacant only</option>
+              <option value="Follow Up">Follow Up only</option>
+            </select>
+          </div>
+          <div id="cluster-legend-info">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Circle color = most common status:</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:10px;color:var(--text2)">
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981"></span> Completed</span>
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316"></span> No Answer</span>
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444"></span> Inaccessible</span>
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6"></span> Left Info</span>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:6px">Hover = quick summary. Click = full breakdown.</div>
+        </div>
+      </div>
+
+      <!-- Basemap -->
+      <div class="sidebar-section">
+        <div class="sidebar-title">Basemap</div>
+        <div class="basemap-grid" id="basemap-grid">
+          <div class="basemap-opt active" data-style="streets">
+            <div class="thumb" style="background:url('https://basemaps.cartocdn.com/rastertiles/voyager/14/4398/6645@2x.png') center/cover"></div>Streets
+          </div>
+          <div class="basemap-opt" data-style="satellite">
+            <div class="thumb" style="background:url('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/14/6645/4398') center/cover"></div>Satellite
+          </div>
+          <div class="basemap-opt" data-style="dark">
+            <div class="thumb" style="background:url('https://basemaps.cartocdn.com/dark_all/14/4398/6645@2x.png') center/cover"></div>Dark
+          </div>
+          <div class="basemap-opt" data-style="light">
+            <div class="thumb" style="background:url('https://basemaps.cartocdn.com/light_all/14/4398/6645@2x.png') center/cover"></div>Light
+          </div>
+          <div class="basemap-opt" data-style="topo">
+            <div class="thumb" style="background:url('https://tile.opentopomap.org/14/4398/6645.png') center/cover"></div>Topo
+          </div>
+          <div class="basemap-opt" data-style="osm">
+            <div class="thumb" style="background:url('https://tile.openstreetmap.org/14/4398/6645.png') center/cover"></div>OSM
+          </div>
+        </div>
+      </div>
+
+      <!-- Survey Points: unified symbology + status colors + filter -->
+      <div class="sidebar-section">
+        <div class="sidebar-title">
+          Survey Point Symbology
+          <button class="btn btn-sm" id="legend-reset" style="padding:2px 8px;font-size:10px">Reset Filter</button>
+        </div>
+
+        <!-- Sliders row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+          <div>
+            <label style="font-size:10px;color:var(--muted);display:flex;justify-content:space-between">Size <span id="pt-size-val" style="font-family:var(--mono)">9</span></label>
+            <input type="range" id="pt-size" min="3" max="20" value="9" style="width:100%;accent-color:var(--accent)">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--muted);display:flex;justify-content:space-between">Opacity <span id="pt-opacity-val" style="font-family:var(--mono)">0.9</span></label>
+            <input type="range" id="pt-opacity" min="10" max="100" value="90" style="width:100%;accent-color:var(--accent)">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--muted);display:flex;justify-content:space-between">Outline <span id="pt-stroke-val" style="font-family:var(--mono)">2</span></label>
+            <input type="range" id="pt-stroke" min="0" max="5" value="2" style="width:100%;accent-color:var(--accent)">
+          </div>
+        </div>
+
+        <!-- Unified status list: color picker + name + count + click to filter -->
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Change color | Click name to show/hide on map</div>
+        <div id="unified-status-controls"></div>
+      </div>
+
+      <!-- Parcel Symbology -->
+      <div class="sidebar-section">
+        <div class="sidebar-title" style="cursor:pointer" onclick="document.getElementById('sym-parcels').classList.toggle('sym-collapsed')">
+          Parcel Symbology <span style="font-size:9px;color:var(--accent)">&#9660;</span>
+        </div>
+        <div id="sym-parcels">
+          <div style="margin-bottom:8px">
+            <label style="font-size:11px;color:var(--text2)">Color By</label>
+            <select id="parcel-color-by" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font:12px var(--font);outline:none;margin-top:4px">
+              <option value="land_use">Land Use</option>
+              <option value="just_value">Property Value</option>
+              <option value="year_built">Year Built</option>
+              <option value="living_area">Living Area</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:flex;justify-content:space-between">Fill Opacity <span id="par-opacity-val" style="font-family:var(--mono)">0.35</span></label>
+              <input type="range" id="par-opacity" min="5" max="100" value="35" style="width:100%;accent-color:var(--accent)">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:flex;justify-content:space-between">Outline <span id="par-outline-val" style="font-family:var(--mono)">0.5</span></label>
+              <input type="range" id="par-outline" min="0" max="40" value="5" style="width:100%;accent-color:var(--accent)">
+            </div>
+          </div>
+          <div style="margin-bottom:8px">
+            <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;justify-content:space-between">
+              Outline Color
+              <input type="color" id="par-outline-color" value="#ffffff" style="width:24px;height:20px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer;padding:0">
+            </label>
+          </div>
+          <div id="parcel-color-legend" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- Data Sources -->
+      <div class="sidebar-section">
+        <div class="sidebar-title">Data Sources</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.6">
+          <div style="margin-bottom:6px">
+            <span style="color:var(--text2);font-weight:500">Survey Points:</span><br>
+            Your Excel file<br>
+            <span style="font-size:10px;opacity:.7">Geocoded via US Census Bureau API</span>
+          </div>
+          <div style="margin-bottom:6px">
+            <span style="color:var(--text2);font-weight:500">Parcels & Property Data:</span><br>
+            Your Parcels.gdb file<br>
+            <span style="font-size:10px;opacity:.7">FL Dept. of Revenue Cadastral</span>
+          </div>
+          <div>
+            <span style="color:var(--text2);font-weight:500">Analysis (values, stats):</span><br>
+            Computed from parcel data above<br>
+            <span style="font-size:10px;opacity:.7">No external data used</span>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Map Area -->
+    <div class="map-area">
+      <div id="map"></div>
+
+      <!-- Analysis toggle bar -->
+      <div class="analysis-toggle" id="analysis-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+        Analysis
+        <span id="analysis-summary" style="margin-left:8px;font-family:var(--mono);color:var(--accent)"></span>
+      </div>
+
+      <!-- Analysis Panel -->
+      <div class="analysis-panel" id="analysis-panel">
+        <div class="analysis-inner">
+          <div class="analysis-tabs">
+            <div class="analysis-tab active" data-tab="summary">Summary</div>
+            <div class="analysis-tab" data-tab="charts">Charts</div>
+            <div class="analysis-tab" data-tab="streets">Streets</div>
+            <div class="analysis-tab" data-tab="parcels">Parcels</div>
+            <div class="analysis-tab" data-tab="results">Survey Results</div>
+          </div>
+          <div class="analysis-content">
+
+            <!-- Summary -->
+            <div class="analysis-pane active" id="pane-summary">
+              <div class="stat-grid" id="stat-cards"></div>
+            </div>
+
+            <!-- Charts -->
+            <div class="analysis-pane" id="pane-charts">
+              <div class="charts-row">
+                <div class="chart-box"><h4>Status Distribution</h4><canvas id="chart-status"></canvas></div>
+                <div class="chart-box"><h4>Top Streets</h4><canvas id="chart-streets"></canvas></div>
+              </div>
+            </div>
+
+            <!-- Streets -->
+            <div class="analysis-pane" id="pane-streets">
+              <div style="max-height:250px;overflow-y:auto">
+                <table class="data-table" id="streets-table">
+                  <thead><tr><th>Street</th><th>Total</th><th>Completed</th><th>No Answer</th><th>Inaccessible</th><th>Other</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Parcels -->
+            <div class="analysis-pane" id="pane-parcels">
+              <div class="stat-grid" id="parcel-stats"></div>
+              <div class="charts-row">
+                <div class="chart-box"><h4>Property Value Distribution</h4><canvas id="chart-values"></canvas></div>
+                <div class="chart-box"><h4>Year Built</h4><canvas id="chart-years"></canvas></div>
+                <div class="chart-box"><h4>Land Use</h4><canvas id="chart-landuse"></canvas></div>
+              </div>
+            </div>
+
+            <!-- Survey Results -->
+            <div class="analysis-pane" id="pane-results">
+              <div id="results-content">
+                <p style="color:var(--muted);text-align:center;padding:40px 0">
+                  No survey results uploaded yet.<br>
+                  <span style="font-size:12px">Upload survey response data via the Import button to see analysis here.</span>
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-overlay" id="import-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Import Data</h2>
+      <button class="btn btn-icon" id="modal-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="upload-zone" id="upload-survey" data-endpoint="/api/upload/survey" data-accept=".xlsx,.xls,.csv">
+        <h4>Survey Contact Data</h4>
+        <p>Excel or CSV with Address and contact attempt columns</p>
+        <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
+        <input type="file" accept=".xlsx,.xls,.csv">
+      </div>
+      <div class="upload-zone" id="upload-results" data-endpoint="/api/upload/results" data-accept=".xlsx,.xls,.csv">
+        <h4>Survey Response Results</h4>
+        <p>Excel or CSV with survey answers and analysis data</p>
+        <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
+        <input type="file" accept=".xlsx,.xls,.csv">
+      </div>
+      <div class="upload-zone" id="upload-parcels" data-endpoint="/api/upload/parcels" data-accept=".geojson,.json,.zip">
+        <h4>Custom Parcel Data</h4>
+        <p>GeoJSON or zipped Shapefile for custom parcel boundaries</p>
+        <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
+        <input type="file" accept=".geojson,.json,.zip">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <p>Loading dashboard data...</p>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

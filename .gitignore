@@ -1,0 +1,12 @@
+.DS_Store
+~$*
+venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+output/*.csv
+output/*.json
+output/uploaded_*
+data/Parcels.gdb/
+.claude/
