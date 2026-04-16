@@ -1713,7 +1713,7 @@ async function uploadFile(zone, endpoint, file) {
 
     } else {
       zone.classList.add('success');
-      zone.innerHTML = `<h4>Uploaded!</h4><p>${file.name}</p>`;
+      zone.innerHTML = `<h4>Uploaded!</h4><p>${file.name}</p><p style="font-size:11px;color:var(--muted)">Loading data…</p>`;
       const [ptsRes, parRes, anaRes] = await Promise.all([
         fetch('/api/survey-points'), fetch('/api/parcels'), fetch('/api/analysis'),
       ]);
@@ -1725,6 +1725,18 @@ async function uploadFile(zone, endpoint, file) {
       map.getSource('parcels')?.setData(parcelsData);
       buildLegend();
       buildAnalysis();
+
+      // Auto-enable survey points layer so the user can see the data immediately
+      if (surveyData.features?.length) {
+        map.setLayoutProperty('survey-points', 'visibility', 'visible');
+        const toggle = document.getElementById('layer-points');
+        if (toggle) toggle.checked = true;
+        fitBounds();
+      }
+
+      // Auto-close the modal after a short pause
+      await new Promise(r => setTimeout(r, 1200));
+      document.getElementById('import-modal')?.classList.remove('show');
     }
 
   } catch (e) {
@@ -1732,8 +1744,8 @@ async function uploadFile(zone, endpoint, file) {
     if (xhrRef.pulse) clearInterval(xhrRef.pulse);
     if (isIAQ) hideAnalysisOverlay();
     zone.classList.remove('success');
-    zone.innerHTML = `<h4 style="color:var(--red)">Error</h4><p>${e.message}</p>`;
-    setTimeout(() => { zone.innerHTML = origHtml; zone.classList.remove('success'); }, 3000);
+    zone.innerHTML = `<h4 style="color:var(--red)">Upload failed</h4><p style="font-size:12px">${e.message}</p><p style="font-size:11px;color:var(--muted);margin-top:6px">Check the Render logs for details.</p>`;
+    setTimeout(() => { zone.innerHTML = origHtml; zone.classList.remove('success'); }, 8000);
   }
 }
 

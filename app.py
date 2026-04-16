@@ -1779,10 +1779,16 @@ async def upload_survey(file: UploadFile = File(...)):
     tmp = OUT / f"uploaded_survey{suf}"
     with open(tmp, "wb") as f:
         f.write(await file.read())
-    shutil.copy2(tmp, DATA / file.filename)
+    # Copy to data/ — create dir first in case it doesn't exist on the host
+    DATA.mkdir(exist_ok=True)
+    dest = DATA / file.filename
+    shutil.copy2(tmp, dest)
     if CACHE_PTS.exists():
         CACHE_PTS.unlink()
-    survey_data = process_survey()
+    # Run blocking geocoding in a thread so the event loop stays responsive
+    # (prevents Render/NGINX from returning a 502/504 on long surveys)
+    loop = asyncio.get_event_loop()
+    survey_data = await loop.run_in_executor(None, process_survey)
     analysis = compute_analysis(survey_data, parcels_data)
     return {"status": "ok", "points": len(survey_data.get("features", []))}
 
