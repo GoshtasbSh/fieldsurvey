@@ -1231,13 +1231,40 @@ async def lifespan(application):
     log.info("=" * 50)
     log.info("  KeyStone Field Survey Dashboard")
     log.info("=" * 50)
-    # Start empty — community survey and IAQ data are populated only when the
-    # user uploads files via the dashboard. Parcels are still loaded if the GDB
-    # is present (base map context, not respondent data).
-    survey_data = {"type": "FeatureCollection", "features": []}
+
+    # Parcels — always loaded from cache (always present)
     parcels_data = process_parcels()
+
+    # Survey points — restore from geocoded cache if available, else start empty
+    if CACHE_PTS.exists():
+        try:
+            survey_data = json.loads(CACHE_PTS.read_text())
+            n = len(survey_data.get("features", []))
+            log.info(f"Survey points: restored {n} features from cache")
+        except Exception as e:
+            log.warning(f"Survey cache load failed: {e}")
+            survey_data = {"type": "FeatureCollection", "features": []}
+    else:
+        survey_data = {"type": "FeatureCollection", "features": []}
+        log.info("Survey points: no cache — upload via dashboard to populate")
+
     analysis = compute_analysis(survey_data, parcels_data)
-    log.info("Community survey and IAQ data: empty (upload via dashboard to populate)")
+
+    # IAQ data — restore from cache if available
+    if CACHE_IAQ.exists():
+        try:
+            cached = json.loads(CACHE_IAQ.read_text())
+            iaq_data      = cached.get("iaq_data", {})
+            iaq_analysis  = cached.get("iaq_analysis", {})
+            street_stats  = cached.get("street_stats", {})
+            iaq_validation = cached.get("iaq_validation", {})
+            n_iaq = len(iaq_data.get("features", []))
+            log.info(f"IAQ data: restored {n_iaq} features from cache")
+        except Exception as e:
+            log.warning(f"IAQ cache load failed: {e}")
+    else:
+        log.info("IAQ data: no cache — upload Qualtrics CSV to populate")
+
     log.info("-" * 50)
     log.info("  Ready! Open http://localhost:8050")
     log.info("-" * 50)
