@@ -113,13 +113,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .popup-value{color:var(--text);text-align:right;max-width:200px;word-wrap:break-word}
 
 /* Analysis panel */
-.analysis-panel{height:0;background:var(--panel);border-top:1px solid var(--border);transition:height .3s ease;overflow:hidden;flex-shrink:0}
-.analysis-panel.open{height:300px}
+.analysis-panel{height:0;background:var(--panel);border-top:1px solid var(--border);transition:height .3s ease;overflow:hidden;flex-shrink:0;display:flex;flex-direction:column}
 .analysis-toggle{position:absolute;bottom:0;left:50%;transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:8px;padding:6px 16px;background:var(--panel);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font:500 12px var(--font);color:var(--text2);transition:all .15s}
 .analysis-toggle:hover{color:var(--text);background:var(--card)}
 .analysis-toggle svg{width:14px;height:14px;transition:transform .3s}
-.analysis-panel.open~.analysis-toggle svg{transform:rotate(180deg)}
-.analysis-inner{display:flex;height:100%;overflow:hidden}
+.analysis-toggle.open svg{transform:rotate(180deg)}
+.analysis-inner{display:flex;flex:1;overflow:hidden}
 .analysis-tabs{display:flex;flex-direction:column;width:160px;padding:8px;border-right:1px solid var(--border);flex-shrink:0}
 .analysis-tab{padding:8px 12px;border-radius:6px;font-size:12px;font-weight:500;color:var(--text2);cursor:pointer;transition:.15s;text-align:left}
 .analysis-tab:hover{background:var(--hover);color:var(--text)}
@@ -172,7 +171,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* Responsive */
 @media(max-width:768px){
   .sidebar{position:absolute;z-index:60;height:100%;box-shadow:8px 0 24px rgba(0,0,0,.3)}
-  .analysis-panel.open{height:220px}
 }
 
 /* Status filter checkboxes in sidebar */
@@ -196,6 +194,92 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 .popup-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(59,130,246,0.04)}
 .popup-pane{display:none}
 .popup-pane.active{display:block}
+
+/* IAQ sidebar section */
+.iaq-section{display:none}
+.iaq-section.visible{display:block}
+
+/* Upload progress (inline in zone) */
+.upload-progress{height:5px;background:var(--hover);border-radius:3px;margin-top:12px;overflow:hidden}
+.upload-progress-bar{height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+
+/* Analysis processing overlay */
+.analysis-overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:3000;display:none;align-items:center;justify-content:center}
+.analysis-overlay.show{display:flex}
+.analysis-overlay-card{background:var(--panel);border:1px solid var(--border-h);border-radius:20px;width:520px;max-width:92vw;padding:32px 36px;box-shadow:0 24px 64px rgba(0,0,0,.6)}
+.analysis-overlay-card h2{font-size:18px;font-weight:700;margin-bottom:6px}
+.overlay-progress-track{height:8px;background:var(--hover);border-radius:4px;overflow:hidden;margin:16px 0 8px}
+.overlay-progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:4px;width:0%;transition:width .5s ease}
+.overlay-steps{display:flex;flex-direction:column;gap:7px;margin-top:20px}
+.overlay-step{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);transition:color .2s}
+.overlay-step.active{color:var(--text)}
+.overlay-step.done{color:var(--green)}
+.overlay-step .step-icon{width:20px;height:20px;border-radius:50%;border:2px solid currentColor;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;font-weight:700;transition:all .2s}
+.overlay-step.done .step-icon{background:var(--green);border-color:var(--green);color:#fff}
+.overlay-step.active .step-icon{border-color:var(--accent);animation:pulse-ring 1.4s infinite}
+@keyframes pulse-ring{0%{box-shadow:0 0 0 0 rgba(59,130,246,.5)}70%{box-shadow:0 0 0 7px rgba(59,130,246,0)}100%{box-shadow:0 0 0 0 rgba(59,130,246,0)}}
+
+/* Summary popup */
+.summary-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:2500;display:none;align-items:center;justify-content:center;padding:20px}
+.summary-overlay.show{display:flex}
+.summary-card{background:var(--panel);border:1px solid var(--border-h);border-radius:20px;width:680px;max-width:95vw;max-height:88vh;overflow-y:auto;box-shadow:0 24px 56px rgba(0,0,0,.5)}
+.summary-card-header{padding:24px 28px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);z-index:1}
+.summary-card-header h2{font-size:18px;font-weight:700;margin-bottom:2px}
+.summary-card-body{padding:20px 28px}
+.summary-card-footer{padding:0 28px 24px;text-align:center}
+
+/* Chat button */
+.chat-btn{position:absolute;bottom:72px;right:16px;z-index:150;width:50px;height:50px;border-radius:50%;background:var(--accent);border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(59,130,246,0.4);transition:all .2s}
+.chat-btn:hover{transform:scale(1.08);background:var(--accent-h)}
+.chat-btn.has-data{background:#8b5cf6;box-shadow:0 4px 20px rgba(139,92,246,0.4)}
+.chat-btn.has-data:hover{background:#7c3aed}
+.chat-btn svg{width:22px;height:22px}
+
+/* Chat panel */
+.chat-panel{position:absolute;top:0;right:0;width:340px;bottom:0;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .3s ease;z-index:120}
+.chat-panel.open{transform:translateX(0)}
+.chat-panel-header{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.chat-panel-header h3{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.chat-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.chat-bubble{max-width:88%;padding:10px 13px;border-radius:12px;font-size:13px;line-height:1.55;word-wrap:break-word}
+.chat-bubble.user{background:var(--accent);color:#fff;align-self:flex-end;border-radius:12px 12px 2px 12px}
+.chat-bubble.assistant{background:var(--card);border:1px solid var(--border);align-self:flex-start;border-radius:2px 12px 12px 12px}
+.chat-bubble.assistant p{margin:0 0 6px}
+.chat-bubble.assistant p:last-child{margin:0}
+.chat-bubble.assistant ul{margin:4px 0;padding-left:16px}
+.chat-bubble.assistant li{margin:2px 0}
+.chat-bubble.assistant table{border-collapse:collapse;font-size:11px;margin:6px 0;width:100%}
+.chat-bubble.assistant th,.chat-bubble.assistant td{padding:3px 7px;border:1px solid var(--border)}
+.chat-bubble.assistant th{background:rgba(255,255,255,.04);color:var(--text2)}
+.chat-bubble.assistant code{background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:11px}
+.chat-bubble.assistant strong{color:var(--text);font-weight:600}
+.chat-followup{font-size:11px;color:var(--accent);font-style:italic;cursor:pointer;margin-top:6px;display:block;padding:3px 0}
+.chat-followup:hover{text-decoration:underline}
+.map-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);color:var(--green);font-size:10px;margin-top:5px}
+.chat-typing{display:flex;gap:5px;padding:10px 14px;align-self:flex-start;background:var(--card);border:1px solid var(--border);border-radius:2px 12px 12px 12px}
+.chat-typing span{width:6px;height:6px;background:var(--muted);border-radius:50%;animation:bounce .9s infinite}
+.chat-typing span:nth-child(2){animation-delay:.15s}
+.chat-typing span:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-8px)}}
+.chat-suggestions{padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--border);flex-shrink:0}
+.chat-chip{padding:4px 11px;border-radius:16px;border:1px solid var(--border);background:var(--card);color:var(--text2);font-size:11px;cursor:pointer;transition:.15s;white-space:nowrap}
+.chat-chip:hover{border-color:var(--accent);color:var(--accent)}
+.chat-input-row{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0}
+.chat-input-row textarea{flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font:13px var(--font);padding:7px 11px;resize:none;outline:none;height:38px;max-height:90px;transition:border .15s;overflow-y:hidden}
+.chat-input-row textarea:focus{border-color:var(--accent)}
+.chat-input-row textarea::placeholder{color:var(--muted)}
+.chat-send{padding:8px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;cursor:pointer;font:500 13px var(--font);transition:.15s;align-self:flex-end;flex-shrink:0}
+.chat-send:hover{background:var(--accent-h)}
+.chat-send:disabled{opacity:.45;cursor:not-allowed}
+
+/* ── Panel resize handles ──────────────────────────────────────────────── */
+.resize-h{background:var(--border);transition:background .2s;flex-shrink:0;position:relative}
+.resize-h:hover,.resize-h.dragging{background:var(--accent)}
+#sidebar-resize{width:4px;cursor:ew-resize;z-index:55}
+#sidebar-resize::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:2px;height:32px;border-left:1px solid rgba(255,255,255,.15);border-right:1px solid rgba(255,255,255,.15)}
+#analysis-resize{height:5px;width:100%;cursor:ns-resize}
+#analysis-resize::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);height:2px;width:32px;border-top:1px solid rgba(255,255,255,.15);border-bottom:1px solid rgba(255,255,255,.15)}
+#chat-resize{width:5px;cursor:ew-resize;position:absolute;left:0;top:0;bottom:0;z-index:125}
 </style>
 </head>
 <body>
@@ -239,7 +323,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         <div class="sidebar-title">Layers</div>
         <div class="layer-row">
           <label for="layer-points">Survey Points</label>
-          <label class="toggle"><input type="checkbox" id="layer-points" checked><span></span></label>
+          <label class="toggle"><input type="checkbox" id="layer-points"><span></span></label>
         </div>
         <div class="layer-row">
           <label for="layer-parcels">Parcels</label>
@@ -336,6 +420,34 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
             </div>
           </div>
           <div style="font-size:10px;color:var(--muted);margin-top:6px">Hover = quick summary. Click = full breakdown.</div>
+        </div>
+      </div>
+
+      <!-- IAQ Survey Layer (shown after IAQ data upload) -->
+      <div class="sidebar-section iaq-section" id="iaq-sidebar-section">
+        <div class="sidebar-title">IAQ Survey Points</div>
+        <div class="layer-row">
+          <label for="layer-iaq">IAQ Points (Risk)</label>
+          <label class="toggle"><input type="checkbox" id="layer-iaq"><span></span></label>
+        </div>
+        <div class="layer-row">
+          <label for="layer-iaq-highlighted">Street Highlights</label>
+          <label class="toggle"><input type="checkbox" id="layer-iaq-highlighted"><span></span></label>
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:10px;color:var(--muted);font-weight:600;margin-bottom:6px">RISK TIERS</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px;color:var(--text2)">
+            <span style="width:10px;height:10px;border-radius:50%;background:#10b981;flex-shrink:0"></span>Low (0–33)
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px;color:var(--text2)">
+            <span style="width:10px;height:10px;border-radius:50%;background:#f97316;flex-shrink:0"></span>Medium (34–66)
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)">
+            <span style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></span>High (67–100)
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <button class="btn btn-sm" id="iaq-reset-filter" style="width:100%;justify-content:center">Reset IAQ Filter</button>
         </div>
       </div>
 
@@ -450,10 +562,51 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       </div>
 
     </aside>
+    <div class="resize-h" id="sidebar-resize"></div>
 
     <!-- Map Area -->
     <div class="map-area">
       <div id="map"></div>
+
+      <!-- Chat Button -->
+      <button class="chat-btn" id="chat-btn" title="AI Survey Analyst">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </button>
+
+      <!-- Chat Panel -->
+      <div class="chat-panel" id="chat-panel">
+        <div class="resize-h" id="chat-resize"></div>
+        <div class="chat-panel-header">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            AI Survey Analyst
+            <span id="model-badge" style="font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(16,185,129,.15);color:var(--green);font-weight:500">Llama 3.3 70B</span>
+          </h3>
+          <button class="btn btn-icon" id="chat-close" style="padding:5px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-bubble assistant">
+            Hello! I'm your AI housing vulnerability analyst for Keystone Heights.<br><br>
+            Upload the Qualtrics Survey CSV via <strong>Import Data</strong> to unlock full analysis.<br><br>
+            I can then answer questions like:<br>
+            • "Which street has the worst air quality?"<br>
+            • "Show respiratory illness cases on the map"<br>
+            • "Compare owner vs renter vulnerability"
+          </div>
+        </div>
+        <div class="chat-suggestions" id="chat-suggestions">
+          <div class="chat-chip" data-q="Which street has the highest overall risk score?">Worst street?</div>
+          <div class="chat-chip" data-q="Show all respiratory illness cases on the map">Resp. cases</div>
+          <div class="chat-chip" data-q="Compare owner vs renter housing vulnerability">Owner vs renter</div>
+          <div class="chat-chip" data-q="What percentage of homes have mold problems?">Mold stats</div>
+        </div>
+        <div class="chat-input-row">
+          <textarea id="chat-input" placeholder="Ask about risk scores, health symptoms, streets..." rows="1"></textarea>
+          <button class="chat-send" id="chat-send">Send</button>
+        </div>
+      </div>
 
       <!-- Analysis toggle bar -->
       <div class="analysis-toggle" id="analysis-toggle">
@@ -464,6 +617,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 
       <!-- Analysis Panel -->
       <div class="analysis-panel" id="analysis-panel">
+        <div class="resize-h" id="analysis-resize"></div>
         <div class="analysis-inner">
           <div class="analysis-tabs">
             <div class="analysis-tab active" data-tab="summary">Summary</div>
@@ -541,18 +695,56 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
         <input type="file" accept=".xlsx,.xls,.csv">
       </div>
-      <div class="upload-zone" id="upload-results" data-endpoint="/api/upload/results" data-accept=".xlsx,.xls,.csv">
-        <h4>Survey Response Results</h4>
-        <p>Excel or CSV with survey answers and analysis data</p>
-        <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
-        <input type="file" accept=".xlsx,.xls,.csv">
+      <div class="upload-zone" id="upload-iaq" data-endpoint="/api/upload/iaq" data-accept=".csv">
+        <h4>Keystone Heights Survey <span style="font-size:11px;font-weight:400;color:var(--muted)">(Qualtrics CSV)</span></h4>
+        <p>Qualtrics CSV export — IAQ, health symptoms, housing, GPS coordinates</p>
+        <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag CSV file here</p>
+        <input type="file" accept=".csv">
       </div>
-      <div class="upload-zone" id="upload-parcels" data-endpoint="/api/upload/parcels" data-accept=".geojson,.json,.zip">
-        <h4>Custom Parcel Data</h4>
-        <p>GeoJSON or zipped Shapefile for custom parcel boundaries</p>
-        <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
-        <input type="file" accept=".geojson,.json,.zip">
+      <div style="padding:12px 14px;border-radius:var(--r);background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.1);font-size:12px;color:var(--text2)">
+        <span style="color:var(--accent);font-weight:600">ℹ Parcel data</span> is loaded automatically from the pre-processed FL DOR cadastral file on server startup — no upload required.
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Analysis processing overlay -->
+<div class="analysis-overlay" id="analysis-overlay">
+  <div class="analysis-overlay-card">
+    <h2>Processing IAQ Survey Data</h2>
+    <p id="overlay-subtitle" style="font-size:13px;color:var(--text2);margin-bottom:0">Geocoding addresses and computing risk scores...</p>
+    <div class="overlay-progress-track">
+      <div class="overlay-progress-fill" id="overlay-progress-fill"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)">
+      <span id="overlay-progress-pct">0%</span>
+      <span id="overlay-progress-label">Starting...</span>
+    </div>
+    <div class="overlay-steps">
+      <div class="overlay-step" id="ostep-upload"><div class="step-icon">1</div>Uploading file to server</div>
+      <div class="overlay-step" id="ostep-parse"><div class="step-icon">2</div>Parsing Qualtrics CSV format</div>
+      <div class="overlay-step" id="ostep-geo"><div class="step-icon">3</div>Validating GPS coordinates</div>
+      <div class="overlay-step" id="ostep-score"><div class="step-icon">4</div>Computing health, IAQ &amp; structural scores</div>
+      <div class="overlay-step" id="ostep-analysis"><div class="step-icon">5</div>Running street-level analysis</div>
+      <div class="overlay-step" id="ostep-validate"><div class="step-icon">6</div>Cross-validating with contact data</div>
+    </div>
+  </div>
+</div>
+
+<!-- Post-analysis summary popup -->
+<div class="summary-overlay" id="summary-overlay">
+  <div class="summary-card">
+    <div class="summary-card-header">
+      <h2>✓ Analysis Complete</h2>
+      <p style="color:var(--text2);font-size:13px;margin:0">Keystone Heights IAQ Survey — Results Summary</p>
+    </div>
+    <div class="summary-card-body" id="summary-card-body">
+      <!-- filled by JS -->
+    </div>
+    <div class="summary-card-footer">
+      <button class="btn btn-accent" id="summary-close" style="padding:10px 44px;font-size:14px;border-radius:10px">
+        View Map &amp; Start Analysis
+      </button>
     </div>
   </div>
 </div>

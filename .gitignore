@@ -7,6 +7,14 @@ __pycache__/
 .env.local
 output/*.csv
 output/*.json
+output/*.geojson
+!output/parcels_keystone.geojson
 output/uploaded_*
 data/Parcels.gdb/
+data/*.csv
+data/*.xlsx
+data/*.xls
+output/iaq_*
+graphify-out/
+mockups/
 .claude/

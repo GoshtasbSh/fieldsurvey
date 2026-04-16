@@ -41,6 +41,16 @@ let currentBasemap = 'streets';
 let map, surveyData, parcelsData, analysisData;
 let activeFilters = new Set();
 let charts = {};
+let iaqData = null, iaqAnalysis = null, chatHistory = [];
+let currentContactFilter = null;
+let currentIAQFilter = null;
+let panelSizes = { sidebar: 280, analysis: 300, chat: 340 };
+// When `highlight_streets` is active, we pin the list of streets so any later
+// chatbot action (e.g. filter_iaq_symptom) intersects with it instead of
+// replacing it. Prevents "show all mold points" from leaking points from
+// streets other than the one the user asked about.
+let activeStreetHighlight = null;   // string[] | null
+let _resultsCharts = {};
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function fmt(n) {
@@ -80,25 +90,36 @@ function initMap() {
 // ── Data loading ────────────────────────────────────────────────────────────
 async function loadData() {
   try {
-    const [ptsRes, parRes, anaRes] = await Promise.all([
+    const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
       fetch('/api/survey-points'),
       fetch('/api/parcels'),
       fetch('/api/analysis'),
+      fetch('/api/iaq-points'),
+      fetch('/api/iaq-analysis'),
     ]);
     surveyData = await ptsRes.json();
     parcelsData = await parRes.json();
     analysisData = await anaRes.json();
+    iaqData = await iaqPtsRes.json();
+    const iaqAnaData = await iaqAnaRes.json();
+    if (iaqAnaData.loaded) iaqAnalysis = iaqAnaData;
 
-    // Store status colors
     if (analysisData.status_colors) {
       Object.assign(STATUS_COLORS, analysisData.status_colors);
     }
 
     addLayers();
+    addIAQLayers();
     buildLegend();
     buildAnalysis();
-    fitBounds();
 
+    // If IAQ data was already loaded (e.g. after re-deploy with warm state)
+    if (iaqData && iaqData.features && iaqData.features.length) {
+      updateIAQOnMap();
+      buildSurveyResultsTab(iaqAnalysis);
+    }
+
+    fitBounds();
     document.getElementById('loading').classList.add('hide');
   } catch (e) {
     console.error('Data load error:', e);
@@ -225,9 +246,10 @@ function addLayers() {
     paint: { 'text-color': '#ffffff' },
   });
 
-  // Survey point circles
+  // Survey point circles (hidden by default — user uploads or toggles on)
   map.addLayer({
     id: 'survey-points', type: 'circle', source: 'survey',
+    layout: { visibility: 'none' },
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 5, 16, 9, 19, 14],
       'circle-color': ['get', 'color'],
@@ -635,6 +657,50 @@ function applyFilters() {
   map.setFilter('survey-labels', filter.length > 1 ? filter : null);
 }
 
+// ── Central layer definition map ─────────────────────────────────────────────
+const LAYER_DEFS = {
+  iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points'] },
+  iaq_highlights: { toggle: 'layer-iaq-highlighted',  mapLayers: ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'] },
+  contact_survey: { toggle: 'layer-points',           mapLayers: ['survey-points'] },
+  parcels:        { toggle: 'layer-parcels',          mapLayers: ['parcels-fill', 'parcels-outline'] },
+  clusters:       { toggle: 'layer-clusters',         mapLayers: ['cluster-circles', 'cluster-count'] },
+  heatmap:        { toggle: 'layer-heatmap',          mapLayers: ['heatmap'] },
+  labels:         { toggle: 'layer-labels',           mapLayers: ['survey-labels'] },
+  '3d':           { toggle: 'layer-3d',               mapLayers: ['parcels-3d'] },
+};
+
+/**
+ * Central function — sets map layer visibility AND syncs the sidebar checkbox.
+ * Always use this instead of calling setLayoutProperty directly from chatbot actions.
+ */
+function setLayerVisibility(name, visible) {
+  const def = LAYER_DEFS[name];
+  if (!def) return;
+  def.mapLayers.forEach(l => {
+    if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', visible ? 'visible' : 'none');
+  });
+  const el = document.getElementById(def.toggle);
+  if (el) el.checked = visible;
+  // Special side-effects
+  if (name === '3d') {
+    if (visible) {
+      map.easeTo({ pitch: 55, bearing: -15, duration: 800 });
+      setLayerVisibility('parcels', false);
+    } else {
+      map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
+    }
+  }
+  if (name === 'heatmap') {
+    const leg = document.getElementById('heatmap-legend');
+    if (leg) leg.style.display = visible ? 'block' : 'none';
+  }
+  if (name === 'clusters') {
+    const leg = document.getElementById('cluster-legend');
+    if (leg) leg.style.display = visible ? 'block' : 'none';
+    if (visible) setLayerVisibility('contact_survey', false);
+  }
+}
+
 // ── Layer toggles ───────────────────────────────────────────────────────────
 function setupLayerToggles() {
   const toggles = {
@@ -644,6 +710,8 @@ function setupLayerToggles() {
     'layer-heatmap': ['heatmap'],
     'layer-clusters': ['cluster-circles', 'cluster-count'],
     'layer-labels': ['survey-labels'],
+    'layer-iaq': ['iaq-points'],
+    'layer-iaq-highlighted': ['iaq-highlighted'],
   };
 
   Object.entries(toggles).forEach(([id, layers]) => {
@@ -890,15 +958,33 @@ function buildParcelAnalysis(a) {
 function setupUI() {
   // Sidebar toggle
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
-    setTimeout(() => map.resize(), 350);
+    const sb = document.getElementById('sidebar');
+    if (sb.classList.contains('collapsed')) {
+      sb.classList.remove('collapsed');
+      if (panelSizes.sidebar !== 280) sb.style.width = panelSizes.sidebar + 'px';
+    } else {
+      sb.style.width = '';
+      sb.classList.add('collapsed');
+    }
+    setTimeout(() => map && map.resize(), 350);
   });
 
   // Analysis panel toggle
   document.getElementById('analysis-toggle').addEventListener('click', () => {
     const panel = document.getElementById('analysis-panel');
-    panel.classList.toggle('open');
-    setTimeout(() => map.resize(), 350);
+    const toggle = document.getElementById('analysis-toggle');
+    if (panel.classList.contains('open')) {
+      panel.style.transition = 'height .3s ease';
+      panel.style.height = '0';
+      panel.classList.remove('open');
+      toggle.classList.remove('open');
+    } else {
+      panel.style.transition = 'height .3s ease';
+      panel.style.height = panelSizes.analysis + 'px';
+      panel.classList.add('open');
+      toggle.classList.add('open');
+    }
+    setTimeout(() => map && map.resize(), 350);
   });
 
   // Analysis tabs
@@ -956,6 +1042,7 @@ function setupUI() {
   setupLayerToggles();
   setupParcelColorBy();
   setupSymbology();
+  initChat();
 }
 
 // ── Symbology controls ──────────────────────────────────────────────────────
@@ -1246,45 +1333,1581 @@ function setupUploadZones() {
   });
 }
 
+// ── Analysis overlay management ─────────────────────────────────────────────
+const OVERLAY_STEPS = ['ostep-upload','ostep-parse','ostep-geo','ostep-score','ostep-analysis','ostep-validate'];
+
+function showAnalysisOverlay() {
+  OVERLAY_STEPS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('done','active');
+    const icon = el.querySelector('.step-icon');
+    if (icon) icon.textContent = OVERLAY_STEPS.indexOf(id) + 1;
+  });
+  setOverlayProgress(0, 'Preparing...');
+  setOverlayStep('ostep-upload');
+  document.getElementById('analysis-overlay')?.classList.add('show');
+}
+
+function setOverlayProgress(pct, label) {
+  const fill = document.getElementById('overlay-progress-fill');
+  if (fill) fill.style.width = pct + '%';
+  const pctEl = document.getElementById('overlay-progress-pct');
+  if (pctEl) pctEl.textContent = pct + '%';
+  const labelEl = document.getElementById('overlay-progress-label');
+  if (labelEl) labelEl.textContent = label;
+}
+
+function setOverlayStep(activeId) {
+  const idx = OVERLAY_STEPS.indexOf(activeId);
+  OVERLAY_STEPS.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const icon = el.querySelector('.step-icon');
+    if (i < idx) {
+      el.classList.remove('active'); el.classList.add('done');
+      if (icon) icon.textContent = '✓';
+    } else if (i === idx) {
+      el.classList.remove('done'); el.classList.add('active');
+    } else {
+      el.classList.remove('done','active');
+      if (icon) icon.textContent = i + 1;
+    }
+  });
+}
+
+function finishOverlaySteps() {
+  OVERLAY_STEPS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('active'); el.classList.add('done');
+    const icon = el.querySelector('.step-icon');
+    if (icon) icon.textContent = '✓';
+  });
+}
+
+function hideAnalysisOverlay() {
+  document.getElementById('analysis-overlay')?.classList.remove('show');
+}
+
+function simulateIAQSteps(xhrRef) {
+  const schedule = [
+    { delay: 1000, stepId: 'ostep-parse',    pct: 25, label: 'Parsing Qualtrics CSV...' },
+    { delay: 3000, stepId: 'ostep-geo',       pct: 42, label: 'Validating GPS coordinates...' },
+    { delay: 7000, stepId: 'ostep-score',     pct: 60, label: 'Computing risk scores...' },
+    { delay: 12000,stepId: 'ostep-analysis',  pct: 75, label: 'Running street-level analysis...' },
+    { delay: 18000,stepId: 'ostep-validate',  pct: 88, label: 'Cross-validating with contact data...' },
+  ];
+  schedule.forEach(({ delay, stepId, pct, label }) => {
+    setTimeout(() => {
+      if (xhrRef.done) return;
+      setOverlayStep(stepId);
+      setOverlayProgress(pct, label);
+    }, delay);
+  });
+  // After all steps fire, pulse the bar if server is still working (geocoding can be slow)
+  setTimeout(() => {
+    if (xhrRef.done) return;
+    let tick = 0;
+    const pulse = setInterval(() => {
+      if (xhrRef.done) { clearInterval(pulse); return; }
+      tick++;
+      // Forward-only: 88→89→90→91→92→93→94→95→94→93...  (never goes below 88)
+      const swing = Math.sin(tick * 0.4) * 3.5;
+      const pct = Math.min(95, Math.max(88, Math.round(88 + Math.abs(swing) + tick * 0.12)));
+      const spinner = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'][tick % 10];
+      setOverlayProgress(pct, `${spinner} Cross-validating with contact data…`);
+    }, 900);
+    xhrRef.pulse = pulse;
+  }, 21000);
+}
+
+// ── Summary popup ────────────────────────────────────────────────────────────
+function showSummaryPopup(uploadResult, iaqAnaData) {
+  const body = document.getElementById('summary-card-body');
+  if (!body) return;
+
+  const a   = iaqAnaData?.analysis || {};
+  const v   = iaqAnaData?.validation || {};
+  const scores   = a.scores    || {};
+  const health   = a.health    || {};
+  const riskTiers = a.risk_tiers || {};
+  const ownership = a.ownership  || {};
+  const housing   = a.housing    || {};
+
+  // Top risk streets
+  const allStreets = iaqAnaData?.street_stats || {};
+  const topStreets = Object.entries(allStreets)
+    .filter(([, d]) => !d.insufficient_data)
+    .sort(([, a2], [, b]) => b.mean_risk - a2.mean_risk)
+    .slice(0, 5);
+
+  // Unmatched breakdown
+  const unmatchedDetails = (v.match_details || []).filter(d => !d.matched);
+  const unmatchedByReason = {
+    gpsOffset:   unmatchedDetails.filter(d => d.nearest_contact_m != null && d.nearest_contact_m < 300).length,
+    notInList:   unmatchedDetails.filter(d => d.nearest_contact_m != null && d.nearest_contact_m >= 300 && d.nearest_contact_m < 1000).length,
+    noContact:   unmatchedDetails.filter(d => d.nearest_contact_m == null || d.nearest_contact_m >= 1000).length,
+    geocoded:    unmatchedDetails.filter(d => d.coord_source === 'geocoded').length,
+  };
+  const unmatchedByStreet = {};
+  unmatchedDetails.forEach(d => {
+    if (!unmatchedByStreet[d.street_name]) unmatchedByStreet[d.street_name] = { count: 0, reasons: [] };
+    unmatchedByStreet[d.street_name].count++;
+    const r = (d.nearest_contact_m != null && d.nearest_contact_m < 300) ? 'GPS/geocode offset'
+            : (d.nearest_contact_m != null && d.nearest_contact_m < 1000) ? 'Not in canvassing list'
+            : 'No contact found';
+    if (!unmatchedByStreet[d.street_name].reasons.includes(r))
+      unmatchedByStreet[d.street_name].reasons.push(r);
+  });
+  const unmatchedStreetRows = Object.entries(unmatchedByStreet)
+    .sort(([, a2], [, b2]) => b2.count - a2.count)
+    .slice(0, 8);
+
+  // Geocoding source breakdown from match_details
+  const _md = v.match_details || [];
+  const _gpsCt    = _md.filter(d => d.coord_source === 'gps').length;
+  const _addrCt   = _md.filter(d => d.coord_source === 'address_matched').length;
+  const _geoCt    = _md.filter(d => d.coord_source === 'geocoded').length;
+  const _totalMap = uploadResult.points || a.geocoded || 0;
+
+  body.innerHTML = `
+    <!-- Data match banner -->
+    <div style="background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em">Survey Points — Mapping &amp; Geocoding</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:1;min-width:100px;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 14px;text-align:center">
+          <div style="font-size:26px;font-weight:700;font-family:var(--mono)">${_totalMap}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">Responses Placed on Map</div>
+        </div>
+        <div style="flex:2;min-width:200px;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 14px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:7px;text-transform:uppercase;letter-spacing:.06em">Coordinate Source Breakdown</div>
+          ${_gpsCt  ? `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid var(--border)"><span style="color:var(--green)">✓ GPS (in-field Qualtrics)</span><span style="font-family:var(--mono);font-weight:600">${_gpsCt} <span style="color:var(--muted);font-size:10px">(${Math.round(_gpsCt/_totalMap*100)}%)</span></span></div>` : ''}
+          ${_addrCt ? `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid var(--border)"><span style="color:var(--cyan)">⊞ Address-matched to contact data</span><span style="font-family:var(--mono);font-weight:600">${_addrCt} <span style="color:var(--muted);font-size:10px">(${Math.round(_addrCt/_totalMap*100)}%)</span></span></div>` : ''}
+          ${_geoCt  ? `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px"><span style="color:var(--purple)">◎ Census geocoded (address fallback)</span><span style="font-family:var(--mono);font-weight:600">${_geoCt} <span style="color:var(--muted);font-size:10px">(${Math.round(_geoCt/_totalMap*100)}%)</span></span></div>` : ''}
+        </div>
+        <div style="flex:1;min-width:100px;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 14px;text-align:center">
+          <div style="font-size:26px;font-weight:700;font-family:var(--mono)">${uploadResult.streets_analyzed || 0}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">Streets Analyzed</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">≥3 responses each</div>
+        </div>
+      </div>
+
+      <!-- Community data match row -->
+      ${v.total_completed_contacts ? `
+      <div style="border-top:1px solid rgba(16,185,129,.2);padding-top:12px">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Match with Community Contact Data (Completed visits)</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:90px;text-align:center">
+            <div style="font-size:22px;font-weight:700;font-family:var(--mono)">${v.total_completed_contacts}</div>
+            <div style="font-size:11px;color:var(--text2)">Completed Contacts</div>
+          </div>
+          <div style="flex:1;min-width:90px;text-align:center">
+            <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">${v.matched_iaq_responses}</div>
+            <div style="font-size:11px;color:var(--text2)">Survey → Contact Confirmed</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">geo-proximity ≤150 m</div>
+          </div>
+          <div style="flex:1;min-width:90px;text-align:center">
+            <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${v.match_rate_pct>60?'var(--green)':v.match_rate_pct>30?'var(--orange)':'var(--red)'}">${v.match_rate_pct}%</div>
+            <div style="font-size:11px;color:var(--text2)">Confirmation Rate</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${v.unmatched_iaq} not confirmed</div>
+          </div>
+        </div>
+      </div>` : `
+      <div style="border-top:1px solid rgba(16,185,129,.2);padding-top:10px;font-size:12px;color:var(--muted)">
+        Upload the Community Contact Excel file to see match rate against completed visits.
+      </div>`}
+    </div>
+
+    <!-- Unmatched points — why -->
+    ${unmatchedDetails.length ? `
+    <div style="background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.18);border-radius:10px;padding:16px;margin-bottom:18px">
+      <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">
+        Unmatched Points — Why (${unmatchedDetails.length} of ${v.total_iaq_responses || 0})
+      </div>
+      <!-- Reason chips -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        ${unmatchedByReason.gpsOffset ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.3);color:#ca8a04;font-size:10px;font-weight:600">
+          GPS/geocode offset: ${unmatchedByReason.gpsOffset} — nearest contact 150–300m (precision gap)</span>` : ''}
+        ${unmatchedByReason.notInList ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.3);color:#ea580c;font-size:10px;font-weight:600">
+          Not in canvassing list: ${unmatchedByReason.notInList} — respondent address not canvassed</span>` : ''}
+        ${unmatchedByReason.noContact ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:var(--red);font-size:10px;font-weight:600">
+          No contact found: ${unmatchedByReason.noContact} — respondent outside contact database</span>` : ''}
+        ${unmatchedByReason.geocoded ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);color:#818cf8;font-size:10px;font-weight:600">
+          Address-geocoded: ${unmatchedByReason.geocoded} — lower positional accuracy</span>` : ''}
+      </div>
+      <!-- Per-street table -->
+      ${unmatchedStreetRows.length ? `
+      <table class="data-table" style="font-size:11px">
+        <thead><tr><th>Street</th><th style="text-align:center">Unmatched</th><th>Reason(s)</th></tr></thead>
+        <tbody>
+          ${unmatchedStreetRows.map(([street, d]) => `
+            <tr>
+              <td style="font-weight:500">${street}</td>
+              <td style="text-align:center;font-family:var(--mono);color:var(--red)">${d.count}</td>
+              <td style="color:var(--muted)">${d.reasons.join(', ')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>` : ''}
+    </div>` : ''}
+
+    <!-- Risk summary -->
+    <div style="margin-bottom:18px">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">Risk Summary</div>
+      <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat-card"><div class="label">Mean Risk</div><div class="value" style="color:var(--orange);font-size:22px">${scores.mean_risk || 0}</div><div class="sub">out of 100</div></div>
+        <div class="stat-card"><div class="label">High Risk</div><div class="value" style="color:var(--red);font-size:22px">${riskTiers.high || 0}</div><div class="sub">households</div></div>
+        <div class="stat-card"><div class="label">Mold Reports</div><div class="value" style="color:var(--orange);font-size:22px">${health.mold_pct || 0}%</div></div>
+        <div class="stat-card"><div class="label">Hospital Visits</div><div class="value" style="font-size:22px">${health.hospital_pct || 0}%</div><div class="sub">respiratory</div></div>
+      </div>
+    </div>
+
+    <!-- What was analyzed -->
+    <div style="margin-bottom:18px">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Analysis Completed</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        ${['Health Score (0–100)', 'Indoor Air Quality Score', 'Structural Score', 'Overall Risk Score',
+           'Street Risk Rankings', 'Mold Analysis', 'Respiratory Health', 'Asthma &amp; Wheeze',
+           'Housing Age', 'Housing Type Breakdown', 'Owner vs Renter', 'GPS Cross-Validation',
+           'Privacy Enforcement (≥3 threshold)', 'LLM Context Builder'].map(tag =>
+          `<span style="padding:3px 9px;border-radius:10px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.2);color:var(--accent);font-size:10px">${tag}</span>`
+        ).join('')}
+      </div>
+    </div>
+
+    <!-- Top risk streets table -->
+    ${topStreets.length ? `
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Highest Risk Streets</div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Street</th><th>N</th><th>Risk</th><th>Main Concern</th></tr></thead>
+        <tbody>
+          ${topStreets.map(([street, d], i) => {
+            const concern = d.pct_mold > 40 ? `Mold ${d.pct_mold}%`
+              : d.pct_respiratory > 30 ? `Resp. ${d.pct_respiratory}%`
+              : d.pct_asthma > 20 ? `Asthma ${d.pct_asthma}%`
+              : `Struct. ${d.mean_struct || '—'}`;
+            const rc = d.mean_risk > 66 ? 'var(--red)' : d.mean_risk > 33 ? 'var(--orange)' : 'var(--green)';
+            return `<tr>
+              <td style="color:var(--muted);font-family:var(--mono)">${i+1}</td>
+              <td style="font-weight:500">${street}</td>
+              <td style="font-family:var(--mono)">${d.n}</td>
+              <td style="font-family:var(--mono);font-weight:700;color:${rc}">${d.mean_risk}</td>
+              <td style="font-size:11px;color:var(--text2)">${concern}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">Ask the AI chatbot about any of these streets for a detailed breakdown.</p>
+    </div>` : ''}
+  `;
+
+  document.getElementById('summary-overlay')?.classList.add('show');
+
+  // Bind close (use once to avoid stacking listeners)
+  const closeBtn = document.getElementById('summary-close');
+  if (closeBtn) {
+    const handler = () => {
+      document.getElementById('summary-overlay').classList.remove('show');
+      const panel = document.getElementById('analysis-panel');
+      if (!panel.classList.contains('open')) {
+        panel.classList.add('open');
+        setTimeout(() => map.resize(), 350);
+      }
+      document.querySelector('.analysis-tab[data-tab="results"]')?.click();
+      closeBtn.removeEventListener('click', handler);
+    };
+    closeBtn.addEventListener('click', handler);
+  }
+}
+
 async function uploadFile(zone, endpoint, file) {
   const origHtml = zone.innerHTML;
-  zone.innerHTML = '<h4>Uploading...</h4><p>Processing your data</p>';
+  const isIAQ = endpoint === '/api/upload/iaq';
+
+  // Show appropriate UI
+  if (isIAQ) {
+    showAnalysisOverlay();
+  } else {
+    zone.innerHTML = `<h4>Uploading...</h4><div class="upload-progress"><div class="upload-progress-bar" id="inline-bar"></div></div>`;
+  }
 
   const fd = new FormData();
   fd.append('file', file);
 
+  // Use XHR for upload progress events
+  const xhrRef = { done: false };
+
   try {
-    const res = await fetch(endpoint, { method: 'POST', body: fd });
-    const data = await res.json();
-    if (res.ok) {
+    const data = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round(e.loaded / e.total * 100);
+        if (isIAQ) {
+          // Upload is ~15% of total work
+          setOverlayProgress(Math.round(pct * 0.15), 'Uploading file...');
+        } else {
+          const bar = document.getElementById('inline-bar');
+          if (bar) bar.style.width = pct + '%';
+        }
+      };
+
+      xhr.upload.onload = () => {
+        if (isIAQ) {
+          // Upload done — advance to parse step and simulate the rest
+          setOverlayStep('ostep-parse');
+          setOverlayProgress(20, 'File received — processing...');
+          simulateIAQSteps(xhrRef);
+        }
+      };
+
+      xhr.onload = () => {
+        xhrRef.done = true;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch { resolve({}); }
+        } else {
+          try { reject(new Error(JSON.parse(xhr.responseText).detail || 'Upload failed')); }
+          catch { reject(new Error('Upload failed')); }
+        }
+      };
+
+      xhr.onerror = () => { xhrRef.done = true; reject(new Error('Network error')); };
+      xhr.open('POST', endpoint);
+      xhr.send(fd);
+    });
+
+    // ── Success ──
+    if (isIAQ) {
+      if (xhrRef.pulse) clearInterval(xhrRef.pulse);
+      finishOverlaySteps();
+      setOverlayProgress(100, 'Analysis complete!');
+      await new Promise(r => setTimeout(r, 700));
+      hideAnalysisOverlay();
+
+      // Fetch processed data
+      const [iaqPtsRes, iaqAnaRes] = await Promise.all([
+        fetch('/api/iaq-points'), fetch('/api/iaq-analysis'),
+      ]);
+      iaqData = await iaqPtsRes.json();
+      const iaqAnaRaw = await iaqAnaRes.json();
+      if (iaqAnaRaw.loaded) iaqAnalysis = iaqAnaRaw;
+
+      updateIAQOnMap();
+      // Auto-show IAQ points immediately after a fresh upload
+      if (map.getLayer('iaq-points')) map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+      const iaqToggle = document.getElementById('layer-iaq');
+      if (iaqToggle) iaqToggle.checked = true;
+      buildSurveyResultsTab(iaqAnalysis);
+      document.getElementById('chat-btn')?.classList.add('has-data');
+
       zone.classList.add('success');
-      zone.innerHTML = `<h4>Success!</h4><p>${file.name} uploaded</p><p style="font-size:11px;color:var(--muted)">${JSON.stringify(data)}</p>`;
-      // Reload data
-      setTimeout(async () => {
-        const [ptsRes, parRes, anaRes] = await Promise.all([
-          fetch('/api/survey-points'), fetch('/api/parcels'), fetch('/api/analysis'),
-        ]);
-        surveyData = await ptsRes.json();
-        parcelsData = await parRes.json();
-        analysisData = await anaRes.json();
-        map.getSource('survey')?.setData(surveyData);
-        map.getSource('survey-clustered')?.setData(surveyData);
-        map.getSource('parcels')?.setData(parcelsData);
-        buildLegend();
-        buildAnalysis();
-      }, 500);
+      zone.innerHTML = `<h4>IAQ Data Loaded!</h4>
+        <p>${data.points || 0} responses mapped · ${data.streets_analyzed || 0} streets</p>
+        <p style="font-size:11px;color:var(--muted)">Mean risk score: ${data.mean_risk || 0}/100</p>`;
+
+      // Show summary popup
+      showSummaryPopup(data, iaqAnalysis);
+
     } else {
-      throw new Error(data.detail || 'Upload failed');
+      zone.classList.add('success');
+      zone.innerHTML = `<h4>Uploaded!</h4><p>${file.name}</p>`;
+      const [ptsRes, parRes, anaRes] = await Promise.all([
+        fetch('/api/survey-points'), fetch('/api/parcels'), fetch('/api/analysis'),
+      ]);
+      surveyData = await ptsRes.json();
+      parcelsData = await parRes.json();
+      analysisData = await anaRes.json();
+      map.getSource('survey')?.setData(surveyData);
+      map.getSource('survey-clustered')?.setData(surveyData);
+      map.getSource('parcels')?.setData(parcelsData);
+      buildLegend();
+      buildAnalysis();
     }
+
   } catch (e) {
+    xhrRef.done = true;
+    if (xhrRef.pulse) clearInterval(xhrRef.pulse);
+    if (isIAQ) hideAnalysisOverlay();
     zone.classList.remove('success');
     zone.innerHTML = `<h4 style="color:var(--red)">Error</h4><p>${e.message}</p>`;
     setTimeout(() => { zone.innerHTML = origHtml; zone.classList.remove('success'); }, 3000);
   }
 }
 
+// ── IAQ layers ──────────────────────────────────────────────────────────────
+function addIAQLayers() {
+  map.addSource('iaq-source', {
+    type: 'geojson',
+    data: iaqData || { type: 'FeatureCollection', features: [] },
+  });
+
+  // Main IAQ points (colored by risk tier)
+  map.addLayer({
+    id: 'iaq-points', type: 'circle', source: 'iaq-source',
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 16, 10, 19, 14],
+      'circle-color': ['get', 'color'],
+      'circle-stroke-width': 2.5,
+      'circle-stroke-color': 'rgba(255,255,255,0.7)',
+      'circle-opacity': 0.92,
+    },
+  });
+
+  // Highlighted streets layer — bright yellow overlay on top of risk points
+  map.addLayer({
+    id: 'iaq-highlighted', type: 'circle', source: 'iaq-source',
+    filter: ['==', ['get', 'street_name'], '__none__'],
+    layout: { visibility: 'visible' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 11, 16, 16, 19, 20],
+      'circle-color': '#facc15',
+      'circle-stroke-width': 3,
+      'circle-stroke-color': 'rgba(0,0,0,0.45)',
+      'circle-opacity': 1,
+    },
+  });
+
+  map.on('click', 'iaq-points', onIAQPointClick);
+  map.on('mouseenter', 'iaq-points', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'iaq-points', () => map.getCanvas().style.cursor = '');
+  // Also handle clicks on highlighted circles (visible when background layer is hidden)
+  map.on('click', 'iaq-highlighted', onIAQPointClick);
+  map.on('mouseenter', 'iaq-highlighted', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'iaq-highlighted', () => map.getCanvas().style.cursor = '');
+
+  // Street line source (updated by highlightStreets)
+  map.addSource('iaq-street-line-source', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  // Glow halo layer
+  map.addLayer({
+    id: 'iaq-street-line', type: 'line', source: 'iaq-street-line-source',
+    layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#facc15', 'line-width': 16, 'line-opacity': 0.35, 'line-blur': 6 },
+  });
+  // Solid core layer on top
+  map.addLayer({
+    id: 'iaq-street-line-core', type: 'line', source: 'iaq-street-line-source',
+    layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#fde047', 'line-width': 5, 'line-opacity': 0.92 },
+  });
+}
+
+function updateIAQOnMap() {
+  if (!iaqData) return;
+  if (map.getSource('iaq-source')) {
+    map.getSource('iaq-source').setData(iaqData);
+    // Do NOT auto-show the layer — the sidebar toggle controls visibility.
+    // Only show if the toggle checkbox is already checked (e.g. warm-state reload).
+    const toggle = document.getElementById('layer-iaq');
+    if (toggle && toggle.checked) {
+      map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+    }
+  }
+  // Show IAQ sidebar section
+  document.getElementById('iaq-sidebar-section')?.classList.add('visible');
+
+  // Reset filter button (guard against duplicate listeners)
+  const resetBtn = document.getElementById('iaq-reset-filter');
+  if (resetBtn && !resetBtn._listenerAdded) {
+    resetBtn._listenerAdded = true;
+    resetBtn.addEventListener('click', () => clearIAQHighlights());
+  }
+}
+
+function onIAQPointClick(e) {
+  const f = e.features[0];
+  const p = f.properties;
+  const coords = f.geometry.coordinates.slice();
+  const rc = p.color || '#9ca3af';
+
+  const html = `<div class="popup-card" style="min-width:260px">
+    <div class="popup-header">
+      <h3>${p.street_name || 'Survey Response'}</h3>
+      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+        <span class="popup-badge" style="background:${rc}22;color:${rc};border:1px solid ${rc}44">${p.risk_tier || '—'} Risk</span>
+        <span class="popup-badge" style="background:rgba(255,255,255,.05);color:var(--text2);border:1px solid var(--border)">Overall: ${p.overall_risk}/100</span>
+      </div>
+    </div>
+    <div class="popup-body">
+      <div class="popup-row"><span class="popup-label">Health Score</span><span class="popup-value">${p.health_score}/100</span></div>
+      <div class="popup-row"><span class="popup-label">IAQ Score</span><span class="popup-value">${p.iaq_score}/100</span></div>
+      <div class="popup-row"><span class="popup-label">Structural Score</span><span class="popup-value">${p.struct_score}/100</span></div>
+      <div class="popup-row"><span class="popup-label">Ownership</span><span class="popup-value">${p.ownership || '—'}</span></div>
+      <div class="popup-row"><span class="popup-label">Housing Type</span><span class="popup-value">${p.housing_type || '—'}</span></div>
+      <div class="popup-row"><span class="popup-label">Year Built</span><span class="popup-value">${p.year_built || '—'}</span></div>
+      <div class="popup-row"><span class="popup-label">Mold Present</span><span class="popup-value">${p.has_mold ? '<span style="color:var(--orange)">Yes</span>' : 'No'}</span></div>
+      <div class="popup-row"><span class="popup-label">Hospital Visit</span><span class="popup-value">${p.hospital_visit === 'yes' ? '<span style="color:var(--red)">Yes</span>' : 'No'}</span></div>
+    </div>
+  </div>`;
+
+  new maplibregl.Popup({ offset: 15, maxWidth: '320px' })
+    .setLngLat(coords)
+    .setHTML(html)
+    .addTo(map);
+}
+
+// ── Survey Results tab ──────────────────────────────────────────────────────
+function buildSurveyResultsTab(data) {
+  const container = document.getElementById('results-content');
+  if (!container) return;
+  if (!data || !data.analysis) {
+    container.innerHTML = '<p style="color:var(--muted);text-align:center;padding:40px 0">No survey results uploaded yet.<br><span style="font-size:12px">Upload the Qualtrics CSV via the Import button.</span></p>';
+    return;
+  }
+
+  // Destroy previous charts
+  Object.values(_resultsCharts).forEach(c => { try { c.destroy(); } catch(e){} });
+  _resultsCharts = {};
+
+  const a          = data.analysis;
+  const v          = data.validation || {};
+  const scores     = a.scores      || {};
+  const riskTiers  = a.risk_tiers  || {};
+  const health     = a.health      || {};
+  const housing    = a.housing     || {};
+  const ownership  = a.ownership   || {};
+  const streetStats = data.street_stats || {};
+
+  const rankedStreets = Object.entries(streetStats)
+    .filter(([, d]) => !d.insufficient_data)
+    .sort(([, a2], [, b]) => b.mean_risk - a2.mean_risk);
+
+  const matchDetails = v.match_details || [];
+  const gpsCount    = matchDetails.filter(d => d.coord_source === 'gps').length;
+  const addrCount   = matchDetails.filter(d => d.coord_source === 'address_matched').length;
+  const geocodedCount = matchDetails.filter(d => d.coord_source === 'geocoded').length;
+  const totalMapped = a.n_responses || 0;
+
+  const _ctx = { scores, riskTiers, health, housing, ownership, rankedStreets, v, gpsCount, addrCount, geocodedCount, totalMapped };
+
+  const TABS = ['Overview','Health','IAQ','Structural','Streets','Validation'];
+
+  container.innerHTML = `
+    <div style="display:flex;border-bottom:1px solid var(--border);margin-bottom:10px;overflow-x:auto;flex-shrink:0">
+      ${TABS.map((t, i) =>
+        `<div class="res-tab" data-rtab="${t.toLowerCase()}"
+          style="padding:5px 13px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;
+                 border-bottom:2px solid ${i===0?'var(--accent)':'transparent'};
+                 color:${i===0?'var(--accent)':'var(--muted)'};transition:.15s">${t}</div>`
+      ).join('')}
+    </div>
+
+    <!-- Overview -->
+    <div id="res-pane-overview" class="res-pane">
+      <div class="stat-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:8px">
+        <div class="stat-card"><div class="label">Mapped</div><div class="value" style="font-size:18px">${totalMapped}</div><div class="sub">${gpsCount} GPS · ${addrCount} addr · ${geocodedCount} geo</div></div>
+        <div class="stat-card"><div class="label">Mean Risk</div><div class="value" style="font-size:18px;color:var(--orange)">${scores.mean_risk||0}</div><div class="sub">/ 100</div></div>
+        <div class="stat-card"><div class="label">High Risk</div><div class="value" style="font-size:18px;color:var(--red)">${riskTiers.high||0}</div><div class="sub">≥67 score</div></div>
+        <div class="stat-card"><div class="label">Medium</div><div class="value" style="font-size:18px;color:var(--orange)">${riskTiers.medium||0}</div><div class="sub">34–66</div></div>
+        <div class="stat-card"><div class="label">Low</div><div class="value" style="font-size:18px;color:var(--green)">${riskTiers.low||0}</div><div class="sub">0–33</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:2;min-width:160px"><h4>Mean Scores by Domain</h4><canvas id="rc-scores" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px"><h4>Ownership</h4><canvas id="rc-ownership" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px"><h4>Risk Tiers</h4><canvas id="rc-risk" height="110"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Health -->
+    <div id="res-pane-health" class="res-pane" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1.4;min-width:160px"><h4>Symptom Prevalence — All Households (%)</h4><canvas id="rc-symptoms" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1.6;min-width:180px"><h4>Respiratory &amp; Mold by Street (top 8 by risk)</h4><canvas id="rc-resp-street" height="110"></canvas></div>
+      </div>
+      <table class="data-table" style="font-size:11px">
+        <thead><tr><th>Indicator</th><th>Overall</th><th>Severity</th><th>Scoring notes</th></tr></thead>
+        <tbody>
+          ${[['Respiratory Illness (active symptoms)',health.respiratory_pct,'weekly/monthly/seasonal reports'],
+             ['Asthma (active)',health.asthma_pct,'weekly/monthly/seasonal'],
+             ['Wheeze (active)',health.wheeze_pct,'weekly/monthly/seasonal'],
+             ['Mold Exposure',health.mold_pct,'any mold present'],
+             ['Hospital Visit (respiratory)',health.hospital_pct,'+20 pts to health score']
+            ].map(([name,pct,note]) => {
+              const p = pct||0;
+              const c = p>40?'var(--red)':p>20?'var(--orange)':'var(--green)';
+              const sev = p>40?'High':p>20?'Moderate':'Low';
+              return `<tr><td>${name}</td>
+                <td style="font-family:var(--mono);color:${c};font-weight:600">${p}%</td>
+                <td><span style="padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;background:${c}22;color:${c}">${sev}</span></td>
+                <td style="color:var(--muted);font-size:10px">${note}</td></tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- IAQ -->
+    <div id="res-pane-iaq" class="res-pane" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1.5;min-width:160px"><h4>Mold Prevalence by Street — top 8 (%)</h4><canvas id="rc-mold-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px"><h4>Housing Age</h4><canvas id="rc-yearbuilt" height="110"></canvas></div>
+      </div>
+      <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="label">Mean IAQ Score</div>
+          <div class="value" style="font-size:18px;color:${(scores.mean_iaq||0)>66?'var(--red)':(scores.mean_iaq||0)>33?'var(--orange)':'var(--green)'}">${scores.mean_iaq||0}</div>
+          <div class="sub">higher = worse IAQ</div></div>
+        <div class="stat-card"><div class="label">Mold Reported</div><div class="value" style="font-size:18px;color:var(--purple)">${health.mold_pct||0}%</div><div class="sub">of surveyed homes</div></div>
+        <div class="stat-card"><div class="label">Streets w/ Mold</div>
+          <div class="value" style="font-size:18px">${rankedStreets.filter(([,d])=>d.pct_mold>0).length}</div>
+          <div class="sub">of ${rankedStreets.length} analyzed</div></div>
+      </div>
+    </div>
+
+    <!-- Structural -->
+    <div id="res-pane-structural" class="res-pane" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1;min-width:120px"><h4>Housing Types</h4><canvas id="rc-htypes" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:120px"><h4>Home Condition</h4><canvas id="rc-cond" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1.6;min-width:160px"><h4>Structural Score by Street (top 8)</h4><canvas id="rc-struct-street" height="110"></canvas></div>
+      </div>
+      <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr))">
+        ${Object.entries(housing.types||{}).map(([k,v3])=>`<div class="stat-card"><div class="label">${k}</div><div class="value" style="font-size:16px">${v3}</div></div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Streets -->
+    <div id="res-pane-streets" class="res-pane" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1"><h4>Overall Risk Score by Street</h4><canvas id="rc-risk-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1"><h4>Health vs IAQ vs Structural (top 6)</h4><canvas id="rc-compare-street" height="110"></canvas></div>
+      </div>
+      <div style="max-height:200px;overflow-y:auto">
+        <table class="data-table" style="font-size:11px">
+          <thead><tr><th>#</th><th>Street</th><th>N</th><th>Risk</th><th>Health</th><th>IAQ</th><th>Struct</th><th>Mold%</th><th>Resp%</th><th>Hosp%</th></tr></thead>
+          <tbody>
+            ${rankedStreets.map(([street,d],i)=>{
+              const rc = d.mean_risk>66?'var(--red)':d.mean_risk>33?'var(--orange)':'var(--green)';
+              return `<tr>
+                <td style="color:var(--muted);font-family:var(--mono)">${i+1}</td>
+                <td style="font-weight:500;white-space:nowrap">${street}</td>
+                <td style="font-family:var(--mono)">${d.n}</td>
+                <td style="font-family:var(--mono);font-weight:700;color:${rc}">${d.mean_risk}</td>
+                <td style="font-family:var(--mono)">${d.mean_health}</td>
+                <td style="font-family:var(--mono)">${d.mean_iaq}</td>
+                <td style="font-family:var(--mono)">${d.mean_struct}</td>
+                <td style="font-family:var(--mono)">${d.pct_mold}%</td>
+                <td style="font-family:var(--mono)">${d.pct_respiratory}%</td>
+                <td style="font-family:var(--mono)">${d.pct_hospital}%</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Validation -->
+    <div id="res-pane-validation" class="res-pane" style="display:none">
+      <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:8px">
+        <div class="stat-card"><div class="label">IAQ Mapped</div><div class="value" style="font-size:18px">${v.total_iaq_responses||totalMapped}</div></div>
+        <div class="stat-card"><div class="label">Contact Completed</div><div class="value" style="font-size:18px">${v.total_completed_contacts||'—'}</div></div>
+        <div class="stat-card"><div class="label">Confirmed</div><div class="value" style="font-size:18px;color:var(--green)">${v.matched_iaq_responses||'—'}</div><div class="sub">≤150m match</div></div>
+        <div class="stat-card"><div class="label">Match Rate</div>
+          <div class="value" style="font-size:18px;color:${(v.match_rate_pct||0)>60?'var(--green)':(v.match_rate_pct||0)>30?'var(--orange)':'var(--red)'}">${v.match_rate_pct||'—'}%</div>
+          <div class="sub">${v.unmatched_iaq||0} not confirmed</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1;min-width:110px"><h4>Coord Source</h4><canvas id="rc-coord-src" height="110"></canvas></div>
+        ${v.unmatched_by_street && Object.keys(v.unmatched_by_street).length ? `
+        <div class="chart-box" style="flex:2;min-width:160px"><h4>Unmatched Responses by Street</h4>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;padding-top:4px">
+            ${Object.entries(v.unmatched_by_street).sort(([,a2],[,b2])=>b2-a2).slice(0,15).map(([street,cnt])=>
+              `<span style="padding:2px 8px;border-radius:6px;font-size:11px;font-family:var(--mono);background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)">${street} <b>${cnt}</b></span>`
+            ).join('')}
+          </div>
+          <p style="font-size:10px;color:var(--muted);margin-top:8px">Not confirmed = nearest completed contact &gt;150 m away or not in canvassing list</p>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  container.querySelectorAll('.res-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      container.querySelectorAll('.res-tab').forEach(t => {
+        t.style.color = 'var(--muted)';
+        t.style.borderBottomColor = 'transparent';
+      });
+      tab.style.color = 'var(--accent)';
+      tab.style.borderBottomColor = 'var(--accent)';
+      const key = tab.dataset.rtab;
+      container.querySelectorAll('.res-pane').forEach(p => p.style.display = 'none');
+      const pane = document.getElementById(`res-pane-${key}`);
+      if (pane) pane.style.display = 'block';
+      _initResultsCharts(key, _ctx);
+    });
+  });
+
+  // Init overview immediately after render
+  setTimeout(() => _initResultsCharts('overview', _ctx), 60);
+}
+
+function _initResultsCharts(tab, { scores, riskTiers, health, housing, rankedStreets, v, gpsCount, addrCount, geocodedCount, ownership }) {
+  const OPTS = {
+    animation: false,
+    plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } } },
+  };
+  const AXIS = { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } };
+  const AXISR = { ...AXIS, max: 100, min: 0 };
+
+  function mk(id, cfg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (_resultsCharts[id]) { try { _resultsCharts[id].destroy(); } catch(e){} }
+    _resultsCharts[id] = new Chart(el.getContext('2d'), cfg);
+  }
+
+  function shortStreet(s) { return s.replace(/\s+(Avenue|Drive|Street|Road|Boulevard|Lane|Court|Way|Place|Circle|Terrace)\.?$/i, '').replace(/\s+(Ave|Dr|St|Rd|Blvd|Ln|Ct|Pl|Cir|Ter)\.?$/i, ''); }
+
+  if (tab === 'overview') {
+    mk('rc-scores', {
+      type: 'bar',
+      data: { labels: ['Health','IAQ','Structural','Overall Risk'],
+        datasets: [{ label: 'Mean Score', barThickness: 28,
+          data: [scores.mean_health||0, scores.mean_iaq||0, scores.mean_struct||0, scores.mean_risk||0],
+          backgroundColor: ['rgba(239,68,68,.75)','rgba(139,92,246,.75)','rgba(249,115,22,.75)','rgba(59,130,246,.75)'],
+          borderRadius: 4 }] },
+      options: { ...OPTS, scales: { x: AXIS, y: AXISR } },
+    });
+    mk('rc-ownership', {
+      type: 'doughnut',
+      data: { labels: ['Owners','Renters','Other'],
+        datasets: [{ data: [ownership.owner||0, ownership.renter||0, ownership.other||0],
+          backgroundColor: ['#06b6d4','#8b5cf6','#475569'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '60%' },
+    });
+    mk('rc-risk', {
+      type: 'doughnut',
+      data: { labels: ['High','Medium','Low'],
+        datasets: [{ data: [riskTiers.high||0, riskTiers.medium||0, riskTiers.low||0],
+          backgroundColor: ['#ef4444','#f97316','#10b981'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '60%' },
+    });
+  }
+
+  if (tab === 'health') {
+    mk('rc-symptoms', {
+      type: 'bar',
+      data: { labels: ['Respiratory','Asthma','Wheeze','Mold','Hospital'],
+        datasets: [{ label: '% of households', barThickness: 22,
+          data: [health.respiratory_pct||0, health.asthma_pct||0, health.wheeze_pct||0, health.mold_pct||0, health.hospital_pct||0],
+          backgroundColor: ['rgba(239,68,68,.75)','rgba(249,115,22,.75)','rgba(234,179,8,.75)','rgba(139,92,246,.75)','rgba(6,182,212,.75)'],
+          borderRadius: 4 }] },
+      options: { ...OPTS, scales: { x: AXIS, y: AXISR } },
+    });
+    const top8 = rankedStreets.slice(0, 8);
+    mk('rc-resp-street', {
+      type: 'bar',
+      data: { labels: top8.map(([s]) => shortStreet(s)),
+        datasets: [
+          { label: 'Respiratory%', data: top8.map(([,d])=>d.pct_respiratory||0), backgroundColor:'rgba(239,68,68,.75)', borderRadius:3 },
+          { label: 'Mold%',        data: top8.map(([,d])=>d.pct_mold||0),        backgroundColor:'rgba(139,92,246,.75)', borderRadius:3 },
+          { label: 'Hospital%',    data: top8.map(([,d])=>d.pct_hospital||0),    backgroundColor:'rgba(6,182,212,.60)',  borderRadius:3 },
+        ] },
+      options: { ...OPTS, scales: { x: { ...AXIS, ticks: { ...AXIS.ticks, maxRotation: 40 } }, y: AXISR } },
+    });
+  }
+
+  if (tab === 'iaq') {
+    const moldSorted = [...rankedStreets].sort(([,a2],[,b])=>b.pct_mold-a2.pct_mold).slice(0,8);
+    mk('rc-mold-street', {
+      type: 'bar',
+      data: { labels: moldSorted.map(([s]) => shortStreet(s)),
+        datasets: [{ label: 'Mold %', barThickness: 20,
+          data: moldSorted.map(([,d])=>d.pct_mold||0),
+          backgroundColor: 'rgba(139,92,246,.75)', borderRadius: 4 }] },
+      options: { ...OPTS, scales: { x: { ...AXIS, ticks: { ...AXIS.ticks, maxRotation: 40 } }, y: AXISR } },
+    });
+    mk('rc-yearbuilt', {
+      type: 'doughnut',
+      data: { labels: Object.keys(housing.year_built||{}),
+        datasets: [{ data: Object.values(housing.year_built||{}),
+          backgroundColor: ['#ef4444','#f97316','#f59e0b','#10b981','#475569'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '55%' },
+    });
+  }
+
+  if (tab === 'structural') {
+    mk('rc-htypes', {
+      type: 'doughnut',
+      data: { labels: Object.keys(housing.types||{}),
+        datasets: [{ data: Object.values(housing.types||{}),
+          backgroundColor: ['#3b82f6','#8b5cf6','#10b981','#475569'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '55%' },
+    });
+    mk('rc-cond', {
+      type: 'doughnut',
+      data: { labels: Object.keys(housing.conditions||{}),
+        datasets: [{ data: Object.values(housing.conditions||{}),
+          backgroundColor: ['#10b981','#f97316','#ef4444','#475569'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '55%' },
+    });
+    const top8s = rankedStreets.slice(0, 8);
+    mk('rc-struct-street', {
+      type: 'bar',
+      data: { labels: top8s.map(([s]) => shortStreet(s)),
+        datasets: [{ label: 'Structural Score', barThickness: 20,
+          data: top8s.map(([,d])=>d.mean_struct||0),
+          backgroundColor: 'rgba(249,115,22,.75)', borderRadius: 4 }] },
+      options: { ...OPTS, scales: { x: { ...AXIS, ticks: { ...AXIS.ticks, maxRotation: 40 } }, y: AXISR } },
+    });
+  }
+
+  if (tab === 'streets') {
+    const all = rankedStreets.slice(0, 10);
+    mk('rc-risk-street', {
+      type: 'bar',
+      data: { labels: all.map(([s]) => shortStreet(s)),
+        datasets: [{ label: 'Overall Risk', barThickness: 18,
+          data: all.map(([,d])=>d.mean_risk),
+          backgroundColor: all.map(([,d])=>d.mean_risk>66?'rgba(239,68,68,.8)':d.mean_risk>33?'rgba(249,115,22,.8)':'rgba(16,185,129,.8)'),
+          borderRadius: 4 }] },
+      options: { ...OPTS, scales: { x: { ...AXIS, ticks: { ...AXIS.ticks, maxRotation: 40 } }, y: AXISR } },
+    });
+    const top6 = rankedStreets.slice(0, 6);
+    mk('rc-compare-street', {
+      type: 'bar',
+      data: { labels: top6.map(([s]) => shortStreet(s)),
+        datasets: [
+          { label: 'Health',     data: top6.map(([,d])=>d.mean_health||0),  backgroundColor:'rgba(239,68,68,.7)',  borderRadius:3 },
+          { label: 'IAQ',        data: top6.map(([,d])=>d.mean_iaq||0),     backgroundColor:'rgba(139,92,246,.7)', borderRadius:3 },
+          { label: 'Structural', data: top6.map(([,d])=>d.mean_struct||0),  backgroundColor:'rgba(249,115,22,.7)', borderRadius:3 },
+        ] },
+      options: { ...OPTS, scales: { x: { ...AXIS, ticks: { ...AXIS.ticks, maxRotation: 40 } }, y: AXISR } },
+    });
+  }
+
+  if (tab === 'validation') {
+    mk('rc-coord-src', {
+      type: 'doughnut',
+      data: { labels: ['GPS','Addr Match','Census Geo'],
+        datasets: [{ data: [gpsCount, addrCount, geocodedCount],
+          backgroundColor: ['#10b981','#3b82f6','#8b5cf6'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '55%' },
+    });
+  }
+}
+
+// ── Contact layer visibility helpers ────────────────────────────────────────
+let _contactWasVisible = true;
+
+function _hideContactLayers() {
+  if (map.getLayer('survey-points')) {
+    _contactWasVisible = map.getLayoutProperty('survey-points', 'visibility') !== 'none';
+    map.setLayoutProperty('survey-points', 'visibility', 'none');
+    if (map.getLayer('survey-labels')) map.setLayoutProperty('survey-labels', 'visibility', 'none');
+  }
+}
+
+function _restoreContactLayers() {
+  if (_contactWasVisible && map.getLayer('survey-points')) {
+    map.setLayoutProperty('survey-points', 'visibility', 'visible');
+  }
+}
+
+// ── Map action dispatcher (called by chatbot) ───────────────────────────────
+// ── Clear all data layers before each chatbot action ─────────────────────────
+function clearMapForChatbot() {
+  Object.keys(LAYER_DEFS).forEach(name => setLayerVisibility(name, false));
+  if (map.getLayer('iaq-points')) {
+    map.setFilter('iaq-points', null);
+    map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+  }
+  if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
+  if (map.getLayer('iaq-highlighted'))
+    map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
+  if (map.getSource('iaq-street-line-source'))
+    map.getSource('iaq-street-line-source').setData({ type: 'FeatureCollection', features: [] });
+  currentIAQFilter = null;
+  currentContactFilter = null;
+  activeStreetHighlight = null;
+}
+
+async function executeMapActions(actions) {
+  if (!actions || !actions.length) return;
+  clearMapForChatbot();
+  for (const action of actions) {
+    const { type, params = {} } = action;
+    switch (type) {
+
+      // ── New comprehensive actions ──────────────────────────────────────────
+      case 'set_layer_visibility':
+        setLayerVisibility(params.layer, params.visible !== false);
+        break;
+
+      case 'highlight_streets':
+        await highlightStreets(params.streets || [], params.color);
+        break;
+
+      case 'zoom_to_street':
+        zoomToStreet(params.street);
+        break;
+
+      case 'filter_contact_status':
+        filterContactByStatus(params.statuses || []);
+        setLayerVisibility('contact_survey', true);
+        break;
+
+      case 'filter_iaq_symptom': {
+        const { field, values } = params;
+        if (!field || !values || !map.getLayer('iaq-points')) break;
+        currentIAQFilter = `${field}:${values.join(',')}`;
+        _hideContactLayers();
+        const exprs = values.map(v =>
+          typeof v === 'boolean' ? ['==', ['get', field], v]
+                                 : ['in', String(v).toLowerCase(), ['downcase', ['get', field]]]
+        );
+        const symptomFilter = exprs.length > 1 ? ['any', ...exprs] : exprs[0];
+
+        // Intersect with active street highlight so a symptom filter emitted
+        // alongside highlight_streets is scoped to that street only.
+        let combined = symptomFilter;
+        if (activeStreetHighlight && activeStreetHighlight.length) {
+          const streetFilter = activeStreetHighlight.length === 1
+            ? ['==', ['get', 'street_name'], activeStreetHighlight[0]]
+            : ['any', ...activeStreetHighlight.map(n => ['==', ['get', 'street_name'], n])];
+          combined = ['all', streetFilter, symptomFilter];
+          console.log('[filter_iaq_symptom] intersecting with active street:', activeStreetHighlight);
+        }
+        map.setFilter('iaq-points', combined);
+        setLayerVisibility('iaq_points', true);
+        break;
+      }
+
+      case 'show_iaq_choropleth': {
+        const valid = ['overall_risk', 'iaq_score', 'health_score', 'struct_score'];
+        const f = valid.includes(params.field) ? params.field : 'overall_risk';
+        if (map.getLayer('iaq-points')) {
+          map.setPaintProperty('iaq-points', 'circle-color',
+            ['interpolate', ['linear'], ['get', f],
+              0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444']);
+          setLayerVisibility('iaq_points', true);
+        }
+        break;
+      }
+
+      case 'clear_filters':
+        if (map.getLayer('iaq-points')) {
+          map.setFilter('iaq-points', null);
+          map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+        }
+        if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
+        if (map.getLayer('iaq-highlighted'))
+          map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
+        if (map.getSource('iaq-street-line-source'))
+          map.getSource('iaq-street-line-source').setData({ type: 'FeatureCollection', features: [] });
+        setLayerVisibility('iaq_highlights', false);
+        setLayerVisibility('contact_survey', true);
+        if (iaqData?.features?.length) setLayerVisibility('iaq_points', true);
+        currentIAQFilter = null;
+        currentContactFilter = null;
+        break;
+
+      case 'show_analysis_tab': {
+        const panel = document.getElementById('analysis-panel');
+        if (panel && !panel.classList.contains('open')) {
+          panel.classList.add('open');
+          setTimeout(() => map.resize(), 350);
+        }
+        document.querySelector(`.analysis-tab[data-tab="${params.tab}"]`)?.click();
+        break;
+      }
+
+      // ── Legacy actions (backward compat) ──────────────────────────────────
+      case 'show_layer':
+        showIAQLayer(params.layer);
+        break;
+      case 'hide_all_layers':
+        setLayerVisibility('iaq_points', false);
+        setLayerVisibility('iaq_highlights', false);
+        break;
+      case 'filter_points':
+        filterIAQPoints(params.field, params.values);
+        break;
+      case 'show_choropleth':
+        showStreetChoropleth(params.field || 'overall_risk');
+        break;
+      case 'clear_all':
+        clearIAQHighlights();
+        _restoreContactLayers();
+        break;
+      case 'show_contact_layer':
+        showContactLayer();
+        break;
+    }
+  }
+}
+
+function showContactLayer() {
+  filterContactByStatus([]);   // clear any contact filter
+  setLayerVisibility('contact_survey', true);
+  setLayerVisibility('iaq_points', false);
+  setLayerVisibility('iaq_highlights', false);
+  if (map.getSource('iaq-street-line-source'))
+    map.getSource('iaq-street-line-source').setData({ type: 'FeatureCollection', features: [] });
+}
+
+function showIAQLayer(layer) {
+  if (!layer) return;
+  if (map.getLayer('iaq-points')) {
+    map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+    map.setFilter('iaq-points', null);
+    map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+  }
+  // Hide contact survey points so only the IAQ filter layer shows
+  _hideContactLayers();
+
+  const activeLayers = {
+    iaq_points:  () => { /* show all IAQ points — already cleared filter above */ },
+    respiratory: () => filterIAQPoints('respiratory_ill', ['weekly', 'month', 'season']),
+    asthma:      () => filterIAQPoints('asthma_freq',    ['weekly', 'month', 'season']),
+    mold:        () => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['==', ['get', 'has_mold'], true]); },
+    high_risk:   () => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['>=', ['get', 'overall_risk'], 67]); },
+    owners_only: () => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['==', ['get', 'ownership'], 'Owner']); },
+    renters_only:() => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['==', ['get', 'ownership'], 'Renter']); },
+  };
+  (activeLayers[layer] || (() => {}))();
+}
+
+// ── Fetch actual road geometry from OpenStreetMap via Overpass API ────────────
+async function fetchOSMRoadGeometry(streetName) {
+  // Build candidate name variants to try against OSM in order of specificity
+  const abbrevMap = {
+    'Ave': 'Avenue', 'Ave.': 'Avenue',
+    'St': 'Street',  'St.': 'Street',
+    'Dr': 'Drive',   'Dr.': 'Drive',
+    'Rd': 'Road',    'Rd.': 'Road',
+    'Ln': 'Lane',    'Ln.': 'Lane',
+    'Blvd': 'Boulevard', 'Blvd.': 'Boulevard',
+    'Ct': 'Court',   'Ct.': 'Court',
+    'Pl': 'Place',   'Pl.': 'Place',
+    'Cir': 'Circle', 'Hwy': 'Highway',
+  };
+  const candidates = new Set([streetName]);
+  // Expand abbreviation (e.g. "Harvard Ave" → "Harvard Avenue")
+  const expanded = streetName.replace(
+    /\b(Ave\.?|St\.?|Dr\.?|Rd\.?|Ln\.?|Blvd\.?|Ct\.?|Pl\.?|Cir|Hwy)$/i,
+    m => abbrevMap[m] || abbrevMap[m.replace(/\.$/, '')] || m
+  );
+  if (expanded !== streetName) candidates.add(expanded);
+  // Contract full word back to abbreviation (e.g. "Harvard Avenue" → "Harvard Ave")
+  const contracted = streetName.replace(
+    /\b(Avenue|Street|Drive|Road|Lane|Boulevard|Court|Place|Circle|Highway)$/i,
+    m => ({ Avenue:'Ave', Street:'St', Drive:'Dr', Road:'Rd', Lane:'Ln',
+            Boulevard:'Blvd', Court:'Ct', Place:'Pl', Circle:'Cir', Highway:'Hwy' })[m] || m
+  );
+  if (contracted !== streetName) candidates.add(contracted);
+
+  const bbox = '29.74,-82.06,29.84,-81.94'; // Keystone Heights (south,west,north,east)
+
+  const _toFeatures = (elements, label) =>
+    (elements || [])
+      .filter(el => el.type === 'way' && el.geometry && el.geometry.length >= 2)
+      .map(el => ({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: el.geometry.map(pt => [pt.lon, pt.lat]) },
+        properties: { street_name: label },
+      }));
+
+  try {
+    for (const name of candidates) {
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Strategy 1: exact case-insensitive match
+      const exactQuery = `[out:json][timeout:12];way["name"~"^${esc}$",i]["highway"](${bbox});out geom;`;
+      const r1 = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(exactQuery),
+      });
+      if (r1.ok) {
+        const d1 = await r1.json();
+        const feats = _toFeatures(d1.elements, streetName);
+        if (feats.length) { console.log(`[OSM] matched "${name}" (exact)`); return feats; }
+      }
+    }
+
+    // Strategy 2: partial match on first word (e.g. "Harvard" inside "Harvard Avenue")
+    const firstWord = streetName.split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const partialQuery = `[out:json][timeout:12];way["name"~"${firstWord}","i"]["highway"](${bbox});out geom;`;
+    const r2 = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(partialQuery),
+    });
+    if (r2.ok) {
+      const d2 = await r2.json();
+      // Filter to ways whose name actually starts with the first word (avoid false positives)
+      const filtered = (d2.elements || []).filter(el =>
+        el.type === 'way' && el.geometry?.length >= 2 &&
+        el.tags?.name?.toLowerCase().startsWith(firstWord.toLowerCase())
+      );
+      if (filtered.length) {
+        console.log(`[OSM] matched "${streetName}" via first-word "${firstWord}"`);
+        return _toFeatures(filtered, streetName);
+      }
+    }
+
+    console.warn(`[OSM] No road geometry found for "${streetName}"`);
+    return [];
+  } catch (e) {
+    console.warn('[OSM] Road fetch failed for', streetName, ':', e.message);
+    return [];
+  }
+}
+
+async function highlightStreets(streets, color) {
+  // Clear previous highlight
+  if (!streets || !streets.length) {
+    if (map.getSource('iaq-street-line-source'))
+      map.getSource('iaq-street-line-source').setData({ type: 'FeatureCollection', features: [] });
+    if (map.getLayer('iaq-street-line'))      map.setLayoutProperty('iaq-street-line',      'visibility', 'none');
+    if (map.getLayer('iaq-street-line-core')) map.setLayoutProperty('iaq-street-line-core', 'visibility', 'none');
+    // Keep circles hidden — never show them from chatbot
+    if (map.getLayer('iaq-highlighted'))
+      map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
+    return;
+  }
+
+  // Resolve line color — caller passes a semantic color based on query context:
+  //   worst / health risk → #ef4444 (red)
+  //   worst structural    → #f97316 (orange)
+  //   worst IAQ / mold    → #8b5cf6 (purple)
+  //   best / safest       → #10b981 (green)
+  //   neutral / compare   → #3b82f6 (blue, default)
+  const lineColor = color || '#3b82f6';
+
+  // Apply color to both line layers
+  if (map.getLayer('iaq-street-line')) {
+    map.setPaintProperty('iaq-street-line', 'line-color', lineColor);
+  }
+  if (map.getLayer('iaq-street-line-core')) {
+    map.setPaintProperty('iaq-street-line-core', 'line-color', lineColor);
+  }
+
+  const names = streets.map(s => s.trim());
+
+  // Pin the street highlight so any later chatbot filter action intersects
+  // with it instead of replacing it.
+  activeStreetHighlight = [...names];
+
+  // Show ONLY the IAQ survey points on the highlighted street(s). Use `any` +
+  // `==` rather than `in` because some MapLibre versions evaluate `in` with
+  // literal arrays inconsistently — `any` is universally reliable.
+  if (map.getLayer('iaq-points')) {
+    const streetFilter = names.length === 1
+      ? ['==', ['get', 'street_name'], names[0]]
+      : ['any', ...names.map(n => ['==', ['get', 'street_name'], n])];
+    map.setFilter('iaq-points', streetFilter);
+    map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+    const el = document.getElementById('layer-iaq');
+    if (el) el.checked = true;
+
+    // Diagnostic: how many actual features match the filter in the loaded data?
+    const matchingFeatures = iaqData?.features?.filter(
+      f => names.includes(f.properties?.street_name)
+    ) || [];
+    console.log(`[highlightStreets] streets=${JSON.stringify(names)} `
+      + `matched ${matchingFeatures.length} iaq points `
+      + `(street_name values: ${[...new Set(matchingFeatures.map(f => f.properties?.street_name))].join(', ') || 'none'})`);
+    if (!matchingFeatures.length) {
+      const allStreets = [...new Set((iaqData?.features || []).map(f => f.properties?.street_name))];
+      console.warn(`[highlightStreets] NO IAQ points on ${JSON.stringify(names)}. `
+        + `Known street_name values in data:`, allStreets.sort());
+    }
+  }
+
+  // Also filter the iaq-highlighted halo layer with the same expression
+  const haloFilter = names.length === 1
+    ? ['==', ['get', 'street_name'], names[0]]
+    : ['any', ...names.map(n => ['==', ['get', 'street_name'], n])];
+
+  // Fetch actual road geometry from OSM for each street
+  const lineFeatures = [];
+  for (const streetName of names) {
+    const osmFeatures = await fetchOSMRoadGeometry(streetName);
+    lineFeatures.push(...osmFeatures);
+  }
+
+  if (map.getSource('iaq-street-line-source')) {
+    map.getSource('iaq-street-line-source').setData({ type: 'FeatureCollection', features: lineFeatures });
+    if (map.getLayer('iaq-street-line'))      map.setLayoutProperty('iaq-street-line',      'visibility', 'visible');
+    if (map.getLayer('iaq-street-line-core')) map.setLayoutProperty('iaq-street-line-core', 'visibility', 'visible');
+  }
+
+  // Fallback when OSM returns no road geometry: highlight the IAQ survey
+  // points on that street with an enlarged, colored halo so the user still
+  // sees a clear visual marker for the street.
+  if (map.getLayer('iaq-highlighted')) {
+    if (lineFeatures.length) {
+      map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
+    } else {
+      map.setFilter('iaq-highlighted', haloFilter);
+      map.setPaintProperty('iaq-highlighted', 'circle-color', lineColor);
+      map.setPaintProperty('iaq-highlighted', 'circle-stroke-color', '#ffffff');
+      map.setLayoutProperty('iaq-highlighted', 'visibility', 'visible');
+      console.warn(`[highlightStreets] OSM returned no geometry for ${names.join(', ')}; highlighting IAQ points on that street instead`);
+    }
+  }
+
+  // Zoom: prefer OSM road bounds, fall back to IAQ survey point bounds for that street
+  const allCoords = lineFeatures.flatMap(f => f.geometry.coordinates);
+  if (allCoords.length >= 2) {
+    const lngs = allCoords.map(c => c[0]);
+    const lats = allCoords.map(c => c[1]);
+    map.fitBounds(
+      [[Math.min(...lngs) - 0.001, Math.min(...lats) - 0.001],
+       [Math.max(...lngs) + 0.001, Math.max(...lats) + 0.001]],
+      { padding: 80, duration: 800 }
+    );
+  } else {
+    // OSM returned nothing — zoom to the IAQ survey points on that street
+    zoomToStreet(names[0]);
+  }
+}
+
+function zoomToStreet(streetName) {
+  if (!streetName || !iaqData || !iaqData.features) return;
+  const pts = iaqData.features.filter(f => f.properties.street_name === streetName);
+  if (!pts.length) return;
+  const lngs = pts.map(f => f.geometry.coordinates[0]);
+  const lats = pts.map(f => f.geometry.coordinates[1]);
+  map.fitBounds(
+    [[Math.min(...lngs) - 0.002, Math.min(...lats) - 0.002],
+     [Math.max(...lngs) + 0.002, Math.max(...lats) + 0.002]],
+    { padding: 80, duration: 800 }
+  );
+}
+
+function filterIAQPoints(field, values) {
+  if (!map.getLayer('iaq-points')) return;
+  if (!field || !values || !values.length) {
+    // Even when clearing the symptom filter, if a street highlight is active
+    // keep the street scope — "show all symptoms" still means within Harvard Ave.
+    if (activeStreetHighlight && activeStreetHighlight.length) {
+      const streetOnly = activeStreetHighlight.length === 1
+        ? ['==', ['get', 'street_name'], activeStreetHighlight[0]]
+        : ['any', ...activeStreetHighlight.map(n => ['==', ['get', 'street_name'], n])];
+      map.setFilter('iaq-points', streetOnly);
+    } else {
+      map.setFilter('iaq-points', null);
+    }
+    _restoreContactLayers();
+    return;
+  }
+  // Hide contact points — only the filtered IAQ layer should show
+  _hideContactLayers();
+  // Partial case-insensitive match (e.g. 'weekly' matches 'Weekly or more often')
+  const exprs = values.map(v => ['in', v.toLowerCase(), ['downcase', ['get', field]]]);
+  const symptomFilter = exprs.length > 1 ? ['any', ...exprs] : exprs[0];
+
+  // Intersect with active street highlight so "mold" after "Harvard Ave"
+  // means "mold cases on Harvard Ave" — not every mold case in the city.
+  let finalFilter = symptomFilter;
+  if (activeStreetHighlight && activeStreetHighlight.length) {
+    const streetFilter = activeStreetHighlight.length === 1
+      ? ['==', ['get', 'street_name'], activeStreetHighlight[0]]
+      : ['any', ...activeStreetHighlight.map(n => ['==', ['get', 'street_name'], n])];
+    finalFilter = ['all', streetFilter, symptomFilter];
+  }
+  map.setFilter('iaq-points', finalFilter);
+  map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+}
+
+function showStreetChoropleth(field) {
+  if (!map.getLayer('iaq-points')) return;
+  const rampExpr = (f) => ['interpolate', ['linear'], ['get', f],
+    0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444'];
+  const valid = ['overall_risk', 'health_score', 'iaq_score', 'struct_score'];
+  map.setPaintProperty('iaq-points', 'circle-color',
+    valid.includes(field) ? rampExpr(field) : ['get', 'color']);
+  map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+}
+
+function clearIAQHighlights() {
+  if (map.getLayer('iaq-points')) {
+    map.setFilter('iaq-points', null);
+    map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+  }
+  if (map.getLayer('iaq-highlighted'))
+    map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
+  if (map.getSource('iaq-street-line-source'))
+    map.getSource('iaq-street-line-source').setData({ type: 'FeatureCollection', features: [] });
+  setLayerVisibility('iaq_highlights', false);
+  currentIAQFilter = null;
+  _restoreContactLayers();
+}
+
+function filterContactByStatus(statuses) {
+  if (!map.getLayer('survey-points')) return;
+  currentContactFilter = statuses && statuses.length ? statuses.join(',') : null;
+  if (!statuses || !statuses.length) {
+    map.setFilter('survey-points', null);
+  } else {
+    map.setFilter('survey-points', ['in', ['get', 'status'], ['literal', statuses]]);
+  }
+  setLayerVisibility('contact_survey', true);
+}
+
+function getCurrentMapState() {
+  const checks = {
+    iaq_points:     'layer-iaq',
+    contact_survey: 'layer-points',
+    parcels:        'layer-parcels',
+    clusters:       'layer-clusters',
+    heatmap:        'layer-heatmap',
+    labels:         'layer-labels',
+    '3d':           'layer-3d',
+  };
+  const on  = Object.entries(checks).filter(([, id]) => document.getElementById(id)?.checked).map(([k]) => k);
+  const off = Object.entries(checks).filter(([, id]) => !document.getElementById(id)?.checked).map(([k]) => k);
+  return `ON:${on.join(',') || 'none'} OFF:${off.join(',') || 'none'} iaq_filter:${currentIAQFilter || 'none'} contact_filter:${currentContactFilter || 'none'} zoom:${Math.round((map?.getZoom() || 14) * 10) / 10} iaq_loaded:${!!(iaqData?.features?.length)}`;
+}
+
+// ── Chat ─────────────────────────────────────────────────────────────────────
+function initChat() {
+  const chatBtn  = document.getElementById('chat-btn');
+  const panel    = document.getElementById('chat-panel');
+  const closeBtn = document.getElementById('chat-close');
+  const input    = document.getElementById('chat-input');
+  const sendBtn  = document.getElementById('chat-send');
+  if (!chatBtn) return;
+
+  chatBtn.addEventListener('click', () => {
+    panel.classList.toggle('open');
+    if (panel.classList.contains('open')) {
+      input.focus();
+      setTimeout(() => map.resize(), 350);
+    } else {
+      setTimeout(() => map.resize(), 350);
+    }
+  });
+
+  closeBtn.addEventListener('click', () => {
+    panel.classList.remove('open');
+    setTimeout(() => map.resize(), 350);
+  });
+
+  sendBtn.addEventListener('click', sendChatMessage);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  });
+
+  // Auto-resize textarea
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 90) + 'px';
+  });
+
+  // Suggestion chips
+  document.querySelectorAll('.chat-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      input.value = chip.dataset.q;
+      sendChatMessage();
+    });
+  });
+}
+
+let chatInFlight = false;
+async function sendChatMessage() {
+  if (chatInFlight) return;   // guard against double-submit (Enter + click, rapid Enter, etc.)
+  const input   = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send');
+  const message = input.value.trim();
+  if (!message) return;
+
+  chatInFlight = true;
+  input.value = '';
+  input.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  appendChatBubble('user', message);
+  const typingId = appendTyping();
+  chatHistory.push({ role: 'user', content: message });
+
+  try {
+    const res  = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, history: chatHistory.slice(-8), map_state: getCurrentMapState() }),
+    });
+    const data = await res.json();
+    removeTyping(typingId);
+
+    const { text, map_actions, model_used } = data;
+
+    // Update header badge with the model that answered
+    if (model_used) {
+      const badge = document.getElementById('model-badge');
+      if (badge) {
+        badge.textContent = model_used;
+        // Color: green for primary, orange for fallbacks
+        const isPrimary = model_used.includes('70B') || model_used.includes('70b');
+        badge.style.background = isPrimary
+          ? 'rgba(16,185,129,.15)' : 'rgba(249,115,22,.15)';
+        badge.style.color = isPrimary ? 'var(--green)' : 'var(--orange)';
+      }
+    }
+
+    if (map_actions && map_actions.length) executeMapActions(map_actions);
+    appendChatBubble('assistant', text, map_actions);
+    chatHistory.push({ role: 'assistant', content: text });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-16);
+  } catch (e) {
+    removeTyping(typingId);
+    appendChatBubble('assistant', 'Sorry, I encountered an error. Please try again.');
+  } finally {
+    chatInFlight = false;
+    sendBtn.disabled = false;
+    document.getElementById('chat-input').focus();
+  }
+}
+
+function appendChatBubble(role, text, mapActions) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `chat-bubble ${role}`;
+
+  if (role === 'assistant') {
+    const followupMatch = text ? text.match(/💡\s*Follow-up:\s*(.+)$/m) : null;
+    const cleanText = text ? text.replace(/💡\s*Follow-up:\s*.+$/m, '').trim() : '...';
+    div.innerHTML = renderMarkdown(cleanText);
+
+    if (mapActions && mapActions.length) {
+      const tag = document.createElement('div');
+      tag.className = 'map-tag';
+      tag.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg> Map updated`;
+      div.appendChild(tag);
+    }
+
+    if (followupMatch) {
+      const fu = document.createElement('div');
+      fu.className = 'chat-followup';
+      fu.textContent = '💡 ' + followupMatch[1];
+      fu.addEventListener('click', () => {
+        document.getElementById('chat-input').value = followupMatch[1];
+        sendChatMessage();
+      });
+      div.appendChild(fu);
+    }
+  } else {
+    div.textContent = text;
+  }
+
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function appendTyping() {
+  const container = document.getElementById('chat-messages');
+  const id  = 'typing-' + Date.now();
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'chat-typing';
+  div.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+
+function removeTyping(id) {
+  document.getElementById(id)?.remove();
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = text
+    // Tables (header | divider | rows)
+    .replace(/^\|(.+)\|\s*\n\|[-| :]+\|\s*\n((?:\|.+\|\s*\n?)*)/gm, (_m, header, rows) => {
+      const ths = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
+      const trs = rows.trim().split('\n').map(row => {
+        const tds = row.split('|').filter(c => c !== '').map(c => `<td>${c.trim()}</td>`).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+    })
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Bullet items → collect into ul in a second pass
+    .replace(/^[•\-\*] (.+)$/gm, '<li>$1</li>');
+
+  // Wrap consecutive <li> into <ul>
+  html = html.replace(/(<li>.*?<\/li>\n?)+/gs, m => `<ul>${m}</ul>`);
+
+  // Paragraphs
+  html = html
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+
+  return `<p>${html}</p>`.replace(/<p>(\s*<table>)/g, '$1').replace(/<\/table>\s*<\/p>/g, '</table>');
+}
+
+// ── Panel resize handles ─────────────────────────────────────────────────────
+function makeDraggable(handle, onDrag, axis) {
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    let prevX = e.clientX, prevY = e.clientY;
+    handle.classList.add('dragging');
+    document.body.style.cursor = axis === 'ew' ? 'ew-resize' : 'ns-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = e2 => {
+      onDrag(e2.clientX - prevX, e2.clientY - prevY);
+      prevX = e2.clientX;
+      prevY = e2.clientY;
+    };
+    const onUp = () => {
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (map) map.resize();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+function initResizeHandles() {
+  // Sidebar: drag right edge — wider/narrower
+  const sidebarEl = document.getElementById('sidebar');
+  makeDraggable(document.getElementById('sidebar-resize'), (dx) => {
+    if (sidebarEl.classList.contains('collapsed')) return;
+    panelSizes.sidebar = Math.max(160, Math.min(520, sidebarEl.offsetWidth + dx));
+    sidebarEl.style.width = panelSizes.sidebar + 'px';
+  }, 'ew');
+
+  // Analysis panel: drag top edge — taller/shorter
+  const analysisEl = document.getElementById('analysis-panel');
+  makeDraggable(document.getElementById('analysis-resize'), (_dx, dy) => {
+    if (!analysisEl.classList.contains('open')) return;
+    panelSizes.analysis = Math.max(80, Math.min(Math.round(window.innerHeight * 0.75), analysisEl.offsetHeight - dy));
+    analysisEl.style.transition = 'none';
+    analysisEl.style.height = panelSizes.analysis + 'px';
+  }, 'ns');
+
+  // Chat panel: drag left edge — wider/narrower
+  const chatEl = document.getElementById('chat-panel');
+  makeDraggable(document.getElementById('chat-resize'), (dx) => {
+    panelSizes.chat = Math.max(240, Math.min(700, chatEl.offsetWidth - dx));
+    chatEl.style.width = panelSizes.chat + 'px';
+  }, 'ew');
+}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setupUI();
   initMap();
+  initResizeHandles();
 });
