@@ -272,6 +272,21 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 .chat-send:hover{background:var(--accent-h)}
 .chat-send:disabled{opacity:.45;cursor:not-allowed}
 
+/* ── Upload step sequencing ────────────────────────────────────────────── */
+.upload-step-label{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.step-badge{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.step-badge.done{background:var(--green)}
+.step-badge.locked{background:var(--muted)}
+.step-label-text{font-size:12px;font-weight:600;color:var(--text2)}
+.step-status-tag{margin-left:auto;font-size:10px;font-weight:600;padding:2px 8px;border-radius:8px}
+.step-status-tag.waiting{background:rgba(100,116,139,.15);color:var(--muted)}
+.step-status-tag.done{background:rgba(16,185,129,.12);color:var(--green)}
+.step-divider{display:flex;align-items:center;gap:8px;margin:4px 0;padding:0 2px}
+.step-divider-line{flex:1;height:1px;background:var(--border)}
+.step-divider-text{font-size:10px;color:var(--muted);white-space:nowrap}
+.upload-zone.locked{position:relative;pointer-events:none;opacity:.5}
+.upload-zone.locked::after{content:'Complete Step 1 first';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text2);background:rgba(11,15,25,.55);border-radius:var(--r);border:1px dashed var(--muted)}
+
 /* ── Panel resize handles ──────────────────────────────────────────────── */
 .resize-h{background:var(--border);transition:background .2s;flex-shrink:0;position:relative}
 .resize-h:hover,.resize-h.dragging{background:var(--accent)}
@@ -689,19 +704,41 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       </button>
     </div>
     <div class="modal-body">
+
+      <!-- Step 1 -->
+      <div class="upload-step-label">
+        <div class="step-badge" id="step1-badge">1</div>
+        <span class="step-label-text">Community Survey Contact Data</span>
+        <span class="step-status-tag waiting" id="step1-tag">Required first</span>
+      </div>
       <div class="upload-zone" id="upload-survey" data-endpoint="/api/upload/survey" data-accept=".xlsx,.xls,.csv">
         <h4>Survey Contact Data</h4>
         <p>Excel or CSV with Address and contact attempt columns</p>
         <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag file here</p>
         <input type="file" accept=".xlsx,.xls,.csv">
       </div>
-      <div class="upload-zone" id="upload-iaq" data-endpoint="/api/upload/iaq" data-accept=".csv">
+
+      <!-- Step divider -->
+      <div class="step-divider">
+        <div class="step-divider-line"></div>
+        <span class="step-divider-text">then upload</span>
+        <div class="step-divider-line"></div>
+      </div>
+
+      <!-- Step 2 (locked until Step 1 done) -->
+      <div class="upload-step-label">
+        <div class="step-badge locked" id="step2-badge">2</div>
+        <span class="step-label-text">Keystone Heights Survey (Qualtrics)</span>
+        <span class="step-status-tag waiting" id="step2-tag">Waiting for Step 1</span>
+      </div>
+      <div class="upload-zone locked" id="upload-iaq" data-endpoint="/api/upload/iaq" data-accept=".csv">
         <h4>Keystone Heights Survey <span style="font-size:11px;font-weight:400;color:var(--muted)">(Qualtrics CSV)</span></h4>
         <p>Qualtrics CSV export — IAQ, health symptoms, housing, GPS coordinates</p>
         <p style="margin-top:6px;font-size:11px;color:var(--accent)">Click or drag CSV file here</p>
         <input type="file" accept=".csv">
       </div>
-      <div style="padding:12px 14px;border-radius:var(--r);background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.1);font-size:12px;color:var(--text2)">
+
+      <div style="margin-top:12px;padding:12px 14px;border-radius:var(--r);background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.1);font-size:12px;color:var(--text2)">
         <span style="color:var(--accent);font-weight:600">ℹ Parcel data</span> is loaded automatically from the pre-processed FL DOR cadastral file on server startup — no upload required.
       </div>
     </div>

@@ -1303,6 +1303,14 @@ async def upload_iaq(file: UploadFile = File(...)):
     """Upload and process the Keystone Heights Survey Qualtrics CSV (in-memory only)."""
     global iaq_data, iaq_analysis, street_stats, iaq_validation
 
+    # Enforce upload order: community contact data must be loaded first so the
+    # IAQ processor can cross-reference geocoded addresses for validation.
+    if not survey_data or not survey_data.get("features"):
+        raise HTTPException(
+            400,
+            "Upload the Community Survey Contact Data (Step 1) before uploading the Qualtrics CSV."
+        )
+
     suf = Path(file.filename).suffix.lower()
     if suf not in (".csv",):
         raise HTTPException(400, "Upload a CSV file exported from Qualtrics")

@@ -1024,9 +1024,14 @@ function setupUI() {
     }
   });
 
-  // Import modal
-  document.getElementById('btn-import').addEventListener('click', () => {
+  // Import modal — check survey status so Step 2 unlocks if data already loaded
+  document.getElementById('btn-import').addEventListener('click', async () => {
     document.getElementById('import-modal').classList.add('show');
+    try {
+      const res = await fetch('/api/survey-points');
+      const data = await res.json();
+      if (data.features?.length > 0) { markStep1Done(); unlockIAQStep(); }
+    } catch {}
   });
   document.getElementById('modal-close').addEventListener('click', () => {
     document.getElementById('import-modal').classList.remove('show');
@@ -1319,18 +1324,41 @@ function setupUploadZones() {
     const input = zone.querySelector('input[type="file"]');
     const endpoint = zone.dataset.endpoint;
 
-    zone.addEventListener('click', () => input.click());
-    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('click', () => {
+      if (zone.classList.contains('locked')) return;
+      input.click();
+    });
+    zone.addEventListener('dragover', (e) => {
+      if (zone.classList.contains('locked')) return;
+      e.preventDefault(); zone.classList.add('dragover');
+    });
     zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
     zone.addEventListener('drop', (e) => {
       e.preventDefault();
       zone.classList.remove('dragover');
+      if (zone.classList.contains('locked')) return;
       if (e.dataTransfer.files.length) uploadFile(zone, endpoint, e.dataTransfer.files[0]);
     });
     input.addEventListener('change', () => {
       if (input.files.length) uploadFile(zone, endpoint, input.files[0]);
     });
   });
+}
+
+function unlockIAQStep() {
+  const zone = document.getElementById('upload-iaq');
+  zone?.classList.remove('locked');
+  const badge = document.getElementById('step2-badge');
+  if (badge) { badge.classList.remove('locked'); badge.classList.add('done'); }
+  const tag = document.getElementById('step2-tag');
+  if (tag) { tag.textContent = 'Ready'; tag.className = 'step-status-tag done'; }
+}
+
+function markStep1Done() {
+  const badge = document.getElementById('step1-badge');
+  if (badge) badge.classList.add('done');
+  const tag = document.getElementById('step1-tag');
+  if (tag) { tag.textContent = 'Loaded'; tag.className = 'step-status-tag done'; }
 }
 
 // ── Analysis overlay management ─────────────────────────────────────────────
@@ -1733,6 +1761,10 @@ async function uploadFile(zone, endpoint, file) {
         if (toggle) toggle.checked = true;
         fitBounds();
       }
+
+      // Mark Step 1 done and unlock the IAQ upload zone (Step 2)
+      markStep1Done();
+      unlockIAQStep();
 
       // Auto-close the modal after a short pause
       await new Promise(r => setTimeout(r, 1200));
