@@ -1042,13 +1042,14 @@ def infer_actions_from_query(query: str) -> list:
 
 # ── Original data processing ───────────────────────────────────────────────────
 
-def process_survey():
-    if CACHE_PTS.exists():
-        log.info("Survey points: loaded from cache")
-        return json.loads(CACHE_PTS.read_text())
+def process_survey(survey_file_path=None):
+    """Geocode survey addresses from the given file path.
+    Never reads or writes cache — data stays in memory only."""
+    file_to_read = Path(survey_file_path) if survey_file_path else SURVEY_FILE
+    suf = file_to_read.suffix.lower()
 
-    log.info("Geocoding survey addresses (first run, ~2 min)...")
-    df = pd.read_excel(SURVEY_FILE)
+    log.info(f"Geocoding survey addresses from {file_to_read.name}...")
+    df = pd.read_csv(file_to_read) if suf == ".csv" else pd.read_excel(file_to_read)
     features, fails = [], []
 
     for i, row in df.iterrows():
@@ -1085,8 +1086,7 @@ def process_survey():
         time.sleep(0.25)
 
     gj = {"type": "FeatureCollection", "features": features}
-    CACHE_PTS.write_text(json.dumps(gj))
-    log.info(f"Geocoded {len(features)}/{len(df)} ({len(fails)} failed)")
+    log.info(f"Geocoded {len(features)}/{len(df)} ({len(fails)} failed) — kept in memory only")
     return gj
 
 
@@ -1232,39 +1232,27 @@ async def lifespan(application):
     log.info("  KeyStone Field Survey Dashboard")
     log.info("=" * 50)
 
-    # Parcels — always loaded from cache (always present)
-    parcels_data = process_parcels()
-
-    # Survey points — restore from geocoded cache if available, else start empty
-    if CACHE_PTS.exists():
+    # Wipe any data files left on disk from a previous session — privacy requirement.
+    # Sensitive survey/IAQ data must never persist across server restarts.
+    for stale in [CACHE_PTS, CACHE_IAQ, CACHE_RES]:
+        if stale.exists():
+            try:
+                stale.unlink()
+                log.info(f"Privacy cleanup: removed {stale.name}")
+            except Exception as e:
+                log.warning(f"Could not remove {stale.name}: {e}")
+    # Also wipe any uploaded temp files
+    for tmp in OUT.glob("uploaded_*"):
         try:
-            survey_data = json.loads(CACHE_PTS.read_text())
-            n = len(survey_data.get("features", []))
-            log.info(f"Survey points: restored {n} features from cache")
-        except Exception as e:
-            log.warning(f"Survey cache load failed: {e}")
-            survey_data = {"type": "FeatureCollection", "features": []}
-    else:
-        survey_data = {"type": "FeatureCollection", "features": []}
-        log.info("Survey points: no cache — upload via dashboard to populate")
+            tmp.unlink()
+        except Exception:
+            pass
 
+    # Always start with empty survey and IAQ data — upload required each session
+    survey_data = {"type": "FeatureCollection", "features": []}
+    parcels_data = process_parcels()   # parcels are base map context, not respondent data
     analysis = compute_analysis(survey_data, parcels_data)
-
-    # IAQ data — restore from cache if available
-    if CACHE_IAQ.exists():
-        try:
-            cached = json.loads(CACHE_IAQ.read_text())
-            iaq_data      = cached.get("iaq_data", {})
-            iaq_analysis  = cached.get("iaq_analysis", {})
-            street_stats  = cached.get("street_stats", {})
-            iaq_validation = cached.get("iaq_validation", {})
-            n_iaq = len(iaq_data.get("features", []))
-            log.info(f"IAQ data: restored {n_iaq} features from cache")
-        except Exception as e:
-            log.warning(f"IAQ cache load failed: {e}")
-    else:
-        log.info("IAQ data: no cache — upload Qualtrics CSV to populate")
-
+    log.info("Survey and IAQ data: empty — upload required each session")
     log.info("-" * 50)
     log.info("  Ready! Open http://localhost:8050")
     log.info("-" * 50)
@@ -1352,18 +1340,7 @@ async def upload_iaq(file: UploadFile = File(...)):
 
     n = len(iaq_data.get("features", []))
     n_streets = len([s for s, d in street_stats.items() if not d.get("insufficient_data")])
-    log.info(f"IAQ data ready: {n} points, {n_streets} streets with sufficient data")
-
-    try:
-        CACHE_IAQ.write_text(json.dumps({
-            "iaq_data":       iaq_data,
-            "iaq_analysis":   iaq_analysis,
-            "street_stats":   street_stats,
-            "iaq_validation": iaq_validation,
-        }))
-        log.info("IAQ cache saved to disk")
-    except Exception as e:
-        log.warning(f"IAQ cache write failed: {e}")
+    log.info(f"IAQ data ready: {n} points, {n_streets} streets — kept in memory only")
 
     return {
         "status": "ok",
@@ -1811,34 +1788,30 @@ async def upload_survey(file: UploadFile = File(...)):
     suf = Path(file.filename).suffix
     if suf not in (".xlsx", ".xls", ".csv"):
         raise HTTPException(400, "Upload Excel or CSV")
+    # Write to a short-lived temp file (pandas needs a file path, not bytes)
     tmp = OUT / f"uploaded_survey{suf}"
-    with open(tmp, "wb") as f:
-        f.write(await file.read())
-    # Copy to data/ — create dir first in case it doesn't exist on the host
-    DATA.mkdir(exist_ok=True)
-    dest = DATA / file.filename
-    shutil.copy2(tmp, dest)
-    if CACHE_PTS.exists():
-        CACHE_PTS.unlink()
-    # Run blocking geocoding in a thread so the event loop stays responsive
-    # (prevents Render/NGINX from returning a 502/504 on long surveys)
-    loop = asyncio.get_event_loop()
-    survey_data = await loop.run_in_executor(None, process_survey)
-    analysis = compute_analysis(survey_data, parcels_data)
-    return {"status": "ok", "points": len(survey_data.get("features", []))}
+    try:
+        with open(tmp, "wb") as f:
+            f.write(await file.read())
+        # Run blocking geocoding in a thread — keeps event loop responsive
+        loop = asyncio.get_event_loop()
+        survey_data = await loop.run_in_executor(None, process_survey, tmp)
+        analysis = compute_analysis(survey_data, parcels_data)
+        return {"status": "ok", "points": len(survey_data.get("features", []))}
+    finally:
+        # Always delete the temp file immediately — never leave data on disk
+        tmp.unlink(missing_ok=True)
 
 
 @app.post("/api/upload/results")
 async def upload_results(file: UploadFile = File(...)):
     global survey_results
     suf = Path(file.filename).suffix
-    tmp = OUT / f"survey_results{suf}"
-    with open(tmp, "wb") as f:
-        f.write(await file.read())
-    df = pd.read_csv(tmp) if suf == ".csv" else pd.read_excel(tmp)
+    file_bytes = await file.read()
+    # Process entirely in memory — no disk write
+    df = pd.read_csv(io.BytesIO(file_bytes)) if suf == ".csv" else pd.read_excel(io.BytesIO(file_bytes))
     survey_results = {"columns": list(df.columns), "rows": df.fillna("").to_dict("records"),
                       "count": len(df)}
-    CACHE_RES.write_text(json.dumps(survey_results))
     return {"status": "ok", "rows": len(df), "columns": list(df.columns)}
 
 
