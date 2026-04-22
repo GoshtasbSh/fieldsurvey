@@ -20,6 +20,7 @@ import asyncio
 import shutil
 import logging
 import difflib
+from datetime import date as _date
 from pathlib import Path
 from collections import defaultdict
 from math import radians, sin, cos, sqrt, atan2
@@ -27,6 +28,8 @@ from math import radians, sin, cos, sqrt, atan2
 import pandas as pd
 import geopandas as gpd
 import shapely
+from shapely.geometry import shape as _shp_shape, Point as _ShapelyPoint
+from shapely.strtree import STRtree as _STRtree
 import requests
 from contextlib import asynccontextmanager
 try:
@@ -40,12 +43,22 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+# ── Supabase client (service role — bypasses RLS) ─────────────────────────────
+try:
+    from supabase import create_client as _sb_create_client
+    _SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+    _SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    sb = _sb_create_client(_SUPABASE_URL, _SUPABASE_KEY) if _SUPABASE_URL and _SUPABASE_KEY else None
+except Exception:
+    sb = None
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE = Path(__file__).parent
 DATA = BASE / "data"
 OUT = BASE / "output"
 STATIC = BASE / "static"
 SURVEY_FILE = DATA / "Community Survey Contact Data .xlsx"
+IAQ_FILE    = DATA / "Keystone Heights Survey - V1_April 15, 2026_13.25.csv"
 GDB_FILE = DATA / "Parcels.gdb"
 CACHE_PTS = OUT / "survey_geocoded.geojson"
 CACHE_PAR = OUT / "parcels_keystone.geojson"
@@ -215,6 +228,114 @@ def geocode(addr):
     except Exception as e:
         log.warning(f"  geocode fail: {e}")
     return None, None, None
+
+
+def _build_parcel_index(parcel_geojson: dict) -> None:
+    """
+    Build address lookup dict and STRtree from parcel polygons.
+    Uses representative_point() which is guaranteed to lie inside each polygon,
+    so every geocoded survey point lands inside the actual parcel, not on the road.
+    Called once after parcels load and again if the parcel layer is re-uploaded.
+    """
+    global _parcel_addr_idx, _parcel_by_house, _parcel_strtree, _parcel_geoms_list
+    features = parcel_geojson.get('features', [])
+    if not features:
+        log.warning("Parcel index: no features — parcel-snapped geocoding disabled")
+        return
+    t0 = time.time()
+    lookup: dict = {}
+    by_house: dict = {}
+    geoms: list = []
+    for f in features:
+        addr = f['properties'].get('address', '')
+        if not addr:
+            continue
+        parts = _parse_addr_parts(str(addr))
+        if not parts:
+            continue
+        house_num, s_core = parts
+        try:
+            geom = _shp_shape(f['geometry'])
+            if not geom.is_valid:
+                geom = geom.buffer(0)
+            pt = geom.representative_point()   # always inside the polygon
+            lon, lat = round(pt.x, 6), round(pt.y, 6)
+        except Exception:
+            continue
+        key = (house_num, s_core)
+        lookup[key] = (lon, lat)
+        by_house.setdefault(house_num, []).append((s_core, lon, lat))
+        geoms.append((geom, lon, lat))
+    _parcel_addr_idx = lookup
+    _parcel_by_house = by_house
+    if geoms:
+        _parcel_strtree = _STRtree([g[0] for g in geoms])
+        _parcel_geoms_list = geoms
+    log.info(f"Parcel index: {len(lookup)} addressable parcels in {time.time()-t0:.1f}s")
+
+
+def _snap_to_parcel(lon: float, lat: float, max_dist_m: float = 150) -> tuple | None:
+    """
+    Find the nearest parcel's representative_point within max_dist_m metres.
+    Returns (lon, lat) inside the parcel, or None if index is empty / no match.
+    Used to pull Census road-centerline points into the actual property interior.
+    """
+    if _parcel_strtree is None or not _parcel_geoms_list:
+        return None
+    search_r = max_dist_m / 111_320   # rough degrees (1° ≈ 111 km)
+    try:
+        idxs = _parcel_strtree.query(_ShapelyPoint(lon, lat).buffer(search_r))
+    except Exception:
+        return None
+    best_dist, best = float('inf'), None
+    for idx in idxs:
+        _, c_lon, c_lat = _parcel_geoms_list[int(idx)]
+        d = _haversine_m(lat, lon, c_lat, c_lon)
+        if d < best_dist:
+            best_dist = d
+            best = (c_lon, c_lat)
+    return best if best_dist <= max_dist_m else None
+
+
+def _parcel_geocode(addr: str) -> tuple:
+    """
+    Parcel-first geocoding — returns (lon, lat, matched_addr, source).
+
+    Priority:
+    1. Exact  parcel address match  → representative_point (inside property)
+    2. Fuzzy  parcel match (same house#, ≥0.75 street sim) → inside property
+    3. Census road geocoding → spatial snap to nearest parcel within 150 m
+    4. Census result only   (source='geocoded', point may be on road)
+    5. Total failure        (None, None, None, 'failed')
+
+    The caller must sleep 0.25 s after a Census call (sources 3 or 4)
+    to respect rate limits.  Parcel-matched sources (1, 2) never call Census.
+    """
+    parts = _parse_addr_parts(addr)
+    if parts:
+        house_num, s_core = parts
+        # 1. Exact parcel match
+        if (house_num, s_core) in _parcel_addr_idx:
+            lon, lat = _parcel_addr_idx[(house_num, s_core)]
+            return lon, lat, addr, 'parcel_exact'
+        # 2. Fuzzy match — only iterate entries with the same house number
+        candidates = _parcel_by_house.get(house_num, [])
+        best_score, best_pos = 0.0, None
+        for c_core, c_lon, c_lat in candidates:
+            sc = difflib.SequenceMatcher(None, s_core, c_core).ratio()
+            if sc > best_score:
+                best_score = sc
+                best_pos = (c_lon, c_lat)
+        if best_score >= 0.75 and best_pos:
+            return best_pos[0], best_pos[1], addr, 'parcel_fuzzy'
+    # 3 & 4. Census geocoding (caller must sleep 0.25 s after)
+    lon, lat, matched = geocode(addr)
+    if lon is not None:
+        snapped = _snap_to_parcel(lon, lat)
+        if snapped:
+            return snapped[0], snapped[1], matched, 'parcel_snapped'
+        return lon, lat, matched, 'geocoded'
+    return None, None, None, 'failed'
 
 
 # ── IAQ score helpers ──────────────────────────────────────────────────────────
@@ -555,6 +676,11 @@ def process_iaq_survey(csv_bytes: bytes):
                 KH_LON_MIN <= float(lon_q) <= KH_LON_MAX):
             # Tier 1: valid in-field GPS from Qualtrics
             coords = [round(float(lon_q), 6), round(float(lat_q), 6)]
+            # Phone GPS may be on the road — snap into the parcel interior (≤80 m)
+            _gps_snap = _snap_to_parcel(float(lon_q), float(lat_q), max_dist_m=80)
+            if _gps_snap:
+                coords = [round(_gps_snap[0], 6), round(_gps_snap[1], 6)]
+                coord_source = 'gps_snapped'
         else:
             q212_str = str(q212).strip()
             if q212_str and q212_str.lower() not in ('', 'ttt', 'nan'):
@@ -570,15 +696,16 @@ def process_iaq_survey(csv_bytes: bytes):
                     street_name = _extract_street_name(matched_addr) or street_name
                     log.debug(f"  addr match ({match_type}): {q212_str!r} → {matched_addr!r}")
                 else:
-                    # Tier 3: Census geocoding for anything that couldn't be matched
+                    # Tier 3: parcel-first geocoding (Census + snap to parcel interior)
                     geocode_fallbacks += 1
-                    coord_source = 'geocoded'
-                    lng_g, lat_g, matched = geocode(q212_str)
+                    lng_g, lat_g, matched, _gsrc = _parcel_geocode(q212_str)
+                    coord_source = _gsrc
                     if lng_g is not None:
                         coords = [round(float(lng_g), 6), round(float(lat_g), 6)]
                         if street_name == 'Unknown':
                             street_name = _extract_street_name(matched or '') or 'Unknown'
-                        time.sleep(0.25)
+                        if _gsrc in ('geocoded', 'parcel_snapped'):
+                            time.sleep(0.25)
 
         if coords is None:
             geocode_fails += 1
@@ -1067,7 +1194,9 @@ def process_survey(survey_file_path=None):
 
         street = _extract_street_name(addr) or addr
         log.info(f"  [{i + 1}/{len(df)}] {addr}")
-        lng, lat, matched = geocode(addr)
+        lng, lat, matched, geo_src = _parcel_geocode(addr)
+        if geo_src in ('geocoded', 'parcel_snapped'):
+            time.sleep(0.25)   # rate-limit Census API; parcel matches need no sleep
 
         if lng and lat:
             features.append({
@@ -1078,12 +1207,12 @@ def process_survey(survey_file_path=None):
                     "status_detail": detail, "second_attempt": second,
                     "date": dt, "notes": notes, "street_name": street,
                     "matched_address": matched or "",
+                    "coord_source": geo_src,
                     "color": STATUS.get(status, "#9ca3af"),
                 },
             })
         else:
             fails.append(addr)
-        time.sleep(0.25)
 
     gj = {"type": "FeatureCollection", "features": features}
     log.info(f"Geocoded {len(features)}/{len(df)} ({len(fails)} failed) — kept in memory only")
@@ -1224,6 +1353,122 @@ iaq_analysis:    dict = {}
 street_stats:    dict = {}
 iaq_validation:  dict = {}
 
+# ── Parcel spatial index (built once at startup) ───────────────────────────────
+_parcel_addr_idx:   dict = {}   # (house_num, street_core) → (lon, lat)
+_parcel_by_house:   dict = {}   # house_num → [(street_core, lon, lat)]
+_parcel_strtree          = None  # STRtree for spatial snap
+_parcel_geoms_list: list = []    # [(geometry, lon, lat)] — parallel to strtree
+
+
+def _sb_save(data_type: str, payload: dict) -> None:
+    """Upsert processed GeoJSON/analysis into Supabase for cross-restart persistence."""
+    if not sb:
+        return
+    try:
+        sb.table('keystone_dashboard_data').upsert(
+            {'data_type': data_type, 'payload': payload}
+        ).execute()
+        n = len(payload.get('features', [])) if 'features' in payload else len(payload.get('geojson', {}).get('features', []))
+        log.info(f"Supabase: saved {data_type} ({n} features)")
+    except Exception as e:
+        log.warning(f"Supabase save {data_type}: {e}")
+
+
+def _sb_load(data_type: str) -> dict | None:
+    """Fetch persisted dashboard data from Supabase. Returns None if absent."""
+    if not sb:
+        return None
+    try:
+        r = sb.table('keystone_dashboard_data').select('payload').eq('data_type', data_type).execute()
+        return r.data[0]['payload'] if r.data else None
+    except Exception as e:
+        log.warning(f"Supabase load {data_type}: {e}")
+        return None
+
+
+def _sb_save_version(data_type: str, payload: dict, label: str, n_points: int = 0) -> int | None:
+    """Append a named snapshot to the versions history table. Returns new row id."""
+    if not sb:
+        return None
+    try:
+        r = sb.table('keystone_analysis_versions').insert({
+            'data_type': data_type,
+            'payload': payload,
+            'label': label,
+            'n_points': n_points,
+        }).execute()
+        return r.data[0]['id'] if r.data else None
+    except Exception as e:
+        log.warning(f"Supabase save_version {data_type}: {e}")
+        return None
+
+
+def _sb_list_versions(data_type: str) -> list:
+    """List version snapshots newest-first, without payload (lightweight)."""
+    if not sb:
+        return []
+    try:
+        r = (sb.table('keystone_analysis_versions')
+             .select('id,label,n_points,created_at')
+             .eq('data_type', data_type)
+             .order('created_at', desc=True)
+             .limit(30)
+             .execute())
+        return r.data or []
+    except Exception as e:
+        log.warning(f"Supabase list_versions {data_type}: {e}")
+        return []
+
+
+def _sb_load_version_by_id(version_id: int) -> dict | None:
+    """Fetch a single version's full payload."""
+    if not sb:
+        return None
+    try:
+        r = (sb.table('keystone_analysis_versions')
+             .select('id,label,created_at,data_type,payload')
+             .eq('id', version_id)
+             .execute())
+        return r.data[0] if r.data else None
+    except Exception as e:
+        log.warning(f"Supabase load_version {version_id}: {e}")
+        return None
+
+
+def _field_pts_to_geojson_features(rows: list) -> list:
+    """Convert field_survey_points DB rows to GeoJSON features for merging."""
+    features = []
+    for r in rows:
+        lat_v, lon_v = r.get('lat'), r.get('lon')
+        if lat_v is None or lon_v is None:
+            continue
+        lat_f, lon_f = float(lat_v), float(lon_v)
+        status = r.get('status', 'Unknown')
+        dt_str = (r.get('collected_at') or '')[:10]
+        snapped = _snap_to_parcel(lon_f, lat_f, max_dist_m=80)
+        if snapped:
+            lon_f, lat_f = snapped
+        features.append({
+            'type': 'Feature',
+            'geometry': {'type': 'Point', 'coordinates': [round(lon_f, 6), round(lat_f, 6)]},
+            'properties': {
+                'id': str(r.get('id', '')),
+                'address': f"Field Visit — {dt_str}",
+                'status': status,
+                'status_detail': r.get('notes', ''),
+                'second_attempt': '',
+                'date': dt_str,
+                'notes': r.get('notes', ''),
+                'street_name': _extract_street_name(r.get('notes', '')) or 'Field Survey',
+                'matched_address': '',
+                'coord_source': 'gps_snapped' if snapped else 'gps',
+                'color': STATUS.get(status, '#9ca3af'),
+                'collector': r.get('collector_name', ''),
+                'is_field_point': True,
+            }
+        })
+    return features
+
 
 @asynccontextmanager
 async def lifespan(application):
@@ -1232,8 +1477,7 @@ async def lifespan(application):
     log.info("  KeyStone Field Survey Dashboard")
     log.info("=" * 50)
 
-    # Wipe any data files left on disk from a previous session — privacy requirement.
-    # Sensitive survey/IAQ data must never persist across server restarts.
+    # Wipe any stale disk files (sensitive data must not persist on the server filesystem)
     for stale in [CACHE_PTS, CACHE_IAQ, CACHE_RES]:
         if stale.exists():
             try:
@@ -1241,18 +1485,65 @@ async def lifespan(application):
                 log.info(f"Privacy cleanup: removed {stale.name}")
             except Exception as e:
                 log.warning(f"Could not remove {stale.name}: {e}")
-    # Also wipe any uploaded temp files
     for tmp in OUT.glob("uploaded_*"):
         try:
             tmp.unlink()
         except Exception:
             pass
 
-    # Always start with empty survey and IAQ data — upload required each session
+    # Load parcels (cached GeoJSON or fresh from GDB)
+    parcels_data = process_parcels()
+    # Build parcel spatial index in a thread (10–30 K geometries, ~2–10 s)
+    await asyncio.to_thread(_build_parcel_index, parcels_data)
+
+    # Try to restore survey & IAQ data from Supabase (persists across restarts)
     survey_data = {"type": "FeatureCollection", "features": []}
-    parcels_data = process_parcels()   # parcels are base map context, not respondent data
+    contact_stored = await asyncio.to_thread(_sb_load, 'community_contact')
+    if contact_stored and contact_stored.get('features'):
+        survey_data = contact_stored
+        log.info(f"Restored {len(survey_data['features'])} contact points from Supabase")
+    elif SURVEY_FILE.exists():
+        # First-ever run: auto-geocode the local Excel using parcel-based method
+        log.info(f"Auto-processing {SURVEY_FILE.name} with parcel geocoding (first run)...")
+        loop = asyncio.get_event_loop()
+        survey_data = await loop.run_in_executor(None, process_survey, SURVEY_FILE)
+        n = len(survey_data.get('features', []))
+        label = f"Initial Analysis — {n} contacts ({_date.today().isoformat()})"
+        await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
+        await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
+        log.info(f"Auto-processed and saved {n} contact points to Supabase as '{label}'")
+    else:
+        log.info("Community contact data: not found — upload required")
+
+    iaq_stored = await asyncio.to_thread(_sb_load, 'iaq_survey')
+    if iaq_stored:
+        iaq_data       = iaq_stored.get('geojson', {})
+        iaq_analysis   = iaq_stored.get('analysis', {})
+        street_stats   = iaq_stored.get('street_stats', {})
+        iaq_validation = iaq_stored.get('validation', {})
+        log.info(f"Restored {len(iaq_data.get('features', []))} IAQ points from Supabase")
+    elif IAQ_FILE.exists():
+        log.info(f"Auto-processing IAQ CSV: {IAQ_FILE.name}...")
+        try:
+            loop = asyncio.get_event_loop()
+            csv_bytes = IAQ_FILE.read_bytes()
+            result = await loop.run_in_executor(None, process_iaq_survey, csv_bytes)
+            iaq_data, iaq_analysis, street_stats, iaq_validation = result
+            n = len(iaq_data.get('features', []))
+            iaq_payload = {
+                'geojson': iaq_data, 'analysis': iaq_analysis,
+                'street_stats': street_stats, 'validation': iaq_validation,
+            }
+            label = f"Initial IAQ Analysis — {n} responses ({_date.today().isoformat()})"
+            await asyncio.to_thread(_sb_save, 'iaq_survey', iaq_payload)
+            await asyncio.to_thread(_sb_save_version, 'iaq_survey', iaq_payload, label, n)
+            log.info(f"Auto-processed and saved {n} IAQ points as '{label}'")
+        except Exception as e:
+            log.warning(f"Auto IAQ processing failed: {e}")
+    else:
+        log.info("IAQ survey data: not in Supabase — upload required")
+
     analysis = compute_analysis(survey_data, parcels_data)
-    log.info("Survey and IAQ data: empty — upload required each session")
     log.info("-" * 50)
     log.info("  Ready! Open http://localhost:8050")
     log.info("-" * 50)
@@ -1267,7 +1558,22 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 async def root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/field/login.html", status_code=302)
+
+
+@app.get("/dashboard")
+async def dashboard():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/config")
+async def api_config():
+    """Public client config (Supabase URL + anon key). Safe to expose; RLS guards writes."""
+    return JSONResponse({
+        "supabase_url": os.environ.get("SUPABASE_URL", ""),
+        "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
+    })
 
 
 @app.get("/api/survey-points")
@@ -1313,6 +1619,113 @@ async def api_iaq_analysis_ep():
     })
 
 
+@app.get("/api/versions")
+async def api_versions():
+    """List all analysis version snapshots (newest first, no payload)."""
+    contact_v = await asyncio.to_thread(_sb_list_versions, 'community_contact')
+    iaq_v     = await asyncio.to_thread(_sb_list_versions, 'iaq_survey')
+    return JSONResponse({'community_contact': contact_v, 'iaq_survey': iaq_v})
+
+
+@app.post("/api/versions/{version_id}/restore")
+async def api_restore_version(version_id: int):
+    """Load a historical snapshot and make it the active dataset."""
+    global survey_data, analysis, iaq_data, iaq_analysis, street_stats, iaq_validation
+    v = await asyncio.to_thread(_sb_load_version_by_id, version_id)
+    if not v:
+        raise HTTPException(404, "Version not found")
+    payload = v['payload']
+    if 'features' in payload:
+        survey_data = payload
+        analysis = compute_analysis(survey_data, parcels_data)
+        await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
+        return JSONResponse({"restored": True, "label": v['label'], "type": "community_contact",
+                             "points": len(survey_data.get('features', []))})
+    if 'geojson' in payload:
+        iaq_data       = payload.get('geojson', {})
+        iaq_analysis   = payload.get('analysis', {})
+        street_stats   = payload.get('street_stats', {})
+        iaq_validation = payload.get('validation', {})
+        await asyncio.to_thread(_sb_save, 'iaq_survey', payload)
+        return JSONResponse({"restored": True, "label": v['label'], "type": "iaq_survey",
+                             "points": len(iaq_data.get('features', []))})
+    raise HTTPException(400, "Unknown payload format")
+
+
+@app.post("/api/daily-refresh")
+async def daily_refresh():
+    """
+    Check for field_survey_points collected since the last analysis snapshot.
+    If any exist, merge them into the community contact dataset, re-run analysis,
+    and save a new version.  Designed to be called by a daily Supabase cron job.
+    """
+    global survey_data, analysis
+    if not sb:
+        return JSONResponse({"refreshed": False, "reason": "Supabase not configured"})
+
+    # Find timestamp of the most recent community_contact snapshot
+    versions = await asyncio.to_thread(
+        lambda: sb.table('keystone_analysis_versions')
+                  .select('created_at')
+                  .eq('data_type', 'community_contact')
+                  .order('created_at', desc=True)
+                  .limit(1)
+                  .execute()
+    )
+    last_at = versions.data[0]['created_at'] if versions.data else '2000-01-01T00:00:00Z'
+
+    # Fetch only field points collected AFTER the last snapshot
+    new_pts_result = await asyncio.to_thread(
+        lambda: sb.table('field_survey_points')
+                  .select('*')
+                  .gt('collected_at', last_at)
+                  .execute()
+    )
+    new_rows = new_pts_result.data or []
+    if not new_rows:
+        return JSONResponse({"refreshed": False,
+                             "reason": "No new field data since last analysis",
+                             "last_analysis": last_at})
+
+    new_features = _field_pts_to_geojson_features(new_rows)
+    merged = {
+        'type': 'FeatureCollection',
+        'features': list(survey_data.get('features', [])) + new_features,
+    }
+    today   = _date.today().isoformat()
+    n_total = len(merged['features'])
+    label   = f"Daily Update {today} — {len(new_rows)} new field visits ({n_total} total)"
+
+    survey_data = merged
+    analysis    = compute_analysis(survey_data, parcels_data)
+    await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
+    await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n_total)
+    log.info(f"Daily refresh: +{len(new_rows)} field points → {n_total} total → '{label}'")
+    return JSONResponse({"refreshed": True, "new_field_points": len(new_rows),
+                         "total_points": n_total, "label": label})
+
+
+@app.get("/api/analysis-meta")
+async def api_analysis_meta():
+    """Return the most-recent snapshot label + date for the header badge."""
+    contact_v = await asyncio.to_thread(_sb_list_versions, 'community_contact')
+    iaq_v     = await asyncio.to_thread(_sb_list_versions, 'iaq_survey')
+    return JSONResponse({
+        'contact': contact_v[0] if contact_v else None,
+        'iaq':     iaq_v[0]     if iaq_v     else None,
+    })
+
+
+@app.get("/api/community-contacts")
+async def api_community_contacts(filter: str = "all"):
+    """Return community contact GeoJSON; filter=today limits to today's date entries."""
+    features = (survey_data or {}).get('features', [])
+    if filter == "today":
+        today = _date.today().isoformat()
+        features = [f for f in features if f.get('properties', {}).get('date', '') == today]
+    return JSONResponse({"type": "FeatureCollection", "features": features, "total": len(features)})
+
+
 @app.post("/api/upload/iaq")
 async def upload_iaq(file: UploadFile = File(...)):
     """Upload and process the Keystone Heights Survey Qualtrics CSV (in-memory only)."""
@@ -1339,6 +1752,15 @@ async def upload_iaq(file: UploadFile = File(...)):
         raise HTTPException(400, f"Processing failed: {e}")
 
     n = len(iaq_data.get("features", []))
+    iaq_payload = {
+        'geojson':      iaq_data,
+        'analysis':     iaq_analysis,
+        'street_stats': street_stats,
+        'validation':   iaq_validation,
+    }
+    iaq_label = f"IAQ Upload {_date.today().isoformat()} — {n} responses"
+    await asyncio.to_thread(_sb_save, 'iaq_survey', iaq_payload)
+    await asyncio.to_thread(_sb_save_version, 'iaq_survey', iaq_payload, iaq_label, n)
     n_streets = len([s for s, d in street_stats.items() if not d.get("insufficient_data")])
     log.info(f"IAQ data ready: {n} points, {n_streets} streets — kept in memory only")
 
@@ -1797,7 +2219,11 @@ async def upload_survey(file: UploadFile = File(...)):
         loop = asyncio.get_event_loop()
         survey_data = await loop.run_in_executor(None, process_survey, tmp)
         analysis = compute_analysis(survey_data, parcels_data)
-        return {"status": "ok", "points": len(survey_data.get("features", []))}
+        n = len(survey_data.get("features", []))
+        label = f"Upload {_date.today().isoformat()} — {n} contacts"
+        await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
+        await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
+        return {"status": "ok", "points": n}
     finally:
         # Always delete the temp file immediately — never leave data on disk
         tmp.unlink(missing_ok=True)
@@ -1834,10 +2260,28 @@ async def upload_parcels(file: UploadFile = File(...)):
         txt = gdf.to_json()
         CACHE_PAR.write_text(txt)
         parcels_data = json.loads(txt)
+        await asyncio.to_thread(_build_parcel_index, parcels_data)
         analysis = compute_analysis(survey_data, parcels_data)
         return {"status": "ok", "parcels": len(gdf)}
     except Exception as e:
         raise HTTPException(400, str(e))
+
+
+FIELD_WEB = BASE / "keystone_field_web"
+
+
+@app.get("/field")
+@app.get("/field/")
+async def field_root():
+    return FileResponse(FIELD_WEB / "index.html")
+
+
+@app.get("/field/{path:path}")
+async def field_file(path: str):
+    target = FIELD_WEB / path
+    if target.exists() and target.is_file():
+        return FileResponse(target)
+    return FileResponse(FIELD_WEB / "index.html")
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")

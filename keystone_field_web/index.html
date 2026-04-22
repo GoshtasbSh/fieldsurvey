@@ -1,0 +1,2198 @@
+<!DOCTYPE html>
+<html data-theme="dark" lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>KeyStone Field</title>
+<link rel="manifest" href="manifest.json">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root,[data-theme="dark"]{
+  --topbar-h:56px;
+  --tabbar-h:58px;
+  --bg:#0d1117;--card:#161b22;--card-2:#21262d;--border:rgba(255,255,255,.09);
+  --text:#e6edf3;--muted:#8b949e;
+  --topbar-bg:#0d1117;--topbar-bdr:rgba(255,255,255,.07);--topbar-txt:#e6edf3;--ham-clr:#e6edf3;
+  --sb-bg:#161b22;--sb-bdr:rgba(255,255,255,.08);--sb-txt:#e6edf3;--sb-muted:#8b949e;
+  --sb-sec:rgba(255,255,255,.04);--sb-hover:rgba(255,255,255,.06);
+  --sb-head-bg:#0d1117;--sb-head-txt:#e6edf3;
+  --accent:#38bdf8;--accent-l:rgba(56,189,248,.12);--accent-b:rgba(56,189,248,.3);
+  --success:#34d399;--warning:#f59e0b;--danger:#ef4444;
+  --toggle-on:#38bdf8;--toggle-off:rgba(255,255,255,.18);
+  --fab-bg:#38bdf8;--fab-txt:#0d1117;--fab-shadow:rgba(56,189,248,.45);
+  --shadow:0 8px 32px rgba(0,0,0,.65);--shadow-s:0 2px 10px rgba(0,0,0,.45);
+  --blur:saturate(180%) blur(20px);
+  color-scheme:dark;
+}
+[data-theme="light"]{
+  --bg:#f0f2f5;--card:#fff;--card-2:#f7f8fa;--border:#e4e6eb;
+  --text:#050505;--muted:#65676b;
+  --topbar-bg:#1877F2;--topbar-bdr:rgba(0,0,0,.08);--topbar-txt:#fff;--ham-clr:#fff;
+  --sb-bg:#fff;--sb-bdr:#e4e6eb;--sb-txt:#050505;--sb-muted:#65676b;
+  --sb-sec:#f0f2f5;--sb-hover:#f0f2f5;--sb-head-bg:#1877F2;--sb-head-txt:#fff;
+  --accent:#1877F2;--accent-l:rgba(24,119,242,.08);--accent-b:rgba(24,119,242,.25);
+  --success:#059669;--warning:#d97706;--danger:#dc2626;
+  --toggle-on:#1877F2;--toggle-off:#bcc0c4;
+  --fab-bg:#1877F2;--fab-txt:#fff;--fab-shadow:rgba(24,119,242,.4);
+  --shadow:0 4px 24px rgba(0,0,0,.15);--shadow-s:0 2px 8px rgba(0,0,0,.1);
+  --blur:saturate(160%) blur(16px);
+  color-scheme:light;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;overflow:hidden;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);}
+button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;background:none;}
+
+/* ── TOP BAR ── */
+.topbar{
+  position:fixed;top:0;left:0;right:0;height:var(--topbar-h);
+  background:var(--topbar-bg);border-bottom:1px solid var(--topbar-bdr);
+  display:flex;align-items:center;padding:0 12px;gap:10px;z-index:300;
+  box-shadow:var(--shadow-s);
+}
+.hamburger{
+  width:40px;height:40px;flex-shrink:0;color:var(--ham-clr);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+  border-radius:10px;transition:background .15s;
+}
+.hamburger:hover{background:rgba(255,255,255,.1);}
+.ham-line{width:18px;height:2px;background:currentColor;border-radius:1px;transition:transform .24s,opacity .24s;}
+.hamburger.open .ham-line:nth-child(1){transform:translateY(7px) rotate(45deg);}
+.hamburger.open .ham-line:nth-child(2){opacity:0;}
+.hamburger.open .ham-line:nth-child(3){transform:translateY(-7px) rotate(-45deg);}
+.tb-brand{display:flex;align-items:center;gap:8px;text-decoration:none;flex-shrink:0;}
+.brand-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);}
+.brand-name{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:800;color:var(--topbar-txt);letter-spacing:.01em;white-space:nowrap;}
+.tb-right{display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:auto;}
+.live-badge{
+  display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:100px;
+  background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.25);
+  font-size:11px;font-weight:600;color:var(--success);white-space:nowrap;
+}
+[data-theme="light"] .live-badge{background:#e9fcf2;border-color:#a7f3d0;}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--success);animation:blink 2s infinite;}
+.theme-btn{
+  width:38px;height:38px;border-radius:10px;
+  background:rgba(255,255,255,.12);color:var(--topbar-txt);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;transition:background .15s;
+}
+.theme-btn:hover{background:rgba(255,255,255,.22);}
+[data-theme="light"] .theme-btn{background:rgba(255,255,255,.25);}
+[data-theme="light"] .theme-btn:hover{background:rgba(255,255,255,.45);}
+.user-av{
+  width:34px;height:34px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),#818cf8);
+  border:2px solid rgba(255,255,255,.3);
+  color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;transition:transform .15s;
+}
+.user-av:hover{transform:scale(1.06);}
+
+/* offline banner */
+.offline-bar{
+  position:fixed;top:var(--topbar-h);left:0;right:0;z-index:295;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:7px 14px;font-size:12px;font-weight:600;color:#fff;
+  background:rgba(239,68,68,.92);backdrop-filter:var(--blur);
+  transform:translateY(-110%);transition:transform .3s ease;
+}
+.offline-bar.visible{transform:translateY(0);}
+.offline-bar.syncing{background:rgba(245,158,11,.92);}
+
+/* ── LAYOUT ── */
+.content{position:fixed;top:var(--topbar-h);left:0;right:0;bottom:0;display:flex;overflow:hidden;}
+
+/* ── SIDEBAR ── */
+.sidebar{
+  width:270px;min-width:270px;height:100%;
+  background:var(--sb-bg);border-right:1px solid var(--sb-bdr);
+  display:flex;flex-direction:column;flex-shrink:0;z-index:200;overflow:hidden;
+  transition:width .3s cubic-bezier(.4,0,.2,1),min-width .3s cubic-bezier(.4,0,.2,1);
+}
+.sidebar.collapsed{width:0;min-width:0;}
+@media(max-width:767px){
+  .sidebar{
+    position:absolute!important;top:0;left:0;bottom:0;
+    width:280px!important;min-width:280px!important;
+    transform:translateX(-100%);
+    transition:transform .3s cubic-bezier(.4,0,.2,1)!important;
+    box-shadow:8px 0 32px rgba(0,0,0,.4);
+  }
+  .sidebar.open{transform:translateX(0)!important;}
+}
+.sb-inner{width:270px;height:100%;display:flex;flex-direction:column;overflow:hidden;}
+@media(max-width:767px){.sb-inner{width:280px;}}
+.sb-head{
+  background:var(--sb-head-bg);padding:16px 14px 14px;
+  flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);
+}
+[data-theme="light"] .sb-head{border-bottom-color:rgba(0,0,0,.08);}
+.sb-brand-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;}
+.sb-brand-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);}
+.sb-brand-name{font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:800;color:var(--sb-head-txt);}
+.sb-user{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  background:rgba(255,255,255,.1);border-radius:10px;border:1px solid rgba(255,255,255,.12);
+}
+[data-theme="light"] .sb-user{background:rgba(255,255,255,.3);border-color:rgba(255,255,255,.3);}
+.sb-av{
+  width:32px;height:32px;border-radius:50%;
+  background:rgba(255,255,255,.25);border:2px solid rgba(255,255,255,.45);
+  color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.sb-username{font-size:13px;font-weight:600;color:var(--sb-head-txt);}
+.sb-role{font-size:10px;color:rgba(255,255,255,.55);margin-top:1px;}
+.sb-body{flex:1;overflow-y:auto;padding:8px 0;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+.sb-lbl{
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:9px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.14em;color:var(--sb-muted);padding:12px 14px 5px;
+}
+.layer-row{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;transition:background .1s;}
+.layer-row:hover{background:var(--sb-hover);}
+.ld{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.ll{flex:1;font-size:13px;font-weight:500;color:var(--sb-txt);}
+.tgl{position:relative;width:38px;height:22px;flex-shrink:0;}
+.tgl input{opacity:0;width:0;height:0;}
+.tgl-track{position:absolute;inset:0;border-radius:11px;background:var(--toggle-off);cursor:pointer;transition:background .2s;}
+.tgl input:checked+.tgl-track{background:var(--toggle-on);}
+.tgl-thumb{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3);pointer-events:none;transition:transform .2s cubic-bezier(.4,0,.2,1);}
+.tgl input:checked~.tgl-thumb{transform:translateX(16px);}
+.bm-sel{
+  margin:4px 12px 8px;width:calc(100% - 24px);
+  padding:8px 10px;border-radius:9px;border:1px solid var(--border);
+  background:var(--sb-sec);color:var(--sb-txt);
+  font-family:'Inter',sans-serif;font-size:12px;outline:none;cursor:pointer;
+}
+.leg-item{display:flex;align-items:center;gap:9px;padding:5px 14px;}
+.leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.leg-lbl{flex:1;font-size:12px;color:var(--sb-muted);}
+.leg-n{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--sb-muted);}
+.sb-prog{margin:0 14px 10px;height:6px;background:var(--border);border-radius:3px;overflow:hidden;display:flex;}
+.sb-prog-seg{height:100%;}
+.sb-stat-total{
+  margin:8px 14px 0;padding:9px 12px;border-radius:9px;
+  background:var(--accent-l);border:1px solid var(--accent-b);
+  font-size:12px;font-weight:600;color:var(--accent);font-family:'IBM Plex Mono',monospace;
+}
+/* ── Community Visits Panel ── */
+.cc-mode-row{display:flex;gap:5px;margin:8px 14px 10px;}
+.cc-tab{
+  flex:1;padding:6px 0;border-radius:7px;font-size:12px;font-weight:600;
+  background:var(--sb-sec);color:var(--sb-muted);border:1px solid var(--border);
+  transition:all .15s;cursor:pointer;
+}
+.cc-tab.active{background:var(--accent-l);color:var(--accent);border-color:var(--accent-b);}
+.cc-hero{
+  display:flex;align-items:baseline;gap:5px;
+  padding:10px 14px 6px;
+}
+.cc-n{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:700;color:var(--text);}
+.cc-n-lbl{font-size:12px;color:var(--sb-muted);font-weight:500;}
+.cc-breakdown{margin:0 14px 12px;}
+.cc-leg-row{
+  display:flex;align-items:center;gap:7px;padding:4px 0;
+  border-bottom:1px solid var(--border);
+}
+.cc-leg-row:last-child{border-bottom:none;}
+.cc-leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.cc-leg-lbl{flex:1;font-size:12px;color:var(--sb-txt);}
+.cc-leg-ct{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--sb-muted);}
+.cc-empty{font-size:12px;color:var(--sb-muted);padding:6px 0;font-style:italic;}
+
+.sb-foot{padding:10px 12px;border-top:1px solid var(--sb-bdr);flex-shrink:0;}
+.online-row{
+  display:flex;align-items:center;gap:7px;padding:7px 10px;
+  background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.18);
+  border-radius:8px;margin-bottom:8px;
+}
+[data-theme="light"] .online-row{background:#e9fcf2;border-color:#a7f3d0;}
+.online-lbl{font-size:12px;font-weight:600;color:var(--success);}
+.signout-btn{
+  width:100%;padding:9px;border:1px solid var(--sb-bdr);border-radius:8px;
+  color:var(--sb-muted);font-size:13px;font-weight:600;transition:all .15s;
+}
+.signout-btn:hover{background:var(--sb-hover);color:var(--sb-txt);}
+.admin-link{
+  display:block;margin-top:7px;padding:8px;text-align:center;
+  border:1px solid var(--border);border-radius:8px;text-decoration:none;
+  color:var(--muted);font-size:12px;font-weight:600;transition:all .15s;
+}
+.admin-link:hover{background:var(--sb-hover);color:var(--text);}
+
+/* ── MAP ── */
+.map-area{flex:1;position:relative;min-width:0;overflow:hidden;}
+#map{position:absolute;inset:0;width:100%;height:100%;}
+.maplibregl-ctrl-attrib{font-size:8px!important;opacity:.25!important;}
+.maplibregl-ctrl-bottom-right{bottom:140px!important;right:6px!important;}
+.maplibregl-ctrl-top-right{display:none!important;}
+.backdrop{display:none;position:fixed;inset:0;top:var(--topbar-h);background:rgba(0,0,0,.45);z-index:199;}
+.backdrop.show{display:block;}
+.place-hint{
+  position:absolute;top:14px;left:50%;
+  transform:translateX(-50%) translateY(-6px);
+  background:var(--card);backdrop-filter:var(--blur);
+  border:1px solid var(--accent-b);border-radius:100px;
+  padding:8px 20px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;
+  color:var(--accent);white-space:nowrap;z-index:50;pointer-events:none;opacity:0;
+  transition:opacity .2s,transform .2s;
+}
+.place-hint.on{opacity:1;transform:translateX(-50%) translateY(0);}
+.preview-dot{
+  width:18px;height:18px;border-radius:50%;
+  background:var(--pdot-clr,#9ca3af);
+  border:3px solid rgba(255,255,255,.9);
+  box-shadow:0 0 0 3px rgba(0,0,0,.15),0 3px 12px rgba(0,0,0,.45);
+  pointer-events:none;animation:pdot-in .15s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+@keyframes pdot-in{from{transform:scale(.3);opacity:0;}to{transform:scale(1);opacity:1;}}
+.pt-pulse{
+  width:44px;height:44px;border-radius:50%;
+  background:var(--ppulse-clr,#10b981);pointer-events:none;opacity:.7;
+  animation:pulse-ring 1s ease-out forwards;
+}
+@keyframes pulse-ring{0%{transform:scale(.2);}80%{transform:scale(1.8);opacity:0;}100%{transform:scale(2);opacity:0;}}
+.map-tools{position:absolute;bottom:146px;right:10px;display:flex;flex-direction:column;gap:4px;z-index:40;}
+.map-btn{
+  width:40px;height:40px;
+  background:var(--card);backdrop-filter:var(--blur);
+  border:1px solid var(--border);border-radius:10px;
+  color:var(--text);font-size:16px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:var(--shadow-s);transition:background .15s;
+}
+.map-btn:hover{background:var(--card-2);}
+.map-btn:active{transform:scale(.93);}
+/* ── BASEMAP POPUP (Option C) ── */
+.bm-wrap{
+  position:absolute;bottom:calc(var(--tabbar-h) + 16px);left:14px;z-index:40;
+  display:flex;flex-direction:column;gap:6px;align-items:flex-start;
+}
+.bm-popup{
+  background:var(--card);backdrop-filter:var(--blur);
+  border:1px solid var(--border);border-radius:14px;
+  padding:6px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:2px;
+  transform-origin:bottom left;
+  transform:scale(.88) translateY(10px);
+  opacity:0;pointer-events:none;
+  transition:transform .22s cubic-bezier(.34,1.56,.64,1),opacity .18s ease;
+}
+.bm-popup.open{transform:scale(1) translateY(0);opacity:1;pointer-events:all;}
+.bm-option{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 12px;border-radius:9px;cursor:pointer;
+  min-height:48px;transition:background .12s;
+  border:1.5px solid transparent;
+}
+.bm-option:active{transform:scale(.96);}
+.bm-option:hover{background:var(--card-2);}
+.bm-option.active{background:var(--accent-l);border-color:var(--accent-b);}
+.opt-swatch{
+  width:28px;height:28px;border-radius:7px;flex-shrink:0;
+  position:relative;overflow:hidden;
+}
+.bm-option[data-bm="osm"]       .opt-swatch{background:linear-gradient(135deg,#c8bca4,#b5a98b);}
+.bm-option[data-bm="osm"]       .opt-swatch::after{content:'';position:absolute;left:3px;right:3px;top:46%;height:3px;background:rgba(255,255,255,.5);border-radius:1px;}
+.bm-option[data-bm="satellite"] .opt-swatch{background:linear-gradient(135deg,#2d5a22,#0d2b1a);}
+.bm-option[data-bm="dark"]      .opt-swatch{background:linear-gradient(135deg,#1e2432,#0d1117);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);}
+.bm-option[data-bm="dark"]      .opt-swatch::after{content:'';position:absolute;left:4px;right:4px;top:48%;height:1px;background:rgba(255,255,255,.15);}
+.bm-option[data-bm="light"]     .opt-swatch{background:linear-gradient(135deg,#f5f0e8,#e8e0d0);}
+.bm-option[data-bm="light"]     .opt-swatch::after{content:'';position:absolute;left:3px;right:3px;top:46%;height:2px;background:rgba(0,0,0,.18);border-radius:1px;}
+.opt-text{flex:1;}
+.opt-lbl{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:var(--text);}
+.opt-sub{font-size:10px;color:var(--muted);margin-top:1px;}
+.opt-check{
+  width:18px;height:18px;border-radius:50%;
+  background:var(--accent);color:#0d1117;
+  display:none;align-items:center;justify-content:center;
+  font-size:10px;font-weight:800;flex-shrink:0;
+}
+.bm-option.active .opt-check{display:flex;}
+.bm-trigger{
+  display:flex;align-items:center;gap:5px;
+  padding:5px 9px;border-radius:8px;
+  background:var(--card);backdrop-filter:var(--blur);
+  border:1px solid var(--border);
+  box-shadow:var(--shadow-s);cursor:pointer;
+  min-height:32px;transition:border-color .15s;
+}
+.bm-trigger:hover{border-color:var(--accent-b);}
+.bm-trigger:active{transform:scale(.94);}
+.trigger-swatch{
+  width:14px;height:14px;border-radius:3px;flex-shrink:0;
+  position:relative;overflow:hidden;transition:background .2s;
+}
+.trigger-swatch.osm      {background:linear-gradient(135deg,#c8bca4,#b5a98b);}
+.trigger-swatch.satellite{background:linear-gradient(135deg,#2d5a22,#0d2b1a);}
+.trigger-swatch.dark     {background:linear-gradient(135deg,#1e2432,#0d1117);}
+.trigger-swatch.light    {background:linear-gradient(135deg,#f5f0e8,#e8e0d0);}
+.trigger-name{
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:700;
+  color:var(--text);white-space:nowrap;
+}
+.trigger-chevron{color:var(--muted);display:flex;align-items:center;transition:transform .2s;}
+.trigger-chevron svg{width:10px;height:10px;stroke:currentColor;fill:none;stroke-width:2.5;stroke-linecap:round;}
+.bm-trigger.open .trigger-chevron{transform:rotate(180deg);}
+
+/* GPS locating state on FAB */
+.fab.locating{opacity:.75;cursor:not-allowed;}
+@keyframes fab-pulse{0%,100%{box-shadow:0 6px 20px var(--fab-shadow);}50%{box-shadow:0 6px 28px var(--fab-shadow),0 0 0 6px rgba(56,189,248,.18);}}
+
+/* info popup (click existing dot) */
+.maplibregl-popup-content{
+  background:var(--card)!important;backdrop-filter:var(--blur)!important;
+  border:1px solid var(--border)!important;border-radius:12px!important;
+  padding:12px 14px!important;box-shadow:var(--shadow)!important;
+  color:var(--text)!important;font-family:'Inter',sans-serif!important;min-width:160px;
+}
+.maplibregl-popup-tip{border-top-color:var(--card)!important;}
+[data-theme="light"] .maplibregl-popup-tip{border-top-color:#fff!important;}
+.maplibregl-popup-close-button{color:var(--muted)!important;font-size:15px!important;top:4px!important;right:6px!important;}
+.pp-status{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.pp-dot{width:9px;height:9px;border-radius:50%;}
+.pp-s{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;}
+.pp-meta{font-size:11px;color:var(--muted);margin-bottom:2px;}
+.pp-notes{font-size:11px;font-style:italic;color:var(--text);margin-top:7px;padding-top:7px;border-top:1px solid var(--border);}
+.pp-badge{margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:2px 6px;border-radius:6px;}
+.pp-badge-mine{background:rgba(16,185,129,.18);color:#10b981;border:1px solid rgba(16,185,129,.4);}
+.pp-badge-team{background:rgba(148,163,184,.18);color:#94a3b8;border:1px solid rgba(148,163,184,.35);}
+
+/* ── FAB ── */
+.fab{
+  position:fixed;bottom:72px;right:20px;z-index:500;
+  height:52px;padding:0 22px;border-radius:14px;
+  background:var(--fab-bg);color:var(--fab-txt);
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:800;
+  display:flex;align-items:center;gap:8px;letter-spacing:.02em;
+  box-shadow:0 6px 20px var(--fab-shadow);
+  transition:all .2s cubic-bezier(.34,1.56,.64,1);
+}
+.fab:hover{transform:scale(1.04);}
+.fab:active{transform:scale(.96);}
+.fab.cancel{background:var(--danger);color:#fff;box-shadow:0 6px 18px rgba(239,68,68,.45);}
+.fab-badge{
+  position:absolute;top:-8px;right:-8px;
+  min-width:20px;height:20px;border-radius:10px;
+  background:var(--danger);border:2.5px solid var(--bg);
+  color:#fff;font-size:10px;font-weight:700;font-family:'IBM Plex Mono',monospace;
+  display:flex;align-items:center;justify-content:center;padding:0 4px;
+  opacity:0;transform:scale(0);
+  transition:opacity .2s,transform .2s cubic-bezier(.34,1.56,.64,1);
+}
+.fab-badge.show{opacity:1;transform:scale(1);}
+
+/* ── FILTER BAR ── */
+.filter-bar{
+  position:fixed;top:calc(var(--topbar-h) + 8px);left:0;right:0;
+  display:flex;gap:6px;padding:0 12px;
+  overflow-x:auto;scrollbar-width:none;z-index:290;pointer-events:none;
+  transition:left .3s cubic-bezier(.4,0,.2,1);
+}
+.filter-bar::-webkit-scrollbar{display:none;}
+.fc{
+  pointer-events:all;height:30px;padding:0 11px;border-radius:15px;
+  border:1.5px solid var(--border);
+  background:var(--card);backdrop-filter:var(--blur);
+  color:var(--text);font-size:11px;font-weight:600;
+  white-space:nowrap;flex-shrink:0;
+  display:flex;align-items:center;gap:5px;
+  box-shadow:var(--shadow-s);transition:all .15s;
+}
+.fc:hover{border-color:var(--accent);}
+.fc.active{background:var(--accent);border-color:var(--accent);color:#0d1117;}
+[data-theme="light"] .fc.active{color:#fff;}
+.fc-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;border:1.5px solid transparent;}
+.fc-ct{font-family:'IBM Plex Mono',monospace;font-size:9px;opacity:.75;}
+
+/* ── TOAST ── */
+.toast-wrap{
+  position:fixed;top:64px;left:50%;transform:translateX(-50%);
+  z-index:800;display:flex;flex-direction:column;align-items:center;gap:6px;
+  pointer-events:none;
+}
+.toast{
+  background:var(--card);backdrop-filter:var(--blur);
+  border:1px solid var(--border);border-radius:100px;
+  padding:8px 16px;font-size:13px;font-weight:500;color:var(--text);
+  display:flex;align-items:center;gap:9px;
+  box-shadow:var(--shadow);white-space:nowrap;
+  animation:t-in .28s cubic-bezier(.34,1.56,.64,1) forwards,
+            t-out .28s ease-in 2.8s forwards;
+}
+@keyframes t-in{from{opacity:0;transform:scale(.85) translateY(-6px);}to{opacity:1;transform:scale(1) translateY(0);}}
+@keyframes t-out{from{opacity:1;}to{opacity:0;transform:translateY(-4px);}}
+.toast-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+
+/* ── BOTTOM SHEET (registration) ── */
+.bs-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:700;opacity:0;pointer-events:none;
+  transition:opacity .3s ease;
+}
+.bs-overlay.show{opacity:1;pointer-events:all;}
+.bottom-sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:710;
+  background:var(--card);
+  border-radius:20px 20px 0 0;border-top:1px solid var(--border);
+  box-shadow:0 -8px 40px rgba(0,0,0,.5);
+  max-height:84dvh;display:flex;flex-direction:column;
+  transform:translateY(100%);
+  transition:transform .35s cubic-bezier(.4,0,.2,1);
+}
+.bottom-sheet.open{transform:translateY(0);}
+@media(min-width:768px){
+  .bottom-sheet{left:50%;transform:translateX(-50%) translateY(100%);width:480px;border-radius:20px 20px 0 0;}
+  .bottom-sheet.open{transform:translateX(-50%) translateY(0);}
+}
+.bs-handle-wrap{padding:10px 0 4px;display:flex;justify-content:center;flex-shrink:0;cursor:grab;}
+.bs-handle{width:36px;height:4px;background:var(--border);border-radius:2px;}
+.bs-scroll{flex:1;overflow-y:auto;padding:0 16px 28px;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+.bs-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.bs-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:800;color:var(--text);}
+.bs-close{
+  width:30px;height:30px;border-radius:50%;
+  background:var(--card-2);color:var(--muted);
+  display:flex;align-items:center;justify-content:center;font-size:14px;
+  transition:all .15s;
+}
+.bs-close:hover{background:var(--border);color:var(--text);}
+.bs-loc{
+  margin-bottom:14px;padding:10px 12px;
+  background:var(--card-2);border-radius:10px;border:1px solid var(--border);
+}
+.bs-coords{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--accent);margin-bottom:3px;}
+.bs-addr{font-size:12px;color:var(--muted);font-style:italic;min-height:16px;}
+.bs-addr.loading{animation:pulse-o 1.2s ease-in-out infinite;}
+@keyframes pulse-o{0%,100%{opacity:.4;}50%{opacity:1;}}
+.bs-section-lbl{
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.12em;color:var(--muted);
+  margin:14px 0 8px;
+}
+.bs-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+.bs-stn{
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  padding:12px 6px;border:1.5px solid var(--border);border-radius:10px;
+  background:var(--card-2);cursor:pointer;min-height:64px;
+  transition:all .15s;-webkit-tap-highlight-color:transparent;
+}
+.bs-stn:active{transform:scale(.93);}
+.bs-stn.sel{background:var(--accent-l);border-color:var(--accent);}
+.bs-sdot{width:13px;height:13px;border-radius:50%;}
+.bs-stxt{font-size:9.5px;font-weight:600;color:var(--muted);text-align:center;line-height:1.25;}
+.bs-stn.sel .bs-stxt{color:var(--text);}
+.bs-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.bs-chip{
+  height:30px;padding:0 12px;border-radius:15px;
+  border:1px solid var(--border);background:var(--card-2);
+  color:var(--muted);font-size:11px;font-weight:500;
+  transition:all .15s;
+}
+.bs-chip:hover{border-color:var(--accent);color:var(--accent);}
+.bs-notes{
+  width:100%;min-height:60px;
+  background:var(--card-2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;color:var(--text);font-family:'Inter',sans-serif;font-size:13px;
+  outline:none;resize:none;transition:border-color .15s;
+}
+.bs-notes:focus{border-color:var(--accent);}
+.bs-notes::placeholder{color:var(--muted);}
+.bs-meta{display:flex;gap:6px;margin-top:10px;}
+.bs-meta-chip{
+  background:var(--card-2);border:1px solid var(--border);
+  border-radius:100px;padding:4px 10px;font-size:11px;color:var(--muted);
+  display:flex;align-items:center;gap:4px;
+}
+.bs-meta-chip strong{color:var(--text);font-weight:600;}
+.bs-save{
+  width:100%;height:52px;margin-top:14px;
+  background:var(--fab-bg);border-radius:13px;
+  color:var(--fab-txt);font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:800;
+  letter-spacing:.02em;display:flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 4px 18px var(--fab-shadow);transition:all .15s;
+}
+.bs-save:hover{filter:brightness(1.07);}
+.bs-save.saving{opacity:.65;}
+.bs-save.saved{background:var(--success);box-shadow:0 4px 14px rgba(52,211,153,.35);color:#fff;}
+
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+@media(min-width:768px){.sidebar:not(.collapsed){transition:width .3s,min-width .3s;}}
+
+/* ── BOTTOM TAB BAR ── */
+.tabbar{
+  position:fixed;bottom:0;left:0;right:0;height:var(--tabbar-h);
+  background:var(--card);border-top:1px solid var(--border);
+  display:flex;z-index:600;
+  box-shadow:0 -2px 16px rgba(0,0,0,.3);
+}
+[data-theme="light"] .tabbar{box-shadow:0 -2px 12px rgba(0,0,0,.1);}
+.tab-btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;padding-bottom:2px;border:none;background:none;cursor:pointer;
+  color:var(--muted);transition:color .15s;position:relative;
+}
+.tab-btn.active{color:var(--accent);}
+.tab-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+.tab-btn span{font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:700;letter-spacing:.01em;}
+.tab-badge{
+  position:absolute;top:6px;right:calc(50% - 18px);
+  min-width:16px;height:16px;border-radius:8px;
+  background:var(--danger);border:2px solid var(--card);
+  color:#fff;font-size:9px;font-weight:700;font-family:'IBM Plex Mono',monospace;
+  display:flex;align-items:center;justify-content:center;padding:0 3px;
+  opacity:0;transform:scale(0);transition:opacity .2s,transform .2s cubic-bezier(.34,1.56,.64,1);
+}
+.tab-badge.show{opacity:1;transform:scale(1);}
+
+/* ── SIDE PANELS (Team + Export) ── */
+.side-panel{
+  position:fixed;top:var(--topbar-h);left:0;right:0;bottom:var(--tabbar-h);
+  background:var(--bg);z-index:250;
+  overflow-y:auto;display:none;
+  padding:16px;
+}
+.side-panel.active{display:block;}
+
+/* Team panel */
+.panel-title{
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:800;
+  color:var(--text);margin-bottom:4px;
+}
+.panel-sub{font-size:12px;color:var(--muted);margin-bottom:20px;}
+
+.team-grid{display:flex;flex-direction:column;gap:10px;}
+.team-card{
+  background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:14px 16px;display:flex;align-items:center;gap:14px;
+}
+.team-av{
+  width:42px;height:42px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--accent),#818cf8);
+  color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+.team-info{flex:1;min-width:0;}
+.team-name{font-size:14px;font-weight:700;color:var(--text);}
+.team-last{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.team-counts{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;}
+.team-today{
+  font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:500;
+  color:var(--accent);line-height:1;
+}
+.team-today-lbl{font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;}
+.team-status-bar{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;}
+.team-status-pill{
+  display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;
+  background:var(--card-2);border:1px solid var(--border);
+  font-size:10px;font-weight:600;color:var(--muted);white-space:nowrap;
+}
+.team-status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.team-card.is-mine{border-color:rgba(16,185,129,.45);background:linear-gradient(180deg,rgba(16,185,129,.06),var(--card));}
+.team-you-tag{margin-left:8px;font-size:9px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:#10b981;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.35);padding:1px 6px;border-radius:6px;vertical-align:middle;}
+.team-presence{font-weight:700;font-size:10px;letter-spacing:.3px;}
+.team-presence.active-now{color:#10b981;}
+.team-presence.idle{color:#f59e0b;}
+.team-presence.offline{color:#6b7280;}
+.team-last-sep{margin:0 6px;color:var(--border-h);}
+.team-total{font-size:10px;color:var(--muted);font-weight:600;}
+
+/* Export panel */
+.export-section{margin-bottom:24px;}
+.export-section-title{
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.12em;color:var(--muted);
+  margin-bottom:10px;
+}
+.export-card{
+  background:var(--card);border:1px solid var(--border);border-radius:14px;
+  overflow:hidden;
+}
+.export-row{
+  display:flex;align-items:center;gap:14px;padding:14px 16px;
+  border-bottom:1px solid var(--border);cursor:pointer;
+  transition:background .12s;
+}
+.export-row:last-child{border-bottom:none;}
+.export-row:hover{background:var(--card-2);}
+.export-ico{
+  width:38px;height:38px;border-radius:10px;
+  background:var(--accent-l);border:1px solid var(--accent-b);
+  color:var(--accent);display:flex;align-items:center;justify-content:center;
+  font-size:18px;flex-shrink:0;
+}
+.export-ico.green{background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.28);color:var(--success);}
+.export-ico.orange{background:rgba(249,115,22,.1);border-color:rgba(249,115,22,.25);color:var(--warning);}
+.export-ico.purple{background:rgba(129,140,248,.12);border-color:rgba(129,140,248,.28);color:#818cf8;}
+.export-lbl{flex:1;}
+.export-lbl-title{font-size:14px;font-weight:600;color:var(--text);}
+.export-lbl-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+.export-arrow{color:var(--muted);font-size:16px;}
+
+/* Completed-today hero */
+.exp-hero{
+  text-align:center;padding:28px 16px 24px;
+  background:var(--card);border:1px solid var(--border);border-radius:16px;
+  margin-bottom:20px;
+}
+.exp-hero-n{font-family:'IBM Plex Mono',monospace;font-size:64px;font-weight:500;color:var(--success);line-height:1;}
+.exp-hero-lbl{font-size:13px;font-weight:700;color:var(--muted);margin-top:6px;letter-spacing:.02em;}
+
+/* Email card */
+.email-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;}
+.email-field{display:flex;flex-direction:column;gap:5px;}
+.email-lbl{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.02em;}
+.email-input{
+  height:44px;padding:0 13px;border-radius:10px;
+  border:1.5px solid var(--border);background:var(--card-2);
+  color:var(--text);font-family:'Inter',sans-serif;font-size:14px;outline:none;
+  transition:border-color .15s;
+}
+.email-input:focus{border-color:var(--accent);}
+.email-input::placeholder{color:var(--muted);}
+.email-send{
+  height:48px;border-radius:11px;
+  background:var(--accent);color:var(--fab-txt);
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 3px 14px var(--fab-shadow);transition:all .15s;
+}
+.email-send:hover{filter:brightness(1.07);}
+.email-send:active{transform:scale(.97);}
+</style>
+</head>
+<body>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<div class="offline-bar" id="offline-bar">
+  <span id="offline-msg">⚡ Offline — points saved locally</span>
+  <span style="background:rgba(255,255,255,.2);border-radius:100px;padding:2px 9px;font-family:'IBM Plex Mono',monospace;font-size:10px;" id="offline-ct">0 queued</span>
+</div>
+
+<header class="topbar">
+  <button class="hamburger" id="hamburger" aria-label="Toggle sidebar">
+    <div class="ham-line"></div>
+    <div class="ham-line"></div>
+    <div class="ham-line"></div>
+  </button>
+  <a class="tb-brand" href="#">
+    <div class="brand-dot"></div>
+    <span class="brand-name">KeyStone Field</span>
+  </a>
+  <div class="tb-right">
+    <div class="live-badge" id="live-badge" style="display:none">
+      <div class="live-dot"></div>
+      <span id="live-ct">0</span>&nbsp;online
+    </div>
+    <button class="theme-btn" id="theme-btn" title="Toggle dark / light theme" aria-label="Toggle theme">☀️</button>
+    <button class="user-av" id="user-av">?</button>
+  </div>
+</header>
+
+<div class="content">
+
+  <aside class="sidebar collapsed" id="sidebar">
+    <div class="sb-inner">
+      <div class="sb-head">
+        <div class="sb-brand-row">
+          <div class="sb-brand-dot"></div>
+          <span class="sb-brand-name">KeyStone Field</span>
+        </div>
+        <div class="sb-user">
+          <div class="sb-av" id="sb-av">?</div>
+          <div>
+            <div class="sb-username" id="sb-name">Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sb-body">
+        <div class="sb-lbl">Map Layers</div>
+        <label class="layer-row">
+          <div class="ld" style="background:#38bdf8"></div>
+          <div class="ll">Survey Points</div>
+          <label class="tgl">
+            <input type="checkbox" checked id="tgl-survey" onchange="toggleLayer('survey',this.checked)">
+            <div class="tgl-track"></div><div class="tgl-thumb"></div>
+          </label>
+        </label>
+        <label class="layer-row">
+          <div class="ld" style="background:#64748b"></div>
+          <div class="ll">Community Contacts</div>
+          <label class="tgl">
+            <input type="checkbox" id="tgl-community" onchange="toggleLayer('community',this.checked)">
+            <div class="tgl-track"></div><div class="tgl-thumb"></div>
+          </label>
+        </label>
+        <label class="layer-row">
+          <div class="ld" style="background:#f97316"></div>
+          <div class="ll">IAQ Points</div>
+          <label class="tgl">
+            <input type="checkbox" id="tgl-iaq" onchange="toggleLayer('iaq',this.checked)">
+            <div class="tgl-track"></div><div class="tgl-thumb"></div>
+          </label>
+        </label>
+
+        <div class="sb-lbl">Basemap</div>
+        <select class="bm-sel" id="bm-sel" onchange="setBasemapBtn(this.value)">
+          <option value="osm" selected>Streets (OSM)</option>
+          <option value="dark">Dark (CARTO)</option>
+          <option value="light">Light (CARTO)</option>
+          <option value="satellite">Satellite (Esri)</option>
+        </select>
+
+        <div class="sb-lbl">Survey Legend</div>
+        <div class="leg-item"><div class="leg-dot" style="background:#10b981"></div><div class="leg-lbl">Completed</div><div class="leg-n" id="lc-Completed">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#f97316"></div><div class="leg-lbl">No Answer</div><div class="leg-n" id="lc-NoAnswer">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#ef4444"></div><div class="leg-lbl">Inaccessible</div><div class="leg-n" id="lc-Inaccessible">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#8b5cf6"></div><div class="leg-lbl">Not Interested</div><div class="leg-n" id="lc-NotInterested">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#3b82f6"></div><div class="leg-lbl">Left Info</div><div class="leg-n" id="lc-LeftInfo">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#6b7280"></div><div class="leg-lbl">Vacant</div><div class="leg-n" id="lc-Vacant">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#06b6d4"></div><div class="leg-lbl">Follow Up</div><div class="leg-n" id="lc-FollowUp">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#ec4899"></div><div class="leg-lbl">Other</div><div class="leg-n" id="lc-Other">0</div></div>
+        <div class="leg-item"><div class="leg-dot" style="background:#9ca3af"></div><div class="leg-lbl">Unknown</div><div class="leg-n" id="lc-Unknown">0</div></div>
+
+        <div class="sb-lbl">Survey Progress</div>
+        <div class="sb-prog" id="sb-prog"></div>
+        <div class="sb-stat-total" id="sb-stat-total">0 total · 0 today</div>
+
+        <div class="sb-lbl">Community Contact Visits</div>
+        <div class="cc-mode-row">
+          <button class="cc-tab active" id="cc-tab-all" onclick="setCcMode('all')">All Time</button>
+          <button class="cc-tab" id="cc-tab-today" onclick="setCcMode('today')">Today</button>
+        </div>
+        <div class="cc-hero">
+          <span class="cc-n" id="cc-n">—</span>
+          <span class="cc-n-lbl" id="cc-n-lbl">visits</span>
+        </div>
+        <div class="cc-breakdown" id="cc-breakdown"><div class="cc-empty">Loading…</div></div>
+      </div>
+
+      <div class="sb-foot">
+        <div class="online-row">
+          <div class="live-dot" style="margin-right:2px;background:#34d399;animation:blink 2s infinite;width:6px;height:6px;border-radius:50%;"></div>
+          <div class="online-lbl" id="sb-online">Online</div>
+        </div>
+        <button class="signout-btn" id="signout-btn">Sign Out</button>
+        <a href="admin.html" class="admin-link">⚙ Admin &amp; Data Upload</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="map-area">
+    <div id="map"></div>
+    <div class="place-hint" id="place-hint">Tap the map to place your point</div>
+    <div class="map-tools">
+      <button class="map-btn" id="btn-zoomin" title="Zoom in" aria-label="Zoom in">+</button>
+      <button class="map-btn" id="btn-zoomout" title="Zoom out" aria-label="Zoom out" style="font-weight:700">−</button>
+      <button class="map-btn" id="btn-locate" title="My location" aria-label="My location">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Basemap selector — single trigger + popup (Option C) -->
+    <div class="bm-wrap" id="bm-wrap">
+      <div class="bm-popup" id="bm-popup">
+        <div class="bm-option active" data-bm="osm" onclick="setBasemapBtn('osm')">
+          <div class="opt-swatch"></div>
+          <div class="opt-text">
+            <div class="opt-lbl">Streets</div>
+            <div class="opt-sub">OpenStreetMap</div>
+          </div>
+          <div class="opt-check">✓</div>
+        </div>
+        <div class="bm-option" data-bm="satellite" onclick="setBasemapBtn('satellite')">
+          <div class="opt-swatch"></div>
+          <div class="opt-text">
+            <div class="opt-lbl">Satellite</div>
+            <div class="opt-sub">Esri World Imagery</div>
+          </div>
+          <div class="opt-check">✓</div>
+        </div>
+        <div class="bm-option" data-bm="dark" onclick="setBasemapBtn('dark')">
+          <div class="opt-swatch"></div>
+          <div class="opt-text">
+            <div class="opt-lbl">Dark</div>
+            <div class="opt-sub">CARTO Dark Matter</div>
+          </div>
+          <div class="opt-check">✓</div>
+        </div>
+        <div class="bm-option" data-bm="light" onclick="setBasemapBtn('light')">
+          <div class="opt-swatch"></div>
+          <div class="opt-text">
+            <div class="opt-lbl">Light</div>
+            <div class="opt-sub">CARTO Voyager</div>
+          </div>
+          <div class="opt-check">✓</div>
+        </div>
+      </div>
+      <button class="bm-trigger" id="bm-trigger" onclick="toggleBmPopup()" aria-label="Change basemap">
+        <div class="trigger-swatch osm" id="bm-trigger-swatch"></div>
+        <span class="trigger-name" id="bm-trigger-name">Streets</span>
+        <div class="trigger-chevron">
+          <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+        </div>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<div class="filter-bar" id="filter-bar">
+  <button class="fc active" data-filter="all" id="fc-all-btn">All <span class="fc-ct" id="fc-all">0</span></button>
+  <button class="fc" data-filter="Completed"><span class="fc-dot" style="background:#10b981"></span>Done <span class="fc-ct" id="fc-Completed">0</span></button>
+  <button class="fc" data-filter="No Answer"><span class="fc-dot" style="background:#f97316"></span>N/Ans <span class="fc-ct" id="fc-NoAnswer">0</span></button>
+  <button class="fc" data-filter="Inaccessible"><span class="fc-dot" style="background:#ef4444"></span>Inac <span class="fc-ct" id="fc-Inaccessible">0</span></button>
+  <button class="fc" data-filter="Not Interested"><span class="fc-dot" style="background:#8b5cf6"></span>Decl <span class="fc-ct" id="fc-NotInterested">0</span></button>
+  <button class="fc" data-filter="Left Info"><span class="fc-dot" style="background:#3b82f6"></span>Info <span class="fc-ct" id="fc-LeftInfo">0</span></button>
+  <button class="fc" data-filter="Vacant"><span class="fc-dot" style="background:#6b7280"></span>Vacant <span class="fc-ct" id="fc-Vacant">0</span></button>
+  <button class="fc" data-filter="Follow Up"><span class="fc-dot" style="background:#06b6d4"></span>F/Up <span class="fc-ct" id="fc-FollowUp">0</span></button>
+</div>
+
+<button class="fab" id="fab">
+  <span id="fab-ico">＋</span>
+  <span id="fab-lbl">Add Point</span>
+  <span class="fab-badge" id="fab-badge">0</span>
+</button>
+
+<!-- TEAM PANEL -->
+<div class="side-panel" id="panel-team">
+  <div class="panel-title">Team</div>
+  <div class="panel-sub" id="team-sub">Loading team data…</div>
+  <div class="team-grid" id="team-grid"></div>
+</div>
+
+<!-- EXPORT / ADMIN PANEL -->
+<div class="side-panel" id="panel-export">
+
+  <!-- Today's completed hero -->
+  <div class="exp-hero">
+    <div class="exp-hero-n" id="exp-today-n">0</div>
+    <div class="exp-hero-lbl">Completed Today</div>
+  </div>
+
+  <!-- Download CSV -->
+  <div class="export-section">
+    <div class="export-section-title">Download</div>
+    <div class="export-card">
+      <div class="export-row" onclick="downloadCSV('survey')">
+        <div class="export-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>
+        <div class="export-lbl">
+          <div class="export-lbl-title">Survey Points (CSV)</div>
+          <div class="export-lbl-sub">All field entries · status &amp; notes</div>
+        </div>
+        <div class="export-arrow">›</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Email Data -->
+  <div class="export-section">
+    <div class="export-section-title">Email Data</div>
+    <div class="email-card">
+      <div class="email-field">
+        <label class="email-lbl" for="email-addr">Recipient email</label>
+        <input type="email" id="email-addr" class="email-input"
+          placeholder="researcher@example.com"
+          autocomplete="email" inputmode="email">
+      </div>
+      <button class="email-send" id="email-send-btn" onclick="emailData()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Send &amp; Download
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- BOTTOM TAB BAR -->
+<nav class="tabbar">
+  <button class="tab-btn active" id="tab-map" onclick="switchTab('map')">
+    <svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+    <span>Map</span>
+  </button>
+  <button class="tab-btn" id="tab-team" onclick="switchTab('team')">
+    <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <span>Team</span>
+    <div class="tab-badge" id="team-badge">0</div>
+  </button>
+  <button class="tab-btn" id="tab-export" onclick="switchTab('export')">
+    <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    <span>Export</span>
+  </button>
+</nav>
+
+<!-- REGISTRATION BOTTOM SHEET -->
+<div class="bs-overlay" id="bs-overlay"></div>
+<div class="bottom-sheet" id="bottom-sheet">
+  <div class="bs-handle-wrap" id="bs-drag-handle">
+    <div class="bs-handle"></div>
+  </div>
+  <div class="bs-scroll">
+    <div class="bs-header">
+      <div class="bs-title">Register Survey Point</div>
+      <button class="bs-close" id="bs-close">✕</button>
+    </div>
+    <div class="bs-loc">
+      <div class="bs-coords" id="bs-coords">—</div>
+      <div class="bs-addr loading" id="bs-addr">Finding address…</div>
+    </div>
+    <div class="bs-section-lbl">Select Status</div>
+    <div class="bs-grid" id="bs-grid"></div>
+    <div class="bs-section-lbl">Quick Notes</div>
+    <div class="bs-chips">
+      <button class="bs-chip" onclick="appendNote('Gate locked')">Gate locked</button>
+      <button class="bs-chip" onclick="appendNote('No one home')">No one home</button>
+      <button class="bs-chip" onclick="appendNote('Left flyer')">Left flyer</button>
+      <button class="bs-chip" onclick="appendNote('IAQ done')">IAQ done</button>
+      <button class="bs-chip" onclick="appendNote('Dog on property')">Dog on property</button>
+      <button class="bs-chip" onclick="appendNote('QR on door')">QR on door</button>
+    </div>
+    <div class="bs-section-lbl">Notes <span style="font-weight:400;opacity:.6;text-transform:none;letter-spacing:0">optional</span></div>
+    <textarea class="bs-notes" id="bs-notes" placeholder='e.g. "Gate locked, return Thu PM"' rows="2"></textarea>
+    <div class="bs-meta">
+      <div class="bs-meta-chip">👤 <strong id="bs-collector">You</strong></div>
+      <div class="bs-meta-chip">🕐 <strong id="bs-time">--:--</strong></div>
+    </div>
+    <button class="bs-save" id="bs-save">✓ &nbsp;Save Survey Point</button>
+  </div>
+</div>
+
+<script>
+// Supabase URL + anon key are fetched from /api/config at boot.
+// Never hardcode credentials — use Vercel env vars: SUPABASE_URL, SUPABASE_ANON_KEY.
+let SUPABASE_URL  = '';
+let SUPABASE_ANON = '';
+async function loadSupabaseConfig() {
+  try {
+    const r = await fetch('/api/config', { cache: 'no-store' });
+    if (!r.ok) throw new Error('config fetch failed: ' + r.status);
+    const c = await r.json();
+    SUPABASE_URL  = c.supabase_url || '';
+    SUPABASE_ANON = c.supabase_anon_key || '';
+  } catch (e) {
+    console.error('Could not load Supabase config:', e);
+  }
+}
+
+const DEMO_POINTS = [
+  {id:'d1',lat:29.6531,lon:-82.0371,status:'Completed',    collector_name:'James R.',  collected_at:'2025-04-21T09:15:00Z',notes:'Resident home, cooperative'},
+  {id:'d2',lat:29.6526,lon:-82.0341,status:'No Answer',    collector_name:'Maria S.',  collected_at:'2025-04-21T09:32:00Z',notes:''},
+  {id:'d3',lat:29.6511,lon:-82.0382,status:'Completed',    collector_name:'James R.',  collected_at:'2025-04-21T09:48:00Z',notes:'IAQ survey also done'},
+  {id:'d4',lat:29.6516,lon:-82.0322,status:'Inaccessible', collector_name:'Carlos R.', collected_at:'2025-04-21T10:05:00Z',notes:'Locked gate'},
+  {id:'d5',lat:29.6501,lon:-82.0356,status:'Completed',    collector_name:'Maria S.',  collected_at:'2025-04-21T10:22:00Z',notes:''},
+  {id:'d6',lat:29.6546,lon:-82.0366,status:'Follow Up',    collector_name:'James R.',  collected_at:'2025-04-21T10:38:00Z',notes:'Return Thu afternoon'},
+  {id:'d7',lat:29.6536,lon:-82.0331,status:'Left Info',    collector_name:'Carlos R.', collected_at:'2025-04-21T10:55:00Z',notes:'QR code on door'},
+  {id:'d8',lat:29.6556,lon:-82.0351,status:'Not Interested',collector_name:'Maria S.', collected_at:'2025-04-21T11:12:00Z',notes:'Politely declined'},
+  {id:'d9',lat:29.6526,lon:-82.0396,status:'Completed',    collector_name:'James R.',  collected_at:'2025-04-21T11:28:00Z',notes:''},
+  {id:'d10',lat:29.6541,lon:-82.0311,status:'Vacant',      collector_name:'Carlos R.', collected_at:'2025-04-21T11:45:00Z',notes:'Boarded up'},
+  {id:'d11',lat:29.6491,lon:-82.0346,status:'Completed',   collector_name:'Maria S.',  collected_at:'2025-04-21T12:02:00Z',notes:''},
+  {id:'d12',lat:29.6476,lon:-82.0376,status:'No Answer',   collector_name:'James R.',  collected_at:'2025-04-21T12:18:00Z',notes:'Car in driveway'},
+];
+
+const STATUS_COLORS = {
+  'Completed':'#10b981','No Answer':'#f97316','Inaccessible':'#ef4444',
+  'Not Interested':'#8b5cf6','Left Info':'#3b82f6','Vacant':'#6b7280',
+  'Follow Up':'#06b6d4','Other':'#ec4899','Unknown':'#9ca3af',
+};
+
+const STATUS_LIST = [
+  ['No Answer','#f97316'],['Completed','#10b981'],['Inaccessible','#ef4444'],
+  ['Not Interested','#8b5cf6'],['Left Info','#3b82f6'],['Vacant','#6b7280'],
+  ['Follow Up','#06b6d4'],['Other','#ec4899'],['Unknown','#9ca3af'],
+];
+
+const MAP_CENTER = [-82.0350, 29.6516];
+
+const TILES = {
+  osm:       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  dark:      'https://basemaps.cartocdn.com/rastertiles/dark_matter/{z}/{x}/{y}.png',
+  light:     'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+};
+
+let sb = null;
+let map = null;
+let currentUser = null;
+let theme = 'dark';
+let sidebarOpen = false;
+let placingMode = false;
+let previewMarker = null;
+let currentFilter = 'all';
+let locallyAdded = new Set();
+let offlineQueue = [];
+let lastStatus = localStorage.getItem('ks-last-status') || 'No Answer';
+let counts = {};
+let totalPts = 0, todayPts = 0;
+let bsOpen = false;
+let bsCoords = null;
+const isMobile = () => window.innerWidth < 768;
+
+/* ── BOOT ── */
+document.addEventListener('DOMContentLoaded', async () => {
+  loadQueueFromStorage();
+  await loadSupabaseConfig();
+
+  if (!SUPABASE_URL) {
+    currentUser = { name: 'Demo User', initials: 'DU', id: 'demo' };
+    updateUserUI();
+    initMap(DEMO_POINTS);
+    return;
+  }
+
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.replace('login.html'); return; }
+  const u = session.user;
+  const name = u.user_metadata?.full_name || u.email.split('@')[0];
+  const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  currentUser = { name, initials, id: u.id };
+  updateUserUI();
+  initMap([]);
+  startPresenceHeartbeat();
+});
+
+/* ── PRESENCE HEARTBEAT ── */
+async function beatPresence() {
+  if (!sb || !currentUser?.id || !navigator.onLine) return;
+  try {
+    await sb.from('user_presence').upsert({
+      user_id: currentUser.id,
+      display_name: currentUser.name,
+      last_active_at: new Date().toISOString(),
+      last_page: 'field',
+    }, { onConflict: 'user_id' });
+  } catch (e) { /* ignore — non-critical */ }
+}
+
+function startPresenceHeartbeat() {
+  beatPresence();
+  setInterval(() => { if (!document.hidden) beatPresence(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) beatPresence(); });
+  window.addEventListener('online', beatPresence);
+}
+
+function updateUserUI() {
+  const n = currentUser.name, i = currentUser.initials;
+  document.getElementById('user-av').textContent = i;
+  document.getElementById('user-av').title = n;
+  document.getElementById('sb-av').textContent = i;
+  document.getElementById('sb-name').textContent = n;
+}
+
+/* ── MAP INIT ── */
+function initMap(initialPoints) {
+  map = new maplibregl.Map({
+    container: 'map',
+    style: {
+      version: 8,
+      sources: {
+        'bm-osm':  { type:'raster', tiles:[TILES.osm],       tileSize:256, maxzoom:19, attribution:'© OpenStreetMap contributors' },
+        'bm-dark': { type:'raster', tiles:[TILES.dark],      tileSize:256, maxzoom:20, attribution:'© CARTO' },
+        'bm-light':{ type:'raster', tiles:[TILES.light],     tileSize:256, maxzoom:20, attribution:'© CARTO' },
+        'bm-sat':  { type:'raster', tiles:[TILES.satellite], tileSize:256, maxzoom:18, attribution:'Esri' },
+      },
+      layers: [
+        { id:'bm-osm',  type:'raster', source:'bm-osm' },
+        { id:'bm-dark', type:'raster', source:'bm-dark',  layout:{visibility:'none'} },
+        { id:'bm-light',type:'raster', source:'bm-light', layout:{visibility:'none'} },
+        { id:'bm-sat',  type:'raster', source:'bm-sat',   layout:{visibility:'none'} },
+      ]
+    },
+    center: MAP_CENTER, zoom: 14.5, maxZoom: 19, minZoom: 10,
+    pitchWithRotate: false,
+  });
+
+  map.on('load', () => {
+    addSurveyLayers(initialPoints);
+    initMapEvents();
+    initOffline();
+    if (sb) { loadSupabaseData(); initRealtime(); }
+    document.getElementById('sidebar').addEventListener('transitionend', () => map.resize(), { passive: true });
+  });
+}
+
+/* ── SURVEY LAYERS ── */
+function pointsToGeoJSON(pts) {
+  const myId = currentUser?.id || null;
+  return {
+    type: 'FeatureCollection',
+    features: pts.map(p => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+      properties: {
+        id: p.id, status: p.status, notes: p.notes || '',
+        collector: p.collector_name || 'Surveyor',
+        collector_id: p.collector_id || null,
+        is_mine: !!(myId && p.collector_id && p.collector_id === myId),
+        collected_at: p.collected_at,
+        time: new Date(p.collected_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+        color: STATUS_COLORS[p.status] || '#9ca3af',
+      },
+    })),
+  };
+}
+
+function addSurveyLayers(pts) {
+  map.addSource('survey', { type:'geojson', data: pointsToGeoJSON(pts) });
+  // Glow: mine vivid, team muted
+  map.addLayer({ id:'survey-glow', type:'circle', source:'survey',
+    paint:{
+      'circle-radius':18,
+      'circle-color':['get','color'],
+      'circle-opacity':['case', ['==',['get','is_mine'],true], 0.18, 0.06],
+      'circle-blur':0.9,
+    }
+  });
+  // Dots: mine full color + white ring + larger; team desaturated + gray ring
+  map.addLayer({ id:'survey-dots', type:'circle', source:'survey',
+    paint:{
+      'circle-radius':[
+        'interpolate',['linear'],['zoom'],
+        11, ['case', ['==',['get','is_mine'],true], 5, 4],
+        17, ['case', ['==',['get','is_mine'],true], 12, 9],
+      ],
+      'circle-color':['get','color'],
+      'circle-opacity':['case', ['==',['get','is_mine'],true], 1.0, 0.45],
+      'circle-stroke-width':['case', ['==',['get','is_mine'],true], 1.8, 0.6],
+      'circle-stroke-color':['case', ['==',['get','is_mine'],true], '#ffffff', '#9ca3af'],
+    }
+  });
+  map.addLayer({ id:'survey-labels', type:'symbol', source:'survey', minzoom:16,
+    layout:{
+      'text-field':['get','status'],'text-size':9,'text-anchor':'top','text-offset':[0,1.1],
+      'text-font':['Open Sans Regular','Arial Unicode MS Regular'],
+    },
+    paint:{ 'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.6)','text-halo-width':1.2 }
+  });
+
+  map.on('click', 'survey-dots', e => {
+    if (placingMode) return;
+    e.preventDefault();
+    const p = e.features[0].properties;
+    const coords = e.features[0].geometry.coordinates;
+    const ownerTag = (p.is_mine === true || p.is_mine === 'true')
+      ? '<span class="pp-badge pp-badge-mine">You</span>'
+      : '<span class="pp-badge pp-badge-team">Team</span>';
+    new maplibregl.Popup({ offset:14, maxWidth:'220px' })
+      .setLngLat(coords)
+      .setHTML(`
+        <div class="pp-status">
+          <div class="pp-dot" style="background:${p.color};box-shadow:0 0 5px ${p.color}55"></div>
+          <div class="pp-s" style="color:${p.color}">${p.status}</div>
+          ${ownerTag}
+        </div>
+        <div class="pp-meta">👤 ${p.collector}</div>
+        <div class="pp-meta">🕐 ${p.time}</div>
+        ${p.notes ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
+      `)
+      .addTo(map);
+  });
+  map.on('mouseenter','survey-dots',() => { if (!placingMode) map.getCanvas().style.cursor='pointer'; });
+  map.on('mouseleave','survey-dots',() => { map.getCanvas().style.cursor = placingMode ? 'crosshair' : ''; });
+  if (pts.length) recalcCounts(pts);
+}
+
+/* ── COMMUNITY + IAQ ── */
+let communityFeatures = [];
+let ccMode = 'all';
+
+function addCommunityLayerGeoJSON(gj) {
+  // Update source data if it already exists
+  if (map.getSource('community')) {
+    map.getSource('community').setData(gj);
+  } else {
+    map.addSource('community', { type:'geojson', data: gj });
+  }
+
+  // Add layer only if not yet added (source-exists but layer-missing is a real edge case)
+  if (!map.getLayer('community-dots')) {
+    map.addLayer({
+      id:'community-dots', type:'circle', source:'community',
+      layout:{ visibility:'visible' },
+      paint:{
+        'circle-radius': ['interpolate',['linear'],['zoom'], 11,4, 17,9],
+        'circle-color': [
+          'match', ['get','status'],
+          'Completed',    '#10b981',
+          'No Answer',    '#f97316',
+          'Inaccessible', '#ef4444',
+          'Not Interested','#8b5cf6',
+          'Left Info',    '#3b82f6',
+          'Vacant',       '#6b7280',
+          'Follow Up',    '#06b6d4',
+          'Other',        '#ec4899',
+          '#9ca3af'
+        ],
+        'circle-stroke-width':1.5,
+        'circle-stroke-color':'rgba(255,255,255,0.55)',
+        'circle-opacity': 0.9,
+      }
+    });
+    // Ensure visibility after adding (belt-and-suspenders)
+    map.setLayoutProperty('community-dots', 'visibility', 'visible');
+
+    map.on('click', 'community-dots', e => {
+      if (placingMode) return;
+      e.preventDefault();
+      const p = e.features[0].properties;
+      const c = e.features[0].geometry.coordinates;
+      const STATUS_MAP = {
+        'Completed':'#10b981','No Answer':'#f97316','Inaccessible':'#ef4444',
+        'Not Interested':'#8b5cf6','Left Info':'#3b82f6','Vacant':'#6b7280',
+        'Follow Up':'#06b6d4','Other':'#ec4899',
+      };
+      const col = STATUS_MAP[p.status] || '#9ca3af';
+      new maplibregl.Popup({ offset:14, maxWidth:'240px' })
+        .setLngLat(c)
+        .setHTML(`
+          <div class="pp-status">
+            <div class="pp-dot" style="background:${col};box-shadow:0 0 5px ${col}55"></div>
+            <div class="pp-s" style="color:${col}">${p.status||'Unknown'}</div>
+          </div>
+          <div class="pp-meta">📍 ${p.address||'—'}</div>
+          ${p.date && p.date !== 'nan' ? `<div class="pp-meta">📅 ${p.date}</div>` : ''}
+          ${p.notes && p.notes !== 'nan' && p.notes !== '' ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
+        `).addTo(map);
+    });
+    map.on('mouseenter','community-dots',() => { if (!placingMode) map.getCanvas().style.cursor='pointer'; });
+    map.on('mouseleave','community-dots',() => { map.getCanvas().style.cursor = placingMode ? 'crosshair' : ''; });
+  }
+}
+
+function addIAQLayer(iaqPts) {
+  if (map.getSource('iaq')) return;
+  const riskColor = (tier) => {
+    if (!tier) return '#9ca3af';
+    const t = tier.toLowerCase();
+    if (t.includes('high')) return '#ef4444';
+    if (t.includes('medium') || t.includes('moderate')) return '#f97316';
+    return '#10b981';
+  };
+  const gj = {
+    type: 'FeatureCollection',
+    features: iaqPts.filter(p => p.lat && p.lon).map(p => ({
+      type: 'Feature',
+      geometry: { type:'Point', coordinates:[p.lon, p.lat] },
+      properties: { risk: p.overall_risk || 0, tier: p.risk_tier || '', color: riskColor(p.risk_tier) },
+    })),
+  };
+  map.addSource('iaq', { type:'geojson', data: gj });
+  const iaqBefore = map.getLayer('survey-glow') ? 'survey-glow' : undefined;
+  map.addLayer({ id:'iaq-dots', type:'circle', source:'iaq',
+    layout:{ visibility:'none' },
+    paint:{ 'circle-radius':6,'circle-color':['get','color'],'circle-stroke-width':1.5,'circle-stroke-color':'rgba(255,255,255,0.5)' }
+  }, iaqBefore);
+}
+
+/* ── LOAD SUPABASE DATA ── */
+async function loadSupabaseData() {
+  try {
+    const { data: pts } = await sb.from('field_survey_points')
+      .select('id,lat,lon,status,notes,collector_name,collected_at')
+      .order('collected_at', { ascending: false }).limit(2000);
+    if (pts && pts.length) { map.getSource('survey').setData(pointsToGeoJSON(pts)); recalcCounts(pts); }
+  } catch (e) { console.warn('Load field points failed:', e); }
+
+  // Community contacts come from the server (geocoded from Excel)
+  await loadCommunityContacts();
+
+  // IAQ points come from the server
+  try {
+    const r2 = await fetch('/api/iaq-points');
+    if (r2.ok) {
+      const gj2 = await r2.json();
+      const iaqPts = (gj2.features || []).map(f => ({
+        lat: f.geometry?.coordinates?.[1],
+        lon: f.geometry?.coordinates?.[0],
+        risk_tier: f.properties?.risk_tier,
+        overall_risk: f.properties?.overall_risk,
+      }));
+      if (iaqPts.length) addIAQLayer(iaqPts);
+    }
+  } catch (e) { console.warn('Load IAQ failed:', e); }
+}
+
+/* ── REALTIME ── */
+function initRealtime() {
+  sb.channel('field-points-live')
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'field_survey_points' }, ({ new: p }) => {
+      if (locallyAdded.has(p.id)) return;
+      appendPointToMap({ ...p, collector_name: p.collector_name || 'Surveyor' });
+      pulsePoint([p.lon, p.lat], STATUS_COLORS[p.status] || '#9ca3af');
+      const mine = currentUser?.id && p.collector_id === currentUser.id;
+      if (!mine) showToast(`${p.collector_name || 'Someone'}: ${p.status}`, STATUS_COLORS[p.status] || '#9ca3af');
+    })
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'field_survey_points' }, ({ new: p }) => {
+      replacePointOnMap({ ...p, collector_name: p.collector_name || 'Surveyor' });
+    })
+    .on('postgres_changes', { event:'DELETE', schema:'public', table:'field_survey_points' }, ({ old: p }) => {
+      if (p && p.id) removePointFromMap(p.id);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'user_presence' }, () => {
+      if (typeof renderTeam === 'function') renderTeam();
+    })
+    .subscribe();
+}
+
+/* ── MAP EVENTS ── */
+function initMapEvents() {
+  map.on('click', e => {
+    if (!placingMode) return;
+    if (map.queryRenderedFeatures(e.point, { layers:['survey-dots'] }).length) return;
+    exitPlaceMode();
+    openBottomSheet(e.lngLat);
+  });
+
+  map.on('mousemove', e => {
+    if (!placingMode || isMobile()) return;
+    const clr = STATUS_COLORS[lastStatus] || '#9ca3af';
+    if (!previewMarker) {
+      const el = document.createElement('div');
+      el.className = 'preview-dot';
+      el.style.setProperty('--pdot-clr', clr);
+      previewMarker = new maplibregl.Marker({ element:el, anchor:'center' }).setLngLat(e.lngLat).addTo(map);
+    } else {
+      previewMarker.setLngLat(e.lngLat);
+      previewMarker.getElement().style.setProperty('--pdot-clr', clr);
+    }
+  });
+}
+
+/* ── PLACEMENT MODE ── */
+function enterPlaceMode() {
+  placingMode = true;
+  closeBottomSheet();
+  document.getElementById('fab').classList.add('cancel');
+  document.getElementById('fab-ico').textContent = '✕';
+  document.getElementById('fab-lbl').textContent = 'Cancel';
+  document.getElementById('place-hint').classList.add('on');
+  map.getCanvas().style.cursor = 'crosshair';
+}
+
+function exitPlaceMode() {
+  placingMode = false;
+  document.getElementById('fab').classList.remove('cancel');
+  document.getElementById('fab-ico').textContent = '＋';
+  document.getElementById('fab-lbl').textContent = 'Add Point';
+  document.getElementById('place-hint').classList.remove('on');
+  map.getCanvas().style.cursor = '';
+  if (previewMarker) { previewMarker.remove(); previewMarker = null; }
+}
+
+/* ── BOTTOM SHEET ── */
+function openBottomSheet(lngLat) {
+  bsCoords = [lngLat.lng, lngLat.lat];
+
+  const lat = Math.abs(lngLat.lat).toFixed(5) + '°' + (lngLat.lat >= 0 ? 'N' : 'S');
+  const lng = Math.abs(lngLat.lng).toFixed(5) + '°' + (lngLat.lng >= 0 ? 'E' : 'W');
+  document.getElementById('bs-coords').textContent = `📍 ${lat}  ${lng}`;
+  document.getElementById('bs-time').textContent = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  document.getElementById('bs-collector').textContent = currentUser ? currentUser.name.split(' ')[0] : 'You';
+  document.getElementById('bs-notes').value = '';
+
+  const addrEl = document.getElementById('bs-addr');
+  addrEl.textContent = 'Finding address…';
+  addrEl.classList.add('loading');
+  reverseGeocode(lngLat.lat, lngLat.lng).then(addr => {
+    addrEl.classList.remove('loading');
+    addrEl.textContent = addr ? 'Near: ' + addr : '';
+  });
+
+  const grid = document.getElementById('bs-grid');
+  grid.innerHTML = STATUS_LIST.map(([name, clr]) => `
+    <div class="bs-stn${name === lastStatus ? ' sel' : ''}" data-status="${name}" onclick="pickStatus(this)">
+      <div class="bs-sdot" style="background:${clr}"></div>
+      <div class="bs-stxt">${name}</div>
+    </div>`).join('');
+
+  const saveBtn = document.getElementById('bs-save');
+  saveBtn.classList.remove('saving', 'saved');
+  saveBtn.textContent = '✓  Save Survey Point';
+  saveBtn.disabled = false;
+
+  bsOpen = true;
+  document.getElementById('bs-overlay').classList.add('show');
+  document.getElementById('bottom-sheet').classList.add('open');
+}
+
+function closeBottomSheet() {
+  bsOpen = false;
+  bsCoords = null;
+  document.getElementById('bs-overlay').classList.remove('show');
+  document.getElementById('bottom-sheet').classList.remove('open');
+}
+
+function appendNote(text) {
+  const el = document.getElementById('bs-notes');
+  el.value = el.value ? el.value + ', ' + text : text;
+}
+
+function pickStatus(el) {
+  document.querySelectorAll('.bs-stn').forEach(s => s.classList.remove('sel'));
+  el.classList.add('sel');
+  lastStatus = el.dataset.status;
+  localStorage.setItem('ks-last-status', lastStatus);
+  if (previewMarker) previewMarker.getElement().style.setProperty('--pdot-clr', STATUS_COLORS[lastStatus] || '#9ca3af');
+}
+
+async function savePoint(coords) {
+  const statusEl = document.querySelector('.bs-stn.sel');
+  const status = statusEl ? statusEl.dataset.status : 'Unknown';
+  const notes  = document.getElementById('bs-notes')?.value || '';
+  const color  = STATUS_COLORS[status] || '#9ca3af';
+
+  const btn = document.getElementById('bs-save');
+  if (btn) { btn.classList.add('saving'); btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  const newPt = {
+    lat: coords[1], lon: coords[0], status, notes,
+    collector_name: currentUser?.name || 'Surveyor',
+    collected_at: new Date().toISOString(),
+    color,
+  };
+
+  const collectorId = currentUser?.id || null;
+  if (!navigator.onLine || !sb) {
+    queuePush({ ...newPt, coords });
+    appendPointToMap({ ...newPt, id: 'q' + Date.now(), collector_id: collectorId });
+    showToast(status + (navigator.onLine ? '' : ' — queued'), color, !navigator.onLine);
+  } else {
+    let insertedId = null;
+    try {
+      const { data } = await sb.from('field_survey_points').insert({
+        lat: newPt.lat, lon: newPt.lon, status, notes,
+        collector_id: collectorId, collector_name: currentUser?.name,
+      }).select('id').single();
+      if (data) { locallyAdded.add(data.id); insertedId = data.id; }
+    } catch (err) {
+      console.warn('Insert failed, queuing:', err);
+      queuePush({ ...newPt, coords });
+    }
+    appendPointToMap({ ...newPt, id: insertedId || ('l' + Date.now()), collector_id: collectorId });
+    showToast(status, color, false);
+  }
+
+  if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Saved!'; btn.disabled = false; }
+  setTimeout(() => closeBottomSheet(), 750);
+  pulsePoint(coords, color);
+  updateCountUI(status);
+}
+
+/* ── MAP DATA HELPERS ── */
+function appendPointToMap(p) {
+  const src = map.getSource('survey');
+  if (!src) return;
+  const data = src._data || { type:'FeatureCollection', features:[] };
+  const myId = currentUser?.id || null;
+  const collectorId = p.collector_id || null;
+  data.features.unshift({
+    type:'Feature',
+    geometry:{ type:'Point', coordinates:[p.lon, p.lat] },
+    properties:{
+      id:p.id, status:p.status, notes:p.notes||'',
+      collector:p.collector_name||'Surveyor',
+      collector_id: collectorId,
+      is_mine: !!(myId && collectorId && collectorId === myId),
+      collected_at: p.collected_at || new Date().toISOString(),
+      time: new Date(p.collected_at||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
+      color: STATUS_COLORS[p.status] || '#9ca3af',
+    },
+  });
+  src.setData(data);
+}
+
+function replacePointOnMap(p) {
+  const src = map.getSource('survey');
+  if (!src) return;
+  const data = src._data || { type:'FeatureCollection', features:[] };
+  const idx = data.features.findIndex(f => f.properties && f.properties.id === p.id);
+  if (idx < 0) { appendPointToMap(p); return; }
+  const myId = currentUser?.id || null;
+  data.features[idx] = {
+    type:'Feature',
+    geometry:{ type:'Point', coordinates:[p.lon, p.lat] },
+    properties:{
+      ...data.features[idx].properties,
+      status:p.status, notes:p.notes||'',
+      collector:p.collector_name||data.features[idx].properties.collector||'Surveyor',
+      collector_id: p.collector_id || data.features[idx].properties.collector_id || null,
+      is_mine: !!(myId && p.collector_id && p.collector_id === myId),
+      collected_at: p.collected_at || data.features[idx].properties.collected_at,
+      color: STATUS_COLORS[p.status] || '#9ca3af',
+    },
+  };
+  src.setData(data);
+}
+
+function removePointFromMap(id) {
+  const src = map.getSource('survey');
+  if (!src) return;
+  const data = src._data || { type:'FeatureCollection', features:[] };
+  data.features = data.features.filter(f => !(f.properties && f.properties.id === id));
+  src.setData(data);
+}
+
+function pulsePoint(coords, color) {
+  const el = document.createElement('div');
+  el.className = 'pt-pulse';
+  el.style.setProperty('--ppulse-clr', color);
+  const m = new maplibregl.Marker({ element:el, anchor:'center' }).setLngLat(coords).addTo(map);
+  setTimeout(() => m.remove(), 1200);
+}
+
+/* ── COUNTS ── */
+function recalcCounts(pts) {
+  counts = {};
+  Object.keys(STATUS_COLORS).forEach(s => counts[s] = 0);
+  pts.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
+  totalPts = pts.length;
+  const today = new Date().toDateString();
+  todayPts = pts.filter(p => new Date(p.collected_at).toDateString() === today).length;
+  renderCounts();
+}
+
+function updateCountUI(status) {
+  if (counts[status] !== undefined) counts[status]++;
+  totalPts++; todayPts++;
+  renderCounts();
+}
+
+function renderCounts() {
+  document.getElementById('lc-Completed').textContent    = counts['Completed'] || 0;
+  document.getElementById('lc-NoAnswer').textContent     = counts['No Answer'] || 0;
+  document.getElementById('lc-Inaccessible').textContent = counts['Inaccessible'] || 0;
+  document.getElementById('lc-NotInterested').textContent= counts['Not Interested'] || 0;
+  document.getElementById('lc-LeftInfo').textContent     = counts['Left Info'] || 0;
+  document.getElementById('lc-Vacant').textContent       = counts['Vacant'] || 0;
+  document.getElementById('lc-FollowUp').textContent     = counts['Follow Up'] || 0;
+  document.getElementById('lc-Other').textContent        = counts['Other'] || 0;
+  document.getElementById('lc-Unknown').textContent      = counts['Unknown'] || 0;
+  document.getElementById('fc-all').textContent          = totalPts;
+  document.getElementById('fc-Completed').textContent    = counts['Completed'] || 0;
+  document.getElementById('fc-NoAnswer').textContent     = counts['No Answer'] || 0;
+  document.getElementById('fc-Inaccessible').textContent = counts['Inaccessible'] || 0;
+  document.getElementById('fc-NotInterested').textContent= counts['Not Interested'] || 0;
+  document.getElementById('fc-LeftInfo').textContent     = counts['Left Info'] || 0;
+  document.getElementById('fc-Vacant').textContent       = counts['Vacant'] || 0;
+  document.getElementById('fc-FollowUp').textContent     = counts['Follow Up'] || 0;
+  const prog = document.getElementById('sb-prog');
+  if (prog && totalPts > 0) {
+    prog.innerHTML = Object.entries(STATUS_COLORS)
+      .filter(([s]) => (counts[s] || 0) > 0)
+      .map(([s, c]) => `<div class="sb-prog-seg" style="background:${c};flex:${counts[s]}"></div>`)
+      .join('');
+  }
+  const tot = document.getElementById('sb-stat-total');
+  if (tot) tot.textContent = `${totalPts} total · +${todayPts} today`;
+}
+
+/* ── COMMUNITY CONTACTS LOADER ── */
+let _ccRetryTimer = null;
+
+async function loadCommunityContacts() {
+  try {
+    const r = await fetch('/api/survey-points', { cache: 'no-cache' });
+    if (!r.ok) return;
+    const gj = await r.json();
+    communityFeatures = gj.features || [];
+    updateCcPanel();
+    if (communityFeatures.length) {
+      addCommunityLayerGeoJSON(gj);
+      const tgl = document.getElementById('tgl-community');
+      if (tgl) tgl.checked = true;
+    } else {
+      // Server still processing — retry in 30 s
+      if (_ccRetryTimer) clearTimeout(_ccRetryTimer);
+      _ccRetryTimer = setTimeout(loadCommunityContacts, 30000);
+    }
+  } catch (e) { console.warn('Load community failed:', e); }
+}
+
+/* ── COMMUNITY VISITS PANEL ── */
+function setCcMode(mode) {
+  ccMode = mode;
+  document.getElementById('cc-tab-all').classList.toggle('active', mode === 'all');
+  document.getElementById('cc-tab-today').classList.toggle('active', mode === 'today');
+  if (map && map.getLayer('community-dots')) {
+    if (mode === 'today') {
+      const today = new Date().toISOString().split('T')[0];
+      map.setFilter('community-dots', ['==', ['get','date'], today]);
+    } else {
+      map.setFilter('community-dots', null);
+    }
+  }
+  updateCcPanel();
+}
+
+function updateCcPanel() {
+  const today = new Date().toISOString().split('T')[0];
+  const filtered = ccMode === 'today'
+    ? communityFeatures.filter(f => (f.properties?.date || '') === today)
+    : communityFeatures;
+  const total = filtered.length;
+  const nEl = document.getElementById('cc-n');
+  if (nEl) nEl.textContent = total;
+  const statusOrder = ['Completed','No Answer','Inaccessible','Not Interested','Left Info','Vacant','Follow Up','Other','Unknown'];
+  const cts = {};
+  filtered.forEach(f => {
+    const s = f.properties?.status || 'Unknown';
+    cts[s] = (cts[s] || 0) + 1;
+  });
+  const rows = statusOrder.filter(s => cts[s] > 0).map(s => {
+    const col = STATUS_COLORS[s] || '#9ca3af';
+    return `<div class="cc-leg-row"><div class="cc-leg-dot" style="background:${col}"></div><div class="cc-leg-lbl">${s}</div><div class="cc-leg-ct">${cts[s]}</div></div>`;
+  }).join('');
+  const bd = document.getElementById('cc-breakdown');
+  if (bd) bd.innerHTML = rows || `<div class="cc-empty">${communityFeatures.length ? 'No visits today' : 'No data loaded'}</div>`;
+}
+
+/* ── FILTER CHIPS ── */
+function setFilter(status) {
+  currentFilter = status;
+  document.querySelectorAll('.fc').forEach(c => c.classList.toggle('active', c.dataset.filter === status));
+  const expr = status === 'all' ? null : ['==', ['get','status'], status];
+  ['survey-glow','survey-dots','survey-labels'].forEach(id => {
+    if (map && map.getLayer(id)) map.setFilter(id, expr);
+  });
+}
+
+/* ── LAYER TOGGLES ── */
+function toggleLayer(name, on) {
+  const layerMap = {
+    survey:    ['survey-glow','survey-dots','survey-labels'],
+    community: ['community-dots'],
+    iaq:       ['iaq-dots'],
+  };
+  (layerMap[name] || []).forEach(id => {
+    if (map && map.getLayer(id)) map.setLayoutProperty(id,'visibility', on ? 'visible' : 'none');
+  });
+}
+
+/* ── BASEMAP ── */
+function setBasemap(key) {
+  const ids = { osm:'bm-osm', dark:'bm-dark', light:'bm-light', satellite:'bm-sat' };
+  Object.values(ids).forEach(id => {
+    if (map && map.getLayer(id)) map.setLayoutProperty(id,'visibility', id === (ids[key]||'bm-osm') ? 'visible' : 'none');
+  });
+}
+
+let bmPopupOpen = false;
+
+function toggleBmPopup() {
+  bmPopupOpen = !bmPopupOpen;
+  document.getElementById('bm-popup').classList.toggle('open', bmPopupOpen);
+  document.getElementById('bm-trigger').classList.toggle('open', bmPopupOpen);
+}
+
+function closeBmPopup() {
+  bmPopupOpen = false;
+  document.getElementById('bm-popup').classList.remove('open');
+  document.getElementById('bm-trigger').classList.remove('open');
+}
+
+const BM_LABELS = { osm:'Streets', satellite:'Satellite', dark:'Dark', light:'Light' };
+
+function setBasemapBtn(key) {
+  setBasemap(key);
+  document.getElementById('bm-sel').value = key;
+  // Update popup active state
+  document.querySelectorAll('.bm-option').forEach(b => b.classList.toggle('active', b.dataset.bm === key));
+  // Update trigger button
+  const sw = document.getElementById('bm-trigger-swatch');
+  sw.className = 'trigger-swatch ' + key;
+  document.getElementById('bm-trigger-name').textContent = BM_LABELS[key] || key;
+  // Close popup after selection
+  setTimeout(closeBmPopup, 180);
+}
+
+/* ── THEME ── */
+function switchTheme() {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('theme-btn').textContent = theme === 'dark' ? '☀️' : '🌙';
+  const bm = theme === 'dark' ? 'dark' : 'light';
+  setBasemapBtn(bm);
+}
+
+/* ── SIDEBAR ── */
+function toggleSidebar() {
+  sidebarOpen = !sidebarOpen;
+  const sb_el = document.getElementById('sidebar');
+  const hb    = document.getElementById('hamburger');
+  const bd    = document.getElementById('backdrop');
+  const fb    = document.getElementById('filter-bar');
+  if (isMobile()) {
+    sb_el.classList.toggle('open', sidebarOpen);
+    hb.classList.toggle('open', sidebarOpen);
+    bd.classList.toggle('show', sidebarOpen);
+    // Shift filter bar on mobile too — sidebar is 280px wide overlay
+    if (fb) fb.style.left = sidebarOpen ? '284px' : '0';
+  } else {
+    sb_el.classList.toggle('collapsed', !sidebarOpen);
+    hb.classList.toggle('open', sidebarOpen);
+    // Shift filter bar so it never overlaps the open sidebar
+    if (fb) fb.style.left = sidebarOpen ? '274px' : '0';
+    sb_el.addEventListener('transitionend', () => map && map.resize(), { once:true });
+  }
+}
+
+/* ── REVERSE GEOCODE ── */
+async function reverseGeocode(lat, lng) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`,
+      { headers:{ 'Accept-Language':'en', 'User-Agent':'KeyStoneField/1.0' } }
+    );
+    const d = await r.json();
+    const a = d.address || {};
+    const road = a.road || a.pedestrian || a.footway || a.path || '';
+    const num  = a.house_number || '';
+    if (road) return (num ? num + ' ' : '') + road;
+    return (d.display_name || '').split(',').slice(0,2).join(', ');
+  } catch { return ''; }
+}
+
+/* ── TOAST ── */
+function showToast(msg, color, queued = false) {
+  const wrap = document.getElementById('toast-wrap');
+  const el   = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<div class="toast-dot" style="background:${color};box-shadow:0 0 5px ${color}88"></div><span>${msg}${queued ? ' — queued' : ''}</span>`;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+/* ── OFFLINE QUEUE ── */
+function loadQueueFromStorage() {
+  try { offlineQueue = JSON.parse(localStorage.getItem('ks-queue') || '[]'); } catch { offlineQueue = []; }
+  updateQueueBadge();
+}
+function queuePush(pt) {
+  offlineQueue.push(pt);
+  localStorage.setItem('ks-queue', JSON.stringify(offlineQueue));
+  updateQueueBadge();
+}
+function queueClear() {
+  offlineQueue = [];
+  localStorage.removeItem('ks-queue');
+  updateQueueBadge();
+}
+function updateQueueBadge() {
+  const badge = document.getElementById('fab-badge');
+  const n = offlineQueue.length;
+  badge.textContent = n;
+  badge.classList.toggle('show', n > 0);
+  document.getElementById('offline-ct').textContent = n + ' queued';
+}
+let _syncing = false;
+async function syncQueue() {
+  if (_syncing) return;
+  if (!sb || !offlineQueue.length) { if (!offlineQueue.length) queueClear(); return; }
+  _syncing = true;
+  const remaining = [];
+  let okCount = 0;
+  for (const p of offlineQueue) {
+    let attempt = 0, success = false;
+    while (attempt < 3 && !success) {
+      try {
+        const { data, error } = await sb.from('field_survey_points').insert({
+          lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
+          collector_id: currentUser?.id, collector_name: p.collector_name,
+        }).select('id').single();
+        if (error) throw error;
+        if (data) { locallyAdded.add(data.id); okCount++; success = true; }
+      } catch (e) {
+        attempt++;
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 400 * Math.pow(2, attempt)));
+        } else {
+          console.warn('Sync failed after retries, keeping in queue:', e);
+          remaining.push(p);
+        }
+      }
+    }
+  }
+  offlineQueue = remaining;
+  localStorage.setItem('ks-queue', JSON.stringify(offlineQueue));
+  updateQueueBadge();
+  _syncing = false;
+  if (okCount) showToast(`Synced ${okCount}${remaining.length ? ` (${remaining.length} still queued)` : ''}`, '#34d399');
+  else if (remaining.length) showToast(`${remaining.length} still queued — will retry`, '#f59e0b', true);
+}
+function initOffline() {
+  const bar = document.getElementById('offline-bar');
+  function update() {
+    if (!navigator.onLine) {
+      bar.classList.add('visible'); bar.classList.remove('syncing');
+      document.getElementById('offline-msg').textContent = '⚡ Offline — points saved locally';
+    } else if (offlineQueue.length) {
+      bar.classList.add('visible','syncing');
+      document.getElementById('offline-msg').textContent = '↑ Syncing queued points…';
+      syncQueue().then(() => bar.classList.remove('visible','syncing'));
+    } else {
+      bar.classList.remove('visible','syncing');
+    }
+  }
+  window.addEventListener('online', update);
+  window.addEventListener('offline', update);
+  update();
+}
+
+/* ── SEARCH ── */
+async function searchAddress(q) {
+  if (!q.trim()) return;
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q+', Keystone Heights, FL')}&format=json&limit=1`,
+      { headers:{ 'Accept-Language':'en', 'User-Agent':'KeyStoneField/1.0' } }
+    );
+    const d = await r.json();
+    if (d.length) {
+      map.flyTo({ center:[parseFloat(d[0].lon), parseFloat(d[0].lat)], zoom:17, duration:900 });
+      showToast('Found: ' + d[0].display_name.split(',')[0], '#38bdf8');
+    } else { showToast('Address not found', '#f97316'); }
+  } catch { showToast('Search unavailable', '#6b7280'); }
+}
+
+/* ── TABS ── */
+let activeTab = 'map';
+
+function switchTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+
+  // Show/hide map chrome
+  const onMap = name === 'map';
+  document.getElementById('filter-bar').style.display  = onMap ? '' : 'none';
+  document.getElementById('fab').style.display          = onMap ? '' : 'none';
+
+  // Show/hide panels
+  document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('active'));
+  if (name === 'team')   { document.getElementById('panel-team').classList.add('active');   renderTeam(); }
+  if (name === 'export') { document.getElementById('panel-export').classList.add('active'); renderExportStats(); }
+}
+
+/* ── TEAM PANEL ── */
+const STATUS_INITIALS = {
+  'Completed':'C','No Answer':'NA','Inaccessible':'Inac',
+  'Not Interested':'Decl','Left Info':'Info','Vacant':'Vac',
+  'Follow Up':'F/Up','Other':'Oth','Unknown':'?',
+};
+
+async function renderTeam() {
+  const grid = document.getElementById('team-grid');
+  const sub  = document.getElementById('team-sub');
+
+  if (!sb) {
+    // Demo data
+    const demo = [
+      { name:'James R.',    initials:'JR', today:4, total:12, last:'Completed – 5 min ago',   statuses:{'Completed':3,'No Answer':1} },
+      { name:'Maria S.',    initials:'MS', today:5, total:15, last:'No Answer – 12 min ago',  statuses:{'Completed':2,'Not Interested':1,'Vacant':2} },
+      { name:'Carlos R.',   initials:'CR', today:3, total:9,  last:'Inaccessible – 28 min ago',statuses:{'Inaccessible':1,'Left Info':2} },
+    ];
+    sub.textContent = `${demo.reduce((a,d)=>a+d.today,0)} points logged today`;
+    grid.innerHTML = demo.map(d => teamCardHTML(d)).join('');
+    document.getElementById('team-badge').textContent = demo.length;
+    document.getElementById('team-badge').classList.add('show');
+    return;
+  }
+
+  sub.textContent = 'Loading…';
+  grid.innerHTML = '';
+  try {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const [ptsQ, presQ] = await Promise.all([
+      sb.from('field_survey_points')
+        .select('collector_id,collector_name,status,collected_at')
+        .order('collected_at', { ascending: false }).limit(5000),
+      sb.from('user_presence')
+        .select('user_id,display_name,last_active_at')
+        .order('last_active_at', { ascending: false }),
+    ]);
+    const pts = ptsQ.data || [];
+    const presence = presQ.data || [];
+
+    // Seed members from presence (so teammates show up even with zero points)
+    const byId = {};
+    for (const pr of presence) {
+      byId[pr.user_id] = {
+        id: pr.user_id,
+        name: pr.display_name || 'Teammate',
+        total: 0, today: 0, last: '', statuses: {},
+        last_active_at: pr.last_active_at,
+      };
+    }
+    // Fold in points
+    for (const p of pts) {
+      const key = p.collector_id || ('name:' + (p.collector_name || 'Unknown'));
+      if (!byId[key]) {
+        byId[key] = { id: key, name: p.collector_name || 'Unknown',
+          total:0, today:0, last:'', statuses:{}, last_active_at:null };
+      }
+      const m = byId[key];
+      if (!m.name || m.name === 'Teammate') m.name = p.collector_name || m.name;
+      m.total++;
+      if (new Date(p.collected_at) >= today) m.today++;
+      if (!m.last) m.last = `${p.status} – ${timeAgo(p.collected_at)}`;
+      m.statuses[p.status] = (m.statuses[p.status] || 0) + 1;
+    }
+
+    const members = Object.values(byId).map(m => {
+      m.initials = (m.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+      m.is_mine = currentUser && m.id === currentUser.id;
+      m.active_label = activeLabel(m.last_active_at);
+      return m;
+    }).sort((a,b) => {
+      if (a.is_mine !== b.is_mine) return a.is_mine ? -1 : 1;  // me first
+      if (b.today !== a.today) return b.today - a.today;
+      return (new Date(b.last_active_at || 0)) - (new Date(a.last_active_at || 0));
+    });
+
+    const todayTotal = members.reduce((a,m)=>a+m.today,0);
+    sub.textContent = `${todayTotal} points logged today · ${members.length} surveyors`;
+    grid.innerHTML = members.map(m => teamCardHTML(m)).join('');
+    document.getElementById('team-badge').textContent = members.length;
+    document.getElementById('team-badge').classList.add('show');
+  } catch(e) { sub.textContent = 'Could not load team data.'; console.warn(e); }
+}
+
+function activeLabel(iso) {
+  if (!iso) return 'offline';
+  const diff = (Date.now() - new Date(iso).getTime()) / 60000;  // min
+  if (diff < 2) return 'active now';
+  if (diff < 60) return `${Math.round(diff)}m ago`;
+  if (diff < 24*60) return `${Math.round(diff/60)}h ago`;
+  return `${Math.round(diff/1440)}d ago`;
+}
+
+function teamCardHTML(m) {
+  const statusPills = Object.entries(m.statuses || {})
+    .sort((a,b)=>b[1]-a[1]).slice(0,4)
+    .map(([s,n]) => `<div class="team-status-pill"><div class="team-status-dot" style="background:${STATUS_COLORS[s]||'#9ca3af'}"></div>${STATUS_INITIALS[s]||s}: ${n}</div>`)
+    .join('');
+  const active = m.active_label || 'offline';
+  const activeClass = active === 'active now' ? 'active-now' : (active === 'offline' ? 'offline' : 'idle');
+  const mineTag = m.is_mine ? `<span class="team-you-tag">You</span>` : '';
+  const name = m.name || 'Teammate';
+  const last = m.last || '—';
+  return `
+    <div class="team-card ${m.is_mine ? 'is-mine' : ''}">
+      <div class="team-av">${m.initials || '?'}</div>
+      <div class="team-info">
+        <div class="team-name">${name}${mineTag}</div>
+        <div class="team-last">
+          <span class="team-presence ${activeClass}">● ${active}</span>
+          <span class="team-last-sep">·</span>
+          <span>${last}</span>
+        </div>
+        <div class="team-status-bar">${statusPills}</div>
+      </div>
+      <div class="team-counts">
+        <div class="team-today">${m.today}</div>
+        <div class="team-today-lbl">today</div>
+        <div class="team-total">${m.total} all-time</div>
+      </div>
+    </div>`;
+}
+
+function timeAgo(iso) {
+  const diff = Math.floor((Date.now() - new Date(iso)) / 60000);
+  if (diff < 1) return 'just now';
+  if (diff < 60) return diff + ' min ago';
+  return Math.floor(diff/60) + 'h ago';
+}
+
+/* ── EXPORT PANEL ── */
+function renderExportStats() {
+  document.getElementById('exp-today-n').textContent = counts['Completed'] || 0;
+}
+
+async function emailData() {
+  const addr = document.getElementById('email-addr').value.trim();
+  if (!addr || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
+    document.getElementById('email-addr').focus();
+    showToast('Enter a valid email address', '#ef4444');
+    return;
+  }
+  // Download CSV first, then open mailto
+  await downloadCSV('survey');
+  const subject = encodeURIComponent('KeyStone Heights Survey Data – ' + new Date().toLocaleDateString());
+  const body = encodeURIComponent('Hi,\n\nPlease find the attached KeyStone survey CSV (just downloaded to your device).\n\nDate: ' + new Date().toLocaleString() + '\nTotal points: ' + totalPts + '\nCompleted today: ' + (counts['Completed'] || 0));
+  window.location.href = `mailto:${addr}?subject=${subject}&body=${body}`;
+  showToast('CSV downloaded · email client opened', '#34d399');
+}
+
+async function downloadCSV(table) {
+  if (!sb) { showToast('Sign in to download data', '#f59e0b'); return; }
+  showToast('Preparing download…', '#38bdf8');
+  try {
+    let data, filename, cols;
+    if (table === 'survey') {
+      const res = await sb.from('field_survey_points')
+        .select('id,lat,lon,status,notes,collector_name,collected_at')
+        .order('collected_at', { ascending: false }).limit(5000);
+      data = res.data || [];
+      cols = ['id','lat','lon','status','notes','collector_name','collected_at'];
+      filename = 'keystone_survey_points.csv';
+    } else if (table === 'community') {
+      const res = await sb.from('community_contacts')
+        .select('id,address,street_name,lat,lon,status').limit(5000);
+      data = res.data || [];
+      cols = ['id','address','street_name','lat','lon','status'];
+      filename = 'keystone_community_contacts.csv';
+    } else {
+      const res = await sb.from('iaq_surveys')
+        .select('id,lat,lon,risk_tier,overall_risk').limit(5000);
+      data = res.data || [];
+      cols = ['id','lat','lon','risk_tier','overall_risk'];
+      filename = 'keystone_iaq_points.csv';
+    }
+
+    if (!data.length) { showToast('No data to download', '#f97316'); return; }
+
+    const escape = v => {
+      if (v == null) return '';
+      const s = String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s;
+    };
+    const csv = [cols.join(','), ...data.map(row => cols.map(c => escape(row[c])).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded ${data.length} rows`, '#34d399');
+  } catch(e) { showToast('Download failed', '#ef4444'); console.warn(e); }
+}
+
+/* ── SIGN OUT ── */
+async function signOut() {
+  if (sb) await sb.auth.signOut();
+  window.location.replace('login.html');
+}
+
+/* ── GPS-FIRST ADD POINT ── */
+function tryGPSFirst() {
+  if (!navigator.geolocation) { enterPlaceMode(); return; }
+
+  const fab = document.getElementById('fab');
+  const fabLbl = document.getElementById('fab-lbl');
+  fab.classList.add('locating');
+  fab.disabled = true;
+  fabLbl.textContent = 'Locating…';
+  fab.style.animation = 'fab-pulse .9s ease-in-out infinite';
+
+  const reset = () => {
+    fab.classList.remove('locating');
+    fab.disabled = false;
+    fabLbl.textContent = 'Add Point';
+    fab.style.animation = '';
+  };
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      reset();
+      const lngLat = { lng: pos.coords.longitude, lat: pos.coords.latitude };
+      map.flyTo({ center: [lngLat.lng, lngLat.lat], zoom: 18, duration: 600 });
+      // Brief delay so map centers before sheet opens
+      setTimeout(() => openBottomSheet(lngLat), 650);
+    },
+    () => {
+      reset();
+      showToast('GPS unavailable — tap map to place point', '#f59e0b');
+      enterPlaceMode();
+    },
+    { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
+  );
+}
+
+/* ── GEOLOCATE (map button) ── */
+function geolocate() {
+  if (!navigator.geolocation) { showToast('GPS unavailable', '#6b7280'); return; }
+  navigator.geolocation.getCurrentPosition(
+    p => map.flyTo({ center:[p.coords.longitude, p.coords.latitude], zoom:17, duration:900 }),
+    () => showToast('Location unavailable', '#ef4444'),
+    { enableHighAccuracy:true, timeout:8000 }
+  );
+}
+
+/* ── EVENT LISTENERS ── */
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('hamburger').addEventListener('click', toggleSidebar);
+  document.getElementById('backdrop').addEventListener('click', () => { if (sidebarOpen) toggleSidebar(); });
+  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : tryGPSFirst(); });
+  document.getElementById('theme-btn').addEventListener('click', switchTheme);
+  document.getElementById('signout-btn').addEventListener('click', signOut);
+  document.getElementById('btn-locate').addEventListener('click', geolocate);
+  document.getElementById('btn-zoomin').addEventListener('click', () => map && map.zoomIn({duration:200}));
+  document.getElementById('btn-zoomout').addEventListener('click', () => map && map.zoomOut({duration:200}));
+
+  // Close basemap popup when tapping outside
+  document.addEventListener('click', e => {
+    if (bmPopupOpen && !e.target.closest('#bm-wrap')) closeBmPopup();
+  });
+
+  document.querySelectorAll('.fc').forEach(btn => {
+    btn.addEventListener('click', () => setFilter(btn.dataset.filter));
+  });
+
+  // Bottom sheet
+  document.getElementById('bs-overlay').addEventListener('click', closeBottomSheet);
+  document.getElementById('bs-close').addEventListener('click', closeBottomSheet);
+  document.getElementById('bs-save').addEventListener('click', () => { if (bsCoords) savePoint(bsCoords); });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (placingMode) { exitPlaceMode(); return; }
+      if (bsOpen)      { closeBottomSheet(); return; }
+      if (sidebarOpen && isMobile()) toggleSidebar();
+    }
+    if (e.key === 'Enter' && !e.shiftKey && bsOpen && document.activeElement?.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      document.getElementById('bs-save')?.click();
+    }
+  });
+
+  // Mobile swipe to open sidebar
+  let sx = null, sy = null;
+  document.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive:true });
+  document.addEventListener('touchend', e => {
+    if (sx === null) return;
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = Math.abs(e.changedTouches[0].clientY - sy);
+    if (dy > 40) { sx = null; return; }
+    if (sx < 28 && dx > 50 && !sidebarOpen) toggleSidebar();
+    if (sidebarOpen && dx < -50 && e.target.closest('#sidebar')) toggleSidebar();
+    sx = null;
+  }, { passive:true });
+
+  window.addEventListener('resize', () => {
+    if (!isMobile() && sidebarOpen) document.getElementById('backdrop').classList.remove('show');
+    map && map.resize();
+  });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+});
+</script>
+</body>
+</html>

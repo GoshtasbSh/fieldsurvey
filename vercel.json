@@ -1,0 +1,55 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "functions": {
+    "api/*.py": {
+      "runtime": "@vercel/python@4.3.1"
+    }
+  },
+  "crons": [
+    { "path": "/api/daily-refresh", "schedule": "0 6 * * *" }
+  ],
+  "rewrites": [
+    { "source": "/",                 "destination": "/keystone_field_web/index.html" },
+    { "source": "/field",            "destination": "/keystone_field_web/index.html" },
+    { "source": "/field/",           "destination": "/keystone_field_web/index.html" },
+    { "source": "/field/:path*",     "destination": "/keystone_field_web/:path*" },
+    { "source": "/login",            "destination": "/keystone_field_web/login.html" },
+    { "source": "/admin",            "destination": "/keystone_field_web/admin.html" },
+    { "source": "/dashboard",        "destination": "/static/index.html" },
+    { "source": "/dashboard/",       "destination": "/static/index.html" },
+    { "source": "/dashboard/:path*", "destination": "/static/:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/keystone_field_web/sw.js",
+      "headers": [
+        { "key": "Cache-Control",          "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control",          "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control",        "value": "no-store" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options",        "value": "DENY" },
+        { "key": "Referrer-Policy",        "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}

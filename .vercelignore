@@ -1,0 +1,31 @@
+# Local-only — don't upload to Vercel
+venv/
+__pycache__/
+.git/
+.claude/
+.DS_Store
+.env
+*.pyc
+*.pyo
+
+# Heavy local data — never deployed. All runtime data comes from Supabase.
+data/
+output/
+graphify-out/
+mockups/
+~$*
+*.xlsx
+*.gdb/
+
+# FastAPI app runs only locally for ingestion; not deployed to Vercel.
+app.py
+keystone_field_api/
+
+# Local-only ingestion scripts
+scripts/
+
+# Retired nested config
+keystone_field_web/vercel.json
+
+# Python deps for Vercel functions live in api/requirements.txt, not root
+requirements.txt

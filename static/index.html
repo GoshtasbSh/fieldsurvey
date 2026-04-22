@@ -127,6 +127,29 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .analysis-pane{display:none}
 .analysis-pane.active{display:block}
 
+/* Team panel (desktop per-user stats) */
+.team-panel{display:flex;flex-direction:column;gap:10px}
+.team-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px}
+.team-title{font-size:13px;font-weight:700;color:var(--text)}
+.team-sub{font-size:11px;color:var(--muted)}
+.team-rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.team-row{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;display:grid;grid-template-columns:36px 1fr auto;gap:12px;align-items:center}
+.team-row.mine{border-color:rgba(16,185,129,.45);background:linear-gradient(180deg,rgba(16,185,129,.06),var(--card))}
+.team-av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#818cf8);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.team-main{min-width:0}
+.team-row-name{font-size:13px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.team-row-you{font-size:9px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:#10b981;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.35);padding:1px 6px;border-radius:6px}
+.team-row-presence{font-size:10px;font-weight:700;margin-top:2px}
+.team-row-presence.active-now{color:#10b981}
+.team-row-presence.idle{color:#f59e0b}
+.team-row-presence.offline{color:#6b7280}
+.team-row-stats{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px}
+.team-row-stats b{color:var(--text);font-weight:700}
+.team-row-right{text-align:right}
+.team-row-today{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--accent);line-height:1}
+.team-row-total{font-size:10px;color:var(--muted);margin-top:2px}
+.team-empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px}
+
 /* Stat cards */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
 .stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px}
@@ -281,6 +304,16 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 .step-status-tag{margin-left:auto;font-size:10px;font-weight:600;padding:2px 8px;border-radius:8px}
 .step-status-tag.waiting{background:rgba(100,116,139,.15);color:var(--muted)}
 .step-status-tag.done{background:rgba(16,185,129,.12);color:var(--green)}
+/* Version history */
+.analyzed-badge{font-size:11px;color:var(--muted);padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.04);border:1px solid var(--border);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.version-list{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.version-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--card);border:1px solid var(--border);transition:.15s}
+.version-item:hover{border-color:var(--border-h)}
+.version-item-label{flex:1;font-size:13px;color:var(--text)}
+.version-item-meta{font-size:11px;color:var(--muted);white-space:nowrap}
+.version-item-pts{font-size:11px;font-family:var(--mono);color:var(--accent)}
+.version-section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:16px 0 6px}
+.version-empty{font-size:13px;color:var(--muted);padding:20px;text-align:center}
 .step-divider{display:flex;align-items:center;gap:8px;margin:4px 0;padding:0 2px}
 .step-divider-line{flex:1;height:1px;background:var(--border)}
 .step-divider-text{font-size:10px;color:var(--muted);white-space:nowrap}
@@ -310,9 +343,14 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       <h1>KeyStone Survey<span>Field Dashboard</span></h1>
     </div>
     <div class="header-right">
+      <span class="analyzed-badge" id="analyzed-badge" title="Last analysis timestamp" style="display:none"></span>
+      <button class="btn btn-sm" id="btn-history" title="View analysis history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        History
+      </button>
       <button class="btn" id="btn-import">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Import Data
+        Re-upload
       </button>
       <button class="btn btn-icon" id="btn-fullscreen" title="Fullscreen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
@@ -343,10 +381,6 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         <div class="layer-row">
           <label for="layer-parcels">Parcels</label>
           <label class="toggle"><input type="checkbox" id="layer-parcels" checked><span></span></label>
-        </div>
-        <div class="layer-row">
-          <label for="layer-3d">3D Extrusion</label>
-          <label class="toggle"><input type="checkbox" id="layer-3d"><span></span></label>
         </div>
         <div class="layer-row">
           <label for="layer-heatmap">Heatmap</label>
@@ -640,6 +674,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
             <div class="analysis-tab" data-tab="streets">Streets</div>
             <div class="analysis-tab" data-tab="parcels">Parcels</div>
             <div class="analysis-tab" data-tab="results">Survey Results</div>
+            <div class="analysis-tab" data-tab="team">Team</div>
           </div>
           <div class="analysis-content">
 
@@ -683,6 +718,18 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
                   No survey results uploaded yet.<br>
                   <span style="font-size:12px">Upload survey response data via the Import button to see analysis here.</span>
                 </p>
+              </div>
+            </div>
+
+            <!-- Team (per-user live stats from field_survey_points + user_presence) -->
+            <div class="analysis-pane" id="pane-team">
+              <div id="team-content" class="team-panel">
+                <div class="team-head">
+                  <div class="team-title">Field collectors</div>
+                  <div class="team-sub" id="team-sub">Connecting…</div>
+                </div>
+                <div id="team-rows" class="team-rows"></div>
+                <div class="team-empty" id="team-empty" style="display:none;">No field points collected yet.</div>
               </div>
             </div>
 
@@ -745,6 +792,31 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
   </div>
 </div>
 
+<!-- Version History Modal -->
+<div class="modal-overlay" id="history-modal">
+  <div class="modal" style="width:620px">
+    <div class="modal-header">
+      <div>
+        <h2>Analysis History</h2>
+        <p style="font-size:12px;color:var(--muted);margin-top:3px">Each upload or daily refresh creates a snapshot. Click Restore to roll back.</p>
+      </div>
+      <button class="btn btn-icon" id="history-modal-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="history-modal-body" style="max-height:60vh;overflow-y:auto">
+      <div class="version-empty">Loading history...</div>
+    </div>
+    <div style="padding:12px 24px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-sm btn-accent" id="btn-daily-refresh" style="gap:6px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Run Daily Refresh Now
+      </button>
+      <span style="font-size:11px;color:var(--muted)">Merges new field survey points collected since last snapshot</span>
+    </div>
+  </div>
+</div>
+
 <!-- Analysis processing overlay -->
 <div class="analysis-overlay" id="analysis-overlay">
   <div class="analysis-overlay-card">
@@ -794,6 +866,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

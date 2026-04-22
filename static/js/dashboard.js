@@ -39,6 +39,11 @@ const BASEMAPS = {
 const STATUS_COLORS = {};
 let currentBasemap = 'streets';
 let map, surveyData, parcelsData, analysisData;
+// ── Field points (real-time from Supabase field_survey_points) ──
+let sbClient = null;
+let currentUserId = null;
+let fieldPointsData = { type: 'FeatureCollection', features: [] };
+let fieldPresence = {}; // user_id → { display_name, last_active_at }
 let activeFilters = new Set();
 let charts = {};
 let iaqData = null, iaqAnalysis = null, chatHistory = [];
@@ -112,14 +117,26 @@ async function loadData() {
     addIAQLayers();
     buildLegend();
     buildAnalysis();
+    // Real-time field points + presence (fire-and-forget, no await — lets the rest render)
+    initFieldPoints();
 
-    // If IAQ data was already loaded (e.g. after re-deploy with warm state)
+    // Auto-show contact data if it was restored from Supabase (no upload needed)
+    if (surveyData && surveyData.features && surveyData.features.length) {
+      map.setLayoutProperty('survey-points', 'visibility', 'visible');
+      const toggle = document.getElementById('layer-points');
+      if (toggle) toggle.checked = true;
+      markStep1Done();
+      unlockIAQStep();
+    }
+
+    // Auto-show IAQ data if it was restored from Supabase
     if (iaqData && iaqData.features && iaqData.features.length) {
       updateIAQOnMap();
       buildSurveyResultsTab(iaqAnalysis);
     }
 
     fitBounds();
+    loadAnalysisMeta();   // show "Analyzed: [date]" badge in header
     document.getElementById('loading').classList.add('hide');
   } catch (e) {
     console.error('Data load error:', e);
@@ -156,17 +173,6 @@ function addLayers() {
   map.addLayer({
     id: 'parcels-outline', type: 'line', source: 'parcels',
     paint: { 'line-color': 'rgba(255,255,255,0.2)', 'line-width': 0.5 },
-  });
-
-  // Parcel 3D extrusion (hidden by default)
-  map.addLayer({
-    id: 'parcels-3d', type: 'fill-extrusion', source: 'parcels',
-    layout: { visibility: 'none' },
-    paint: {
-      'fill-extrusion-color': buildParcelColorExpr('land_use'),
-      'fill-extrusion-height': ['/', ['coalesce', ['get', 'just_value'], 0], 3000],
-      'fill-extrusion-opacity': 0.7,
-    },
   });
 
   // Survey points source
@@ -287,6 +293,279 @@ function addLayers() {
   map.on('mouseenter', 'parcels-fill', () => map.getCanvas().style.cursor = 'pointer');
   map.on('mouseleave', 'parcels-fill', () => map.getCanvas().style.cursor = '');
   setupClusterHover();
+
+  // ── Field points (live from Supabase) — always on top ──
+  map.addSource('field-points', { type: 'geojson', data: fieldPointsData });
+  map.addLayer({
+    id: 'field-points-glow', type: 'circle', source: 'field-points',
+    paint: {
+      'circle-radius': 16,
+      'circle-color': ['get', 'color'],
+      'circle-opacity': ['case', ['==', ['get','is_mine'], true], 0.20, 0.07],
+      'circle-blur': 0.85,
+    },
+  });
+  map.addLayer({
+    id: 'field-points-dots', type: 'circle', source: 'field-points',
+    paint: {
+      'circle-radius': [
+        'interpolate', ['linear'], ['zoom'],
+        11, ['case', ['==', ['get','is_mine'], true], 6, 4.5],
+        17, ['case', ['==', ['get','is_mine'], true], 13, 10],
+      ],
+      'circle-color': ['get', 'color'],
+      'circle-opacity': ['case', ['==', ['get','is_mine'], true], 1.0, 0.45],
+      'circle-stroke-width': ['case', ['==', ['get','is_mine'], true], 2, 0.6],
+      'circle-stroke-color': ['case', ['==', ['get','is_mine'], true], '#ffffff', '#9ca3af'],
+    },
+  });
+  map.on('click', 'field-points-dots', onFieldPointClick);
+  map.on('mouseenter', 'field-points-dots', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'field-points-dots', () => map.getCanvas().style.cursor = '');
+}
+
+// ── Field-points helpers (Supabase-driven, real-time) ──
+function fieldPointFeature(p, myId) {
+  return {
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+    properties: {
+      id: p.id,
+      status: p.status || 'Unknown',
+      notes: p.notes || '',
+      collector: p.collector_name || 'Surveyor',
+      collector_id: p.collector_id || null,
+      is_mine: !!(myId && p.collector_id && p.collector_id === myId),
+      collected_at: p.collected_at,
+      color: STATUS_COLORS[p.status] || '#9ca3af',
+    },
+  };
+}
+
+function setFieldPointsData() {
+  const src = map && map.getSource && map.getSource('field-points');
+  if (src) src.setData(fieldPointsData);
+}
+
+function upsertFieldPoint(p) {
+  const feat = fieldPointFeature(p, currentUserId);
+  const idx = fieldPointsData.features.findIndex(f => f.properties.id === feat.properties.id);
+  if (idx >= 0) fieldPointsData.features[idx] = feat;
+  else fieldPointsData.features.unshift(feat);
+  setFieldPointsData();
+}
+
+function removeFieldPoint(id) {
+  fieldPointsData.features = fieldPointsData.features.filter(f => f.properties.id !== id);
+  setFieldPointsData();
+}
+
+function onFieldPointClick(e) {
+  e.preventDefault();
+  const f = e.features[0];
+  const p = f.properties;
+  const coords = f.geometry.coordinates;
+  const mine = p.is_mine === true || p.is_mine === 'true';
+  const badge = mine
+    ? '<span style="margin-left:auto;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;background:rgba(16,185,129,.18);color:#10b981;border:1px solid rgba(16,185,129,.4);text-transform:uppercase;letter-spacing:.4px;">You</span>'
+    : '<span style="margin-left:auto;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;background:rgba(148,163,184,.18);color:#94a3b8;border:1px solid rgba(148,163,184,.35);text-transform:uppercase;letter-spacing:.4px;">Team</span>';
+  const when = p.collected_at ? new Date(p.collected_at).toLocaleString() : '';
+  new maplibregl.Popup({ offset: 14, maxWidth: '260px' })
+    .setLngLat(coords)
+    .setHTML(`
+      <div style="padding:10px 12px;font-family:var(--font);">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:${p.color};box-shadow:0 0 6px ${p.color}66;"></div>
+          <div style="font-size:13px;font-weight:700;color:${p.color};">${p.status}</div>
+          ${badge}
+        </div>
+        <div style="font-size:11px;color:var(--muted);">👤 ${p.collector}</div>
+        <div style="font-size:11px;color:var(--muted);">🕐 ${when}</div>
+        ${p.notes ? `<div style="font-size:11px;font-style:italic;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);">"${p.notes}"</div>` : ''}
+      </div>
+    `)
+    .addTo(map);
+}
+
+async function initFieldPoints() {
+  // Boot Supabase client from /api/config (dashboard runs authenticated as viewer;
+  // field_survey_points has public read, so unauthenticated SDK can still subscribe
+  // and read under the anon RLS policy's effective behavior).
+  let cfg = null;
+  try {
+    const r = await fetch('/api/config');
+    if (r.ok) cfg = await r.json();
+  } catch (e) { /* ignore — viewer-only mode works without Supabase */ }
+  if (!cfg || !cfg.supabase_url || !cfg.supabase_anon_key || !window.supabase) {
+    console.info('Supabase not configured for desktop dashboard; skipping real-time field points.');
+    return;
+  }
+  sbClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+
+  // Identify the user if they have an existing session (cookie/localStorage shared
+  // with the field PWA subdomain). Viewer-only is fine — is_mine simply stays false.
+  let currentSession = null;
+  try {
+    const { data: { session } } = await sbClient.auth.getSession();
+    currentSession = session;
+    currentUserId = session?.user?.id || null;
+  } catch (e) { /* ignore */ }
+
+  // Presence heartbeat (only when authenticated)
+  if (currentSession?.user?.id) {
+    const uid = currentSession.user.id;
+    const name = currentSession.user.user_metadata?.full_name || (currentSession.user.email || '').split('@')[0];
+    const beat = async () => {
+      try {
+        await sbClient.from('user_presence').upsert({
+          user_id: uid, display_name: name,
+          last_active_at: new Date().toISOString(), last_page: 'dashboard',
+        }, { onConflict: 'user_id' });
+      } catch (e) { /* ignore */ }
+    };
+    beat();
+    setInterval(() => { if (!document.hidden) beat(); }, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
+  }
+
+  // Initial load
+  try {
+    const { data, error } = await sbClient
+      .from('field_survey_points')
+      .select('id, lat, lon, status, notes, collector_id, collector_name, collected_at')
+      .order('collected_at', { ascending: false })
+      .limit(5000);
+    if (!error && Array.isArray(data)) {
+      fieldPointsData = {
+        type: 'FeatureCollection',
+        features: data.map(p => fieldPointFeature(p, currentUserId)),
+      };
+      setFieldPointsData();
+    }
+  } catch (e) { console.warn('Initial field-points fetch failed:', e); }
+
+  // Presence
+  try {
+    const { data: pres } = await sbClient
+      .from('user_presence')
+      .select('user_id, display_name, last_active_at');
+    if (Array.isArray(pres)) {
+      fieldPresence = {};
+      for (const r of pres) fieldPresence[r.user_id] = r;
+    }
+  } catch (e) { /* table may not exist yet — ignore */ }
+
+  // Realtime
+  sbClient.channel('keystone-dashboard-live')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'field_survey_points' },
+      ({ new: p }) => { upsertFieldPoint(p); onFieldPointsChanged(); })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'field_survey_points' },
+      ({ new: p }) => { upsertFieldPoint(p); onFieldPointsChanged(); })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'field_survey_points' },
+      ({ old: p }) => { if (p && p.id) { removeFieldPoint(p.id); onFieldPointsChanged(); } })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'user_presence' },
+      ({ new: p, old: o }) => {
+        const r = p || o;
+        if (r && r.user_id) fieldPresence[r.user_id] = r;
+        if (typeof renderPerUserPanel === 'function') renderPerUserPanel();
+      })
+    .subscribe();
+}
+
+// Hook: called whenever field-points data changes (realtime or initial load).
+// Safe-no-op if per-user panel not yet rendered.
+function onFieldPointsChanged() {
+  if (typeof renderPerUserPanel === 'function') renderPerUserPanel();
+}
+
+// ── Team panel (desktop) ──
+function presenceLabel(iso) {
+  if (!iso) return { label: 'offline', cls: 'offline' };
+  const diff = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (diff < 2) return { label: 'active now', cls: 'active-now' };
+  if (diff < 60) return { label: `${Math.round(diff)}m ago`, cls: 'idle' };
+  if (diff < 24*60) return { label: `${Math.round(diff/60)}h ago`, cls: 'idle' };
+  return { label: `${Math.round(diff/1440)}d ago`, cls: 'offline' };
+}
+
+function renderPerUserPanel() {
+  const rowsEl = document.getElementById('team-rows');
+  const subEl  = document.getElementById('team-sub');
+  const empty  = document.getElementById('team-empty');
+  if (!rowsEl) return;
+
+  const midnight = new Date(); midnight.setHours(0,0,0,0);
+  const byId = {};
+
+  // Seed from presence (so idle-but-signed-in teammates still appear)
+  for (const [uid, pr] of Object.entries(fieldPresence || {})) {
+    byId[uid] = {
+      id: uid, name: pr.display_name || 'Teammate',
+      total: 0, today: 0, statuses: {},
+      last_active_at: pr.last_active_at,
+    };
+  }
+  // Fold in field points
+  for (const f of (fieldPointsData.features || [])) {
+    const p = f.properties;
+    const key = p.collector_id || ('name:' + (p.collector || 'Unknown'));
+    if (!byId[key]) {
+      byId[key] = { id: key, name: p.collector || 'Unknown',
+        total:0, today:0, statuses:{}, last_active_at: null };
+    }
+    const m = byId[key];
+    if (!m.name || m.name === 'Teammate') m.name = p.collector || m.name;
+    m.total++;
+    if (new Date(p.collected_at) >= midnight) m.today++;
+    m.statuses[p.status] = (m.statuses[p.status] || 0) + 1;
+  }
+
+  const rows = Object.values(byId).map(m => {
+    m.initials = (m.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+    m.is_mine = currentUserId && m.id === currentUserId;
+    const pres = presenceLabel(m.last_active_at);
+    m.presence_label = pres.label; m.presence_cls = pres.cls;
+    return m;
+  }).sort((a,b) => {
+    if (a.is_mine !== b.is_mine) return a.is_mine ? -1 : 1;
+    if (b.today !== a.today) return b.today - a.today;
+    return (new Date(b.last_active_at || 0)) - (new Date(a.last_active_at || 0));
+  });
+
+  if (!rows.length) {
+    if (subEl) subEl.textContent = 'Waiting for field data…';
+    if (empty) empty.style.display = 'block';
+    rowsEl.innerHTML = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const todayTotal = rows.reduce((a,m)=>a+m.today,0);
+  if (subEl) subEl.textContent = `${todayTotal} today · ${rows.length} surveyor${rows.length === 1 ? '' : 's'}`;
+
+  rowsEl.innerHTML = rows.map(m => {
+    const topStatuses = Object.entries(m.statuses || {}).sort((a,b)=>b[1]-a[1]).slice(0,3)
+      .map(([s,n]) => `<span style="color:${STATUS_COLORS[s]||'#9ca3af'}">${s} ${n}</span>`)
+      .join(' · ');
+    return `
+      <div class="team-row ${m.is_mine ? 'mine' : ''}">
+        <div class="team-av">${m.initials || '?'}</div>
+        <div class="team-main">
+          <div class="team-row-name">${escapeHtml(m.name)}${m.is_mine ? '<span class="team-row-you">You</span>' : ''}</div>
+          <div class="team-row-presence ${m.presence_cls}">● ${m.presence_label}</div>
+          <div class="team-row-stats">${topStatuses || '<span style="color:var(--muted)">no points yet</span>'}</div>
+        </div>
+        <div class="team-row-right">
+          <div class="team-row-today">${m.today}</div>
+          <div class="team-row-total">${m.total} all-time</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
 // ── Parcel color expression ─────────────────────────────────────────────────
@@ -541,7 +820,7 @@ function switchBasemap(style) {
   const savedLayers = [];
   const dataSrcIds = ['parcels', 'survey', 'survey-clustered'];
   const dataLayerIds = [
-    'parcels-fill', 'parcels-outline', 'parcels-3d',
+    'parcels-fill', 'parcels-outline',
     'heatmap', 'cluster-circles', 'cluster-count',
     'survey-points', 'survey-labels',
   ];
@@ -666,7 +945,6 @@ const LAYER_DEFS = {
   clusters:       { toggle: 'layer-clusters',         mapLayers: ['cluster-circles', 'cluster-count'] },
   heatmap:        { toggle: 'layer-heatmap',          mapLayers: ['heatmap'] },
   labels:         { toggle: 'layer-labels',           mapLayers: ['survey-labels'] },
-  '3d':           { toggle: 'layer-3d',               mapLayers: ['parcels-3d'] },
 };
 
 /**
@@ -681,15 +959,6 @@ function setLayerVisibility(name, visible) {
   });
   const el = document.getElementById(def.toggle);
   if (el) el.checked = visible;
-  // Special side-effects
-  if (name === '3d') {
-    if (visible) {
-      map.easeTo({ pitch: 55, bearing: -15, duration: 800 });
-      setLayerVisibility('parcels', false);
-    } else {
-      map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
-    }
-  }
   if (name === 'heatmap') {
     const leg = document.getElementById('heatmap-legend');
     if (leg) leg.style.display = visible ? 'block' : 'none';
@@ -706,7 +975,6 @@ function setupLayerToggles() {
   const toggles = {
     'layer-points': ['survey-points'],
     'layer-parcels': ['parcels-fill', 'parcels-outline'],
-    'layer-3d': ['parcels-3d'],
     'layer-heatmap': ['heatmap'],
     'layer-clusters': ['cluster-circles', 'cluster-count'],
     'layer-labels': ['survey-labels'],
@@ -718,20 +986,6 @@ function setupLayerToggles() {
     document.getElementById(id).addEventListener('change', (e) => {
       const vis = e.target.checked ? 'visible' : 'none';
       layers.forEach(l => { if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', vis); });
-
-      // When 3D is toggled, adjust pitch
-      if (id === 'layer-3d') {
-        if (e.target.checked) {
-          map.easeTo({ pitch: 55, bearing: -15, duration: 800 });
-          // Hide 2D parcels when 3D is on
-          map.setLayoutProperty('parcels-fill', 'visibility', 'none');
-        } else {
-          map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
-          if (document.getElementById('layer-parcels').checked) {
-            map.setLayoutProperty('parcels-fill', 'visibility', 'visible');
-          }
-        }
-      }
 
       // Hide individual points when clusters are on
       if (id === 'layer-clusters' && e.target.checked) {
@@ -761,21 +1015,9 @@ function setupParcelColorBy() {
     const field = e.target.value;
     const expr = buildParcelColorExpr(field);
     map.setPaintProperty('parcels-fill', 'fill-color', expr);
-    map.setPaintProperty('parcels-3d', 'fill-extrusion-color', expr);
 
     // Update parcel color legend
     if (typeof buildParcelColorLegend === 'function') buildParcelColorLegend();
-
-    // Update 3D height based on field
-    if (field === 'just_value') {
-      map.setPaintProperty('parcels-3d', 'fill-extrusion-height', ['/', ['coalesce', ['get', 'just_value'], 0], 3000]);
-    } else if (field === 'living_area') {
-      map.setPaintProperty('parcels-3d', 'fill-extrusion-height', ['/', ['coalesce', ['get', 'living_area'], 0], 5]);
-    } else if (field === 'year_built') {
-      map.setPaintProperty('parcels-3d', 'fill-extrusion-height', ['-', ['coalesce', ['get', 'year_built'], 1950], 1900]);
-    } else {
-      map.setPaintProperty('parcels-3d', 'fill-extrusion-height', 30);
-    }
   });
 }
 
@@ -994,6 +1236,9 @@ function setupUI() {
       document.querySelectorAll('.analysis-pane').forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('pane-' + tab.dataset.tab)?.classList.add('active');
+      if (tab.dataset.tab === 'team' && typeof renderPerUserPanel === 'function') {
+        renderPerUserPanel();
+      }
     });
   });
 
@@ -1042,12 +1287,169 @@ function setupUI() {
     }
   });
 
+  // History modal
+  document.getElementById('btn-history').addEventListener('click', openHistoryModal);
+  document.getElementById('history-modal-close').addEventListener('click', () => {
+    document.getElementById('history-modal').classList.remove('show');
+  });
+  document.getElementById('history-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) document.getElementById('history-modal').classList.remove('show');
+  });
+  document.getElementById('btn-daily-refresh').addEventListener('click', runDailyRefresh);
+
   // Upload zones
   setupUploadZones();
   setupLayerToggles();
   setupParcelColorBy();
   setupSymbology();
   initChat();
+}
+
+// ── Version / History ────────────────────────────────────────────────────────
+
+async function loadAnalysisMeta() {
+  try {
+    const res = await fetch('/api/analysis-meta');
+    if (!res.ok) return;
+    const meta = await res.json();
+    const badge = document.getElementById('analyzed-badge');
+    if (!badge) return;
+    const v = meta.contact;
+    if (v) {
+      const d = new Date(v.created_at);
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      badge.textContent = `Analyzed: ${label}`;
+      badge.style.display = '';
+      badge.title = v.label || '';
+    }
+  } catch {}
+}
+
+async function openHistoryModal() {
+  document.getElementById('history-modal').classList.add('show');
+  const body = document.getElementById('history-modal-body');
+  body.innerHTML = '<div class="version-empty">Loading...</div>';
+  try {
+    const res = await fetch('/api/versions');
+    const data = await res.json();
+    const contactVersions = data.community_contact || [];
+    const iaqVersions     = data.iaq_survey || [];
+    let html = '';
+
+    if (contactVersions.length === 0 && iaqVersions.length === 0) {
+      html = '<div class="version-empty">No history yet — data will appear here after the first upload or daily refresh.</div>';
+    } else {
+      if (contactVersions.length > 0) {
+        html += '<div class="version-section-title">Community Contact Data</div><div class="version-list">';
+        contactVersions.forEach((v, i) => {
+          const d = new Date(v.created_at);
+          const dateStr = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const isCurrent = i === 0;
+          html += `<div class="version-item">
+            <div>
+              <div class="version-item-label">${v.label || 'Analysis snapshot'}</div>
+              <div class="version-item-meta">${dateStr}</div>
+            </div>
+            <span class="version-item-pts">${(v.n_points || 0).toLocaleString()} pts</span>
+            ${isCurrent
+              ? '<span style="font-size:11px;color:var(--green);font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,.1)">Current</span>'
+              : `<button class="btn btn-sm" onclick="restoreVersion(${v.id},'${(v.label||'').replace(/'/g,"\\'")}','contact')">Restore</button>`}
+          </div>`;
+        });
+        html += '</div>';
+      }
+      if (iaqVersions.length > 0) {
+        html += '<div class="version-section-title" style="margin-top:20px">IAQ Survey Data</div><div class="version-list">';
+        iaqVersions.forEach((v, i) => {
+          const d = new Date(v.created_at);
+          const dateStr = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const isCurrent = i === 0;
+          html += `<div class="version-item">
+            <div>
+              <div class="version-item-label">${v.label || 'IAQ snapshot'}</div>
+              <div class="version-item-meta">${dateStr}</div>
+            </div>
+            <span class="version-item-pts">${(v.n_points || 0).toLocaleString()} pts</span>
+            ${isCurrent
+              ? '<span style="font-size:11px;color:var(--green);font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,.1)">Current</span>'
+              : `<button class="btn btn-sm" onclick="restoreVersion(${v.id},'${(v.label||'').replace(/'/g,"\\'")}','iaq')">Restore</button>`}
+          </div>`;
+        });
+        html += '</div>';
+      }
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div class="version-empty" style="color:var(--red)">Failed to load history: ${e.message}</div>`;
+  }
+}
+
+async function restoreVersion(id, label, type) {
+  if (!confirm(`Restore "${label}"?\n\nThis will set it as the active dataset. The current data is already saved in history.`)) return;
+  try {
+    const res = await fetch(`/api/versions/${id}/restore`, { method: 'POST' });
+    const data = await res.json();
+    if (!data.restored) throw new Error('Restore failed');
+
+    // Reload the affected layer
+    if (type === 'contact') {
+      const pts = await (await fetch('/api/survey-points')).json();
+      surveyData = pts;
+      map.getSource('survey')?.setData(pts);
+      map.getSource('survey-clustered')?.setData(pts);
+      if (pts.features?.length) {
+        map.setLayoutProperty('survey-points', 'visibility', 'visible');
+        markStep1Done(); unlockIAQStep();
+      }
+      const ana = await (await fetch('/api/analysis')).json();
+      analysisData = ana;
+      buildAnalysis();
+      fitBounds();
+    } else {
+      const iaqPts = await (await fetch('/api/iaq-points')).json();
+      iaqData = iaqPts;
+      const iaqAna = await (await fetch('/api/iaq-analysis')).json();
+      if (iaqAna.loaded) iaqAnalysis = iaqAna;
+      updateIAQOnMap();
+      buildSurveyResultsTab(iaqAnalysis);
+    }
+
+    await loadAnalysisMeta();
+    document.getElementById('history-modal').classList.remove('show');
+    openHistoryModal();   // refresh the list
+  } catch (e) {
+    alert(`Restore failed: ${e.message}`);
+  }
+}
+
+async function runDailyRefresh() {
+  const btn = document.getElementById('btn-daily-refresh');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  try {
+    const res = await fetch('/api/daily-refresh', { method: 'POST' });
+    const data = await res.json();
+    if (data.refreshed) {
+      // Reload contact points with merged field data
+      const pts = await (await fetch('/api/survey-points')).json();
+      surveyData = pts;
+      map.getSource('survey')?.setData(pts);
+      map.getSource('survey-clustered')?.setData(pts);
+      const ana = await (await fetch('/api/analysis')).json();
+      analysisData = ana;
+      buildAnalysis();
+      await loadAnalysisMeta();
+      alert(`Refresh complete: ${data.new_field_points} new field visits merged (${data.total_points} total).\n\n"${data.label}"`);
+    } else {
+      alert(`No new field data found since last analysis.\n\n${data.reason}`);
+    }
+    openHistoryModal();   // refresh the version list
+  } catch (e) {
+    alert(`Refresh failed: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Run Daily Refresh Now';
+  }
 }
 
 // ── Symbology controls ──────────────────────────────────────────────────────
@@ -1262,7 +1664,6 @@ function buildParcelColorLegend() {
         PARCEL_LU_COLORS[lu] = e.target.value;
         const expr = buildParcelColorExpr('land_use');
         map.setPaintProperty('parcels-fill', 'fill-color', expr);
-        map.setPaintProperty('parcels-3d', 'fill-extrusion-color', expr);
       });
       container.appendChild(row);
     });
@@ -2704,7 +3105,6 @@ function getCurrentMapState() {
     clusters:       'layer-clusters',
     heatmap:        'layer-heatmap',
     labels:         'layer-labels',
-    '3d':           'layer-3d',
   };
   const on  = Object.entries(checks).filter(([, id]) => document.getElementById(id)?.checked).map(([k]) => k);
   const off = Object.entries(checks).filter(([, id]) => !document.getElementById(id)?.checked).map(([k]) => k);
