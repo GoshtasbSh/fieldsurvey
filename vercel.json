@@ -2,11 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
-  "functions": {
-    "api/*.py": {
-      "runtime": "@vercel/python@latest"
-    }
-  },
   "crons": [
     { "path": "/api/daily-refresh", "schedule": "0 6 * * *" }
   ],
