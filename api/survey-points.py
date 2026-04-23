@@ -8,5 +8,5 @@ from _lib import load_cached, json_response, empty_geojson
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        data = load_cached("survey_points") or empty_geojson()
+        data = load_cached("community_contact") or empty_geojson()
         json_response(self, 200, data, cache="public, max-age=30")

@@ -1544,6 +1544,18 @@ async def lifespan(application):
         log.info("IAQ survey data: not in Supabase — upload required")
 
     analysis = compute_analysis(survey_data, parcels_data)
+
+    # Persist analysis + parcels blobs to Supabase so the Vercel dashboard
+    # can read them without re-running this pipeline.
+    try:
+        if analysis:
+            _sb_save('analysis', analysis)
+        if parcels_data and parcels_data.get('features'):
+            _sb_save('parcels', parcels_data)
+        log.info("Persisted analysis + parcels blobs to Supabase.")
+    except Exception as e:
+        log.warning(f"Could not persist analysis/parcels blobs: {e}")
+
     log.info("-" * 50)
     log.info("  Ready! Open http://localhost:8050")
     log.info("-" * 50)
@@ -1700,6 +1712,8 @@ async def daily_refresh():
     analysis    = compute_analysis(survey_data, parcels_data)
     await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
     await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n_total)
+    if analysis:
+        await asyncio.to_thread(_sb_save, 'analysis', analysis)
     log.info(f"Daily refresh: +{len(new_rows)} field points → {n_total} total → '{label}'")
     return JSONResponse({"refreshed": True, "new_field_points": len(new_rows),
                          "total_points": n_total, "label": label})
@@ -2223,6 +2237,8 @@ async def upload_survey(file: UploadFile = File(...)):
         label = f"Upload {_date.today().isoformat()} — {n} contacts"
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
+        if analysis:
+            await asyncio.to_thread(_sb_save, 'analysis', analysis)
         return {"status": "ok", "points": n}
     finally:
         # Always delete the temp file immediately — never leave data on disk
@@ -2262,6 +2278,13 @@ async def upload_parcels(file: UploadFile = File(...)):
         parcels_data = json.loads(txt)
         await asyncio.to_thread(_build_parcel_index, parcels_data)
         analysis = compute_analysis(survey_data, parcels_data)
+        # Persist so Vercel dashboard reads fresh data without re-ingesting
+        try:
+            await asyncio.to_thread(_sb_save, 'parcels', parcels_data)
+            if analysis:
+                await asyncio.to_thread(_sb_save, 'analysis', analysis)
+        except Exception as e:
+            log.warning(f"Could not persist parcels/analysis blobs: {e}")
         return {"status": "ok", "parcels": len(gdf)}
     except Exception as e:
         raise HTTPException(400, str(e))
