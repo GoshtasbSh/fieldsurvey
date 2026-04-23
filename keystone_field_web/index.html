@@ -1670,6 +1670,10 @@ function setCcMode(mode) {
       map.setFilter('community-dots', null);
     }
   }
+  // Also propagate the All Time/Today mode to the field-points layers so the
+  // user's requirement (1-3) is respected: "All Time" = show all,
+  // "Today" = show everyone's today points (is_mine styling stays).
+  applyFieldFilters();
   updateCcPanel();
 }
 
@@ -1696,12 +1700,41 @@ function updateCcPanel() {
 }
 
 /* ── FILTER CHIPS ── */
+// Top filter chips reflect the user's own today progress. Clicking a status
+// must narrow the map to the intersection of:
+//   - is_mine = true (so we don't surface teammate points the count excludes)
+//   - collected_at >= today midnight (so the map matches "today" counts)
+//   - (optional) status = <clicked>
+// Keeps count label and visible map in sync: clicking "Completed 2" shows 2 dots.
 function setFilter(status) {
   currentFilter = status;
   document.querySelectorAll('.fc').forEach(c => c.classList.toggle('active', c.dataset.filter === status));
-  const expr = status === 'all' ? null : ['==', ['get','status'], status];
+  applyFieldFilters();
+}
+
+function _todayIsoMidnight() {
+  const d = new Date(); d.setHours(0,0,0,0);
+  return d.toISOString();
+}
+
+function applyFieldFilters() {
+  if (!map) return;
+  // Three rules, reflecting the user's intent:
+  //   - Status chip selected  → show ONLY my today points of that status (1-4)
+  //   - 'All' chip + ccMode=today → show everyone's today points (is_mine styling stays) (1-3)
+  //   - 'All' chip + ccMode=all  → show everything (default overview) (1-3)
+  let filter = null;
+  if (currentFilter && currentFilter !== 'all') {
+    filter = ['all',
+      ['==', ['get','is_mine'], true],
+      ['>=', ['get','collected_at'], _todayIsoMidnight()],
+      ['==', ['get','status'], currentFilter],
+    ];
+  } else if (ccMode === 'today') {
+    filter = ['>=', ['get','collected_at'], _todayIsoMidnight()];
+  }
   ['survey-glow','survey-dots','survey-labels'].forEach(id => {
-    if (map && map.getLayer(id)) map.setFilter(id, expr);
+    if (map.getLayer(id)) map.setFilter(id, filter);
   });
 }
 
