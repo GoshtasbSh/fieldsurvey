@@ -568,6 +568,77 @@ function escapeHtml(s) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+// ── Data-summary panel in the Update Data modal ──────────────────────────────
+function _fmtRelative(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!t) return '';
+  const diff = (Date.now() - t) / 60000;
+  if (diff < 1) return 'just now';
+  if (diff < 60) return `${Math.round(diff)} min ago`;
+  if (diff < 60*24) return `${Math.round(diff/60)} h ago`;
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month:'short', day:'numeric' });
+}
+
+async function renderDataSummary() {
+  const cards = {
+    community_contact: { count: 'ds-community-count', file: 'ds-community-file', when: 'ds-community-when', countPath: 'features' },
+    iaq_survey:        { count: 'ds-iaq-count',       file: 'ds-iaq-file',       when: 'ds-iaq-when',       countPath: 'geojson.features' },
+    parcels:           { count: 'ds-parcels-count',   file: 'ds-parcels-file',   when: 'ds-parcels-when',   countPath: 'features' },
+  };
+  const parent = {
+    community_contact: document.querySelector('[data-dataset="community_contact"]'),
+    iaq_survey:        document.querySelector('[data-dataset="iaq_survey"]'),
+    parcels:           document.querySelector('[data-dataset="parcels"]'),
+  };
+  for (const key of Object.keys(cards)) {
+    const c = cards[key]; const el = parent[key];
+    const countEl = document.getElementById(c.count);
+    const whenEl  = document.getElementById(c.when);
+    if (countEl) countEl.textContent = '…';
+    if (whenEl) whenEl.textContent = '';
+    if (el) { el.classList.remove('fresh','empty'); }
+  }
+  if (!sbClient) return;
+  try {
+    const { data, error } = await sbClient
+      .from('keystone_dashboard_data')
+      .select('data_type, payload, updated_at');
+    if (error) throw error;
+    const byType = Object.fromEntries((data || []).map(r => [r.data_type, r]));
+    for (const [key, c] of Object.entries(cards)) {
+      const row = byType[key];
+      const countEl = document.getElementById(c.count);
+      const whenEl  = document.getElementById(c.when);
+      const fileEl  = document.getElementById(c.file);
+      const el = parent[key];
+      if (!row) {
+        if (countEl) { countEl.textContent = '—'; countEl.classList.add('empty'); }
+        if (whenEl) whenEl.textContent = '';
+        if (el) el.classList.add('empty');
+        continue;
+      }
+      // Count
+      let n = 0;
+      const payload = row.payload || {};
+      if (c.countPath === 'features') n = (payload.features || []).length;
+      else if (c.countPath === 'geojson.features') n = ((payload.geojson || {}).features || []).length;
+      if (countEl) { countEl.textContent = n.toLocaleString(); countEl.classList.remove('empty'); }
+      if (whenEl) whenEl.textContent = `Updated ${_fmtRelative(row.updated_at)}`;
+      if (fileEl && key !== 'parcels') fileEl.textContent = payload.source_filename || 'Processed dataset';
+      if (el) {
+        el.classList.remove('empty');
+        if (row.updated_at && (Date.now() - new Date(row.updated_at).getTime()) < 60*60*1000) {
+          el.classList.add('fresh');
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('data-summary load failed:', e);
+  }
+}
+
 // ── Parcel color expression ─────────────────────────────────────────────────
 function buildParcelColorExpr(field) {
   if (field === 'land_use') {
@@ -1287,6 +1358,7 @@ function setupUI() {
   // Import modal — check survey status so Step 2 unlocks if data already loaded
   document.getElementById('btn-import').addEventListener('click', async () => {
     document.getElementById('import-modal').classList.add('show');
+    renderDataSummary();  // populate current-data panel from Supabase
     try {
       const res = await fetch('/api/survey-points');
       const data = await res.json();

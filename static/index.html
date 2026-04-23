@@ -176,6 +176,22 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .modal-header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid var(--border)}
 .modal-header h2{font-size:16px;font-weight:600}
 .modal-body{padding:20px 24px}
+.data-summary{margin-bottom:20px}
+.data-summary-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.data-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.data-summary-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
+.data-summary-card.fresh{border-color:rgba(16,185,129,.4)}
+.data-summary-card.empty{opacity:.55}
+.data-summary-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.data-summary-label{font-size:12px;font-weight:600;color:var(--text)}
+.data-summary-count{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--text);line-height:1}
+.data-summary-count.empty{color:var(--muted);font-weight:500}
+.data-summary-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+.data-summary-file{font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.data-summary-when{font-size:10px;color:var(--muted);font-family:var(--mono)}
+@media (max-width:640px){.data-summary-grid{grid-template-columns:1fr}}
+.data-section-divider{display:flex;align-items:center;gap:10px;margin:8px 0 16px;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.data-section-divider::before,.data-section-divider::after{content:"";flex:1;height:1px;background:var(--border)}
 .upload-zone{border:2px dashed var(--border);border-radius:var(--r);padding:28px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:16px}
 .upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:rgba(59,130,246,0.04)}
 .upload-zone h4{font-size:13px;font-weight:600;margin-bottom:4px}
@@ -348,9 +364,9 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         History
       </button>
-      <button class="btn" id="btn-import">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Re-upload
+      <button class="btn" id="btn-import" title="Review or replace the uploaded datasets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 12a9 9 0 1 1-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
+        Update Data
       </button>
       <button class="btn btn-icon" id="btn-fullscreen" title="Fullscreen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
@@ -741,16 +757,60 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
   </div>
 </div>
 
-<!-- Import Modal -->
+<!-- Import / Update Data Modal -->
 <div class="modal-overlay" id="import-modal">
   <div class="modal">
     <div class="modal-header">
-      <h2>Import Data</h2>
-      <button class="btn btn-icon" id="modal-close">
+      <div>
+        <h2 style="margin:0">Update Data</h2>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">
+          Your current datasets are persisted in Supabase. Replace any source below to push a new version.
+        </div>
+      </div>
+      <button class="btn btn-icon" id="modal-close" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="modal-body">
+
+      <!-- Current datasets — populated from Supabase on modal open -->
+      <section class="data-summary" id="data-summary" aria-label="Currently loaded datasets">
+        <div class="data-summary-title">Currently loaded</div>
+        <div class="data-summary-grid">
+          <div class="data-summary-card" data-dataset="community_contact">
+            <div class="data-summary-row">
+              <span class="data-summary-label">Community Survey</span>
+              <span class="data-summary-count" id="ds-community-count">—</span>
+            </div>
+            <div class="data-summary-meta">
+              <span class="data-summary-file" id="ds-community-file">No upload yet</span>
+              <span class="data-summary-when" id="ds-community-when"></span>
+            </div>
+          </div>
+          <div class="data-summary-card" data-dataset="iaq_survey">
+            <div class="data-summary-row">
+              <span class="data-summary-label">IAQ Survey</span>
+              <span class="data-summary-count" id="ds-iaq-count">—</span>
+            </div>
+            <div class="data-summary-meta">
+              <span class="data-summary-file" id="ds-iaq-file">No upload yet</span>
+              <span class="data-summary-when" id="ds-iaq-when"></span>
+            </div>
+          </div>
+          <div class="data-summary-card" data-dataset="parcels">
+            <div class="data-summary-row">
+              <span class="data-summary-label">Parcels</span>
+              <span class="data-summary-count" id="ds-parcels-count">—</span>
+            </div>
+            <div class="data-summary-meta">
+              <span class="data-summary-file" id="ds-parcels-file">Auto-ingested</span>
+              <span class="data-summary-when" id="ds-parcels-when"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="data-section-divider"><span>Replace a dataset</span></div>
 
       <!-- Step 1 -->
       <div class="upload-step-label">

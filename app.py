@@ -44,13 +44,19 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 # ── Supabase client (service role — bypasses RLS) ─────────────────────────────
+sb = None
+_sb_init_error = None
 try:
     from supabase import create_client as _sb_create_client
     _SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
     _SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-    sb = _sb_create_client(_SUPABASE_URL, _SUPABASE_KEY) if _SUPABASE_URL and _SUPABASE_KEY else None
-except Exception:
-    sb = None
+    if _SUPABASE_URL and _SUPABASE_KEY:
+        sb = _sb_create_client(_SUPABASE_URL, _SUPABASE_KEY)
+    else:
+        _sb_init_error = f"missing env (URL set={bool(_SUPABASE_URL)}, KEY set={bool(_SUPABASE_KEY)})"
+except Exception as e:
+    _sb_init_error = f"{type(e).__name__}: {e}"
+print(f"[supabase] client = {'READY' if sb else 'DISABLED — ' + (_sb_init_error or 'unknown')}", flush=True)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE = Path(__file__).parent
@@ -1507,8 +1513,10 @@ async def lifespan(application):
         log.info(f"Auto-processing {SURVEY_FILE.name} with parcel geocoding (first run)...")
         loop = asyncio.get_event_loop()
         survey_data = await loop.run_in_executor(None, process_survey, SURVEY_FILE)
+        try: survey_data['source_filename'] = SURVEY_FILE.name
+        except Exception: pass
         n = len(survey_data.get('features', []))
-        label = f"Initial Analysis — {n} contacts ({_date.today().isoformat()})"
+        label = f"Initial Analysis — {n} contacts · {SURVEY_FILE.name}"
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
         log.info(f"Auto-processed and saved {n} contact points to Supabase as '{label}'")
@@ -1533,8 +1541,9 @@ async def lifespan(application):
             iaq_payload = {
                 'geojson': iaq_data, 'analysis': iaq_analysis,
                 'street_stats': street_stats, 'validation': iaq_validation,
+                'source_filename': IAQ_FILE.name,
             }
-            label = f"Initial IAQ Analysis — {n} responses ({_date.today().isoformat()})"
+            label = f"Initial IAQ Analysis — {n} responses · {IAQ_FILE.name}"
             await asyncio.to_thread(_sb_save, 'iaq_survey', iaq_payload)
             await asyncio.to_thread(_sb_save_version, 'iaq_survey', iaq_payload, label, n)
             log.info(f"Auto-processed and saved {n} IAQ points as '{label}'")
@@ -1767,12 +1776,13 @@ async def upload_iaq(file: UploadFile = File(...)):
 
     n = len(iaq_data.get("features", []))
     iaq_payload = {
-        'geojson':      iaq_data,
-        'analysis':     iaq_analysis,
-        'street_stats': street_stats,
-        'validation':   iaq_validation,
+        'geojson':         iaq_data,
+        'analysis':        iaq_analysis,
+        'street_stats':    street_stats,
+        'validation':      iaq_validation,
+        'source_filename': file.filename,
     }
-    iaq_label = f"IAQ Upload {_date.today().isoformat()} — {n} responses"
+    iaq_label = f"IAQ Upload {_date.today().isoformat()} — {n} responses · {file.filename}"
     await asyncio.to_thread(_sb_save, 'iaq_survey', iaq_payload)
     await asyncio.to_thread(_sb_save_version, 'iaq_survey', iaq_payload, iaq_label, n)
     n_streets = len([s for s, d in street_stats.items() if not d.get("insufficient_data")])
@@ -2232,14 +2242,18 @@ async def upload_survey(file: UploadFile = File(...)):
         # Run blocking geocoding in a thread — keeps event loop responsive
         loop = asyncio.get_event_loop()
         survey_data = await loop.run_in_executor(None, process_survey, tmp)
+        # Tag the payload with its source filename so the Update Data modal
+        # can display it — ignored by everything else.
+        try: survey_data['source_filename'] = file.filename
+        except Exception: pass
         analysis = compute_analysis(survey_data, parcels_data)
         n = len(survey_data.get("features", []))
-        label = f"Upload {_date.today().isoformat()} — {n} contacts"
+        label = f"Upload {_date.today().isoformat()} — {n} contacts · {file.filename}"
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
         if analysis:
             await asyncio.to_thread(_sb_save, 'analysis', analysis)
-        return {"status": "ok", "points": n}
+        return {"status": "ok", "points": n, "filename": file.filename}
     finally:
         # Always delete the temp file immediately — never leave data on disk
         tmp.unlink(missing_ok=True)
