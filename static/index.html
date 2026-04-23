@@ -867,6 +867,30 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<!-- Auth gate — no session → send to login. Runs BEFORE dashboard.js so we
+     never flash an unauthenticated map. Mobile devices are bounced to the
+     field PWA entry so the login flow lands them on the right app. -->
+<script>
+(async () => {
+  const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    || window.innerWidth < 768;
+  if (isMobile) { window.location.replace('/keystone_field_web/index.html'); return; }
+  try {
+    const r = await fetch('/api/config', { cache: 'no-store' });
+    if (!r.ok) throw new Error('config');
+    const { supabase_url, supabase_anon_key } = await r.json();
+    if (!supabase_url || !supabase_anon_key || !window.supabase) return;  // offline/dev → let dashboard load
+    const sb = window.supabase.createClient(supabase_url, supabase_anon_key);
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) {
+      window.location.replace('/keystone_field_web/login.html');
+    }
+  } catch (e) {
+    // If auth check fails outright, still send to login rather than silently unauth
+    window.location.replace('/keystone_field_web/login.html');
+  }
+})();
+</script>
 <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

@@ -3,17 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <title>KeyStone</title>
-  <script>
-    // Route based on device: phone/tablet → field PWA; everything else → desktop dashboard.
-    const mobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-      || window.innerWidth < 900;
-    window.location.replace(mobile ? '/keystone_field_web/index.html' : '/static/index.html');
-  </script>
-  <noscript>
-    <meta http-equiv="refresh" content="0; url=/keystone_field_web/index.html">
-  </noscript>
+  <!-- Always go to login first. The login page checks for an existing session
+       and redirects by device (desktop → /dashboard, mobile → /field). -->
+  <meta http-equiv="refresh" content="0; url=/keystone_field_web/login.html">
+  <script>window.location.replace('/keystone_field_web/login.html');</script>
 </head>
 <body>
-  <p><a href="/static/index.html">Desktop dashboard</a> · <a href="/keystone_field_web/index.html">Field app</a></p>
+  <a href="/keystone_field_web/login.html">Sign in to KeyStone</a>
 </body>
 </html>
