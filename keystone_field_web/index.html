@@ -646,6 +646,10 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 }
 .exp-hero-n{font-family:'IBM Plex Mono',monospace;font-size:64px;font-weight:500;color:var(--success);line-height:1;}
 .exp-hero-lbl{font-size:13px;font-weight:700;color:var(--muted);margin-top:6px;letter-spacing:.02em;}
+.exp-breakdown{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;}
+.exp-breakdown-chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--muted);background:var(--card-2,var(--card));border:1px solid var(--border);padding:3px 8px;border-radius:999px;white-space:nowrap;}
+.exp-breakdown-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.exp-breakdown-empty{font-size:10px;color:var(--muted);opacity:.6;font-style:italic;}
 
 /* Email card */
 .email-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;}
@@ -883,6 +887,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
   <div class="exp-hero">
     <div class="exp-hero-n" id="exp-today-n">0</div>
     <div class="exp-hero-lbl">Completed Today</div>
+    <div class="exp-breakdown" id="exp-breakdown"></div>
   </div>
 
   <!-- Download CSV -->
@@ -1040,6 +1045,9 @@ let offlineQueue = [];
 let lastStatus = localStorage.getItem('ks-last-status') || 'No Answer';
 let counts = {};
 let totalPts = 0, todayPts = 0;
+// Cached raw rows from field_survey_points — used by CSV export + status breakdown
+// so we don't re-query Supabase for every export click.
+let _allFieldPoints = [];
 let bsOpen = false;
 let bsCoords = null;
 const isMobile = () => window.innerWidth < 768;
@@ -1305,9 +1313,11 @@ function addIAQLayer(iaqPts) {
 async function loadSupabaseData() {
   try {
     const { data: pts } = await sb.from('field_survey_points')
-      .select('id,lat,lon,status,notes,collector_name,collected_at')
+      .select('id,lat,lon,status,notes,collector_id,collector_name,collected_at')
       .order('collected_at', { ascending: false }).limit(2000);
-    if (pts && pts.length) { map.getSource('survey').setData(pointsToGeoJSON(pts)); recalcCounts(pts); }
+    _allFieldPoints = pts || [];
+    if (_allFieldPoints.length) map.getSource('survey').setData(pointsToGeoJSON(_allFieldPoints));
+    recalcCounts(_allFieldPoints);
   } catch (e) { console.warn('Load field points failed:', e); }
 
   // Community contacts come from the server (geocoded from Excel)
@@ -1334,16 +1344,23 @@ function initRealtime() {
   sb.channel('field-points-live')
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'field_survey_points' }, ({ new: p }) => {
       if (locallyAdded.has(p.id)) return;
+      _allFieldPoints.unshift(p);
       appendPointToMap({ ...p, collector_name: p.collector_name || 'Surveyor' });
       pulsePoint([p.lon, p.lat], STATUS_COLORS[p.status] || '#9ca3af');
       const mine = currentUser?.id && p.collector_id === currentUser.id;
       if (!mine) showToast(`${p.collector_name || 'Someone'}: ${p.status}`, STATUS_COLORS[p.status] || '#9ca3af');
+      // Counts don't change for teammates' points (they're only my progress)
     })
     .on('postgres_changes', { event:'UPDATE', schema:'public', table:'field_survey_points' }, ({ new: p }) => {
+      const i = _allFieldPoints.findIndex(x => x.id === p.id);
+      if (i >= 0) _allFieldPoints[i] = p;
       replacePointOnMap({ ...p, collector_name: p.collector_name || 'Surveyor' });
     })
     .on('postgres_changes', { event:'DELETE', schema:'public', table:'field_survey_points' }, ({ old: p }) => {
-      if (p && p.id) removePointFromMap(p.id);
+      if (p && p.id) {
+        _allFieldPoints = _allFieldPoints.filter(x => x.id !== p.id);
+        removePointFromMap(p.id);
+      }
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'user_presence' }, () => {
       if (typeof renderTeam === 'function') renderTeam();
@@ -1471,7 +1488,9 @@ async function savePoint(coords) {
   const collectorId = currentUser?.id || null;
   if (!navigator.onLine || !sb) {
     queuePush({ ...newPt, coords });
-    appendPointToMap({ ...newPt, id: 'q' + Date.now(), collector_id: collectorId });
+    const localId = 'q' + Date.now();
+    _allFieldPoints.unshift({ ...newPt, id: localId, collector_id: collectorId });
+    appendPointToMap({ ...newPt, id: localId, collector_id: collectorId });
     showToast(status + (navigator.onLine ? '' : ' — queued'), color, !navigator.onLine);
   } else {
     let insertedId = null;
@@ -1485,7 +1504,9 @@ async function savePoint(coords) {
       console.warn('Insert failed, queuing:', err);
       queuePush({ ...newPt, coords });
     }
-    appendPointToMap({ ...newPt, id: insertedId || ('l' + Date.now()), collector_id: collectorId });
+    const finalId = insertedId || ('l' + Date.now());
+    _allFieldPoints.unshift({ ...newPt, id: finalId, collector_id: collectorId });
+    appendPointToMap({ ...newPt, id: finalId, collector_id: collectorId });
     showToast(status, color, false);
   }
 
@@ -1558,17 +1579,24 @@ function pulsePoint(coords, color) {
 }
 
 /* ── COUNTS ── */
+// Counts show ONLY the signed-in user's points. Other users' points are still
+// visible on the map (desaturated), but the filter bar + legend counts + export
+// stats represent personal progress. Legend 'lc-*' ids reflect today's totals.
 function recalcCounts(pts) {
   counts = {};
   Object.keys(STATUS_COLORS).forEach(s => counts[s] = 0);
-  pts.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
-  totalPts = pts.length;
+  const myId = currentUser?.id || null;
   const today = new Date().toDateString();
-  todayPts = pts.filter(p => new Date(p.collected_at).toDateString() === today).length;
+  const mine = pts.filter(p => myId ? p.collector_id === myId : false);
+  const mineToday = mine.filter(p => new Date(p.collected_at).toDateString() === today);
+  mineToday.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
+  totalPts = mine.length;      // all-time mine
+  todayPts = mineToday.length; // today mine
   renderCounts();
 }
 
 function updateCountUI(status) {
+  // Only called after I save a point, so always bump my own counters.
   if (counts[status] !== undefined) counts[status]++;
   totalPts++; todayPts++;
   renderCounts();
@@ -1601,6 +1629,10 @@ function renderCounts() {
   }
   const tot = document.getElementById('sb-stat-total');
   if (tot) tot.textContent = `${totalPts} total · +${todayPts} today`;
+  // Keep the export panel's hero + breakdown in sync when it's open
+  if (document.getElementById('panel-export')?.classList.contains('active')) {
+    renderExportStats();
+  }
 }
 
 /* ── COMMUNITY CONTACTS LOADER ── */
@@ -2022,7 +2054,24 @@ function timeAgo(iso) {
 
 /* ── EXPORT PANEL ── */
 function renderExportStats() {
-  document.getElementById('exp-today-n').textContent = counts['Completed'] || 0;
+  const heroEl = document.getElementById('exp-today-n');
+  if (!heroEl) return;
+  heroEl.textContent = counts['Completed'] || 0;
+
+  // Breakdown by status (your own today) — rendered under the hero number
+  const host = document.getElementById('exp-breakdown');
+  if (!host) return;
+  const nonZero = Object.entries(STATUS_COLORS)
+    .map(([s, c]) => [s, counts[s] || 0, c])
+    .filter(([s, n]) => n > 0 && s !== 'Completed');
+  if (!nonZero.length) {
+    host.innerHTML = '<span class="exp-breakdown-empty">Completed is your only status today.</span>';
+    return;
+  }
+  host.innerHTML = nonZero
+    .map(([s, n, c]) =>
+      `<span class="exp-breakdown-chip"><span class="exp-breakdown-dot" style="background:${c}"></span>${s} ${n}</span>`
+    ).join('');
 }
 
 async function emailData() {
@@ -2046,12 +2095,21 @@ async function downloadCSV(table) {
   try {
     let data, filename, cols;
     if (table === 'survey') {
+      // Export ONLY the current user's field points. Switch to shared-team CSV
+      // later if/when the export panel adds a teammate scope toggle.
+      if (!currentUser?.id) { showToast('Sign in to download your data', '#f59e0b'); return; }
       const res = await sb.from('field_survey_points')
         .select('id,lat,lon,status,notes,collector_name,collected_at')
+        .eq('collector_id', currentUser.id)
         .order('collected_at', { ascending: false }).limit(5000);
       data = res.data || [];
       cols = ['id','lat','lon','status','notes','collector_name','collected_at'];
-      filename = 'keystone_survey_points.csv';
+      filename = `keystone_survey_${currentUser.name.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+      if (!data.length) {
+        showToast('You have no points to download yet', '#f59e0b');
+        return;
+      }
+      showToast(`Downloading ${data.length} of your points…`, '#38bdf8');
     } else if (table === 'community') {
       const res = await sb.from('community_contacts')
         .select('id,address,street_name,lat,lon,status').limit(5000);
@@ -2138,7 +2196,7 @@ function geolocate() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('hamburger').addEventListener('click', toggleSidebar);
   document.getElementById('backdrop').addEventListener('click', () => { if (sidebarOpen) toggleSidebar(); });
-  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : tryGPSFirst(); });
+  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : enterPlaceMode(); });
   document.getElementById('theme-btn').addEventListener('click', switchTheme);
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('btn-locate').addEventListener('click', geolocate);

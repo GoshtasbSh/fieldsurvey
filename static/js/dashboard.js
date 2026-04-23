@@ -873,6 +873,7 @@ function buildUnifiedStatusControls() {
     const row = document.createElement('div');
     row.className = 'legend-item';
     row.dataset.status = status;
+    row.setAttribute('data-status-row', status);
     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;color:var(--text2);transition:opacity .15s';
 
     row.innerHTML = `
@@ -903,24 +904,38 @@ function buildLegend() {
   buildUnifiedStatusControls();
 }
 
+// `activeFilters` is the set of statuses the user wants to SHOW. Empty = show all.
+// Clicking a status toggles it in/out of the shown set; when the set becomes empty
+// we revert to showing everything (so the user can clear all filters by re-clicking).
 function toggleStatusFilter(status, el) {
   if (activeFilters.has(status)) {
     activeFilters.delete(status);
-    el.style.opacity = '1';
   } else {
     activeFilters.add(status);
-    el.style.opacity = '0.25';
   }
+  updateStatusRowHighlights();
   applyFilters();
 }
 
+function updateStatusRowHighlights() {
+  // When nothing is selected, no dimming (show-all). When something is selected,
+  // dim the rows that aren't in the selection.
+  const rows = document.querySelectorAll('[data-status-row]');
+  const anySelected = activeFilters.size > 0;
+  rows.forEach(row => {
+    const s = row.getAttribute('data-status-row');
+    if (!anySelected) { row.style.opacity = '1'; return; }
+    row.style.opacity = activeFilters.has(s) ? '1' : '0.35';
+  });
+}
+
 function applyFilters() {
-  const search = document.getElementById('search-input').value.toLowerCase();
+  const search = (document.getElementById('search-input')?.value || '').toLowerCase();
   let filter = ['all'];
 
-  // Status filter
+  // Status filter: show only selected; if nothing selected, no status filter
   if (activeFilters.size > 0) {
-    const shown = Object.keys(STATUS_COLORS).filter(s => !activeFilters.has(s));
+    const shown = [...activeFilters];
     filter.push(['in', 'status', ...shown]);
   }
 
