@@ -73,10 +73,32 @@ def _build_from_table() -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
+def _trim_cached() -> dict | None:
+    """Load the cached blob from keystone_dashboard_data and trim it in place
+    so the response fits under Vercel's 4.5MB limit."""
+    from _lib import load_cached
+    raw = load_cached("parcels")
+    if not raw or "features" not in raw:
+        return None
+    feats = raw.get("features") or []
+    out = []
+    for f in feats:
+        if not f or "geometry" not in f:
+            continue
+        out.append({
+            "type": "Feature",
+            "geometry": _round_geom(f.get("geometry")),
+            "properties": _compact_props(f.get("properties") or {}),
+        })
+    return {"type": "FeatureCollection", "features": out}
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Always query the table (never the cached blob) — the blob was saved by
-        # app.py with full precision and exceeds Vercel's 4.5MB response limit.
-        # Live queries with trimmed precision fit comfortably.
-        data = _build_from_table()
-        json_response(self, 200, data, cache="public, max-age=300")
+        # Prefer the cached blob (fast, one query) — trim precision + drop
+        # empty props so it fits in Vercel's 4.5MB body limit.
+        # Fall back to live table query if the blob is missing/empty.
+        data = _trim_cached()
+        if not data or not data.get("features"):
+            data = _build_from_table()
+        json_response(self, 200, data or empty_geojson(), cache="public, max-age=300")

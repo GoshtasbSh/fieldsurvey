@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>KeyStone</title>
+  <script>
+    // Route based on device: phone/tablet → field PWA; everything else → desktop dashboard.
+    const mobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      || window.innerWidth < 900;
+    window.location.replace(mobile ? '/keystone_field_web/index.html' : '/static/index.html');
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/keystone_field_web/index.html">
+  </noscript>
+</head>
+<body>
+  <p><a href="/static/index.html">Desktop dashboard</a> · <a href="/keystone_field_web/index.html">Field app</a></p>
+</body>
+</html>
