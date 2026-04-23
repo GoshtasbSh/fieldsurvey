@@ -33,5 +33,6 @@ keystone_field_web/vercel.json
 # functions are only needed locally for `supabase db push` / `supabase functions deploy`.
 supabase/
 
-# Python deps for Vercel functions live in api/requirements.txt, not root
-requirements.txt
+# Local-only Python deps (geopandas/fiona/shapely/pandas/fastapi/uvicorn).
+# Vercel reads the root `requirements.txt` (supabase only) for api/*.py.
+requirements-local.txt

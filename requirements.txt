@@ -1,11 +1,7 @@
-fastapi==0.128.8
-uvicorn[standard]==0.39.0
-pandas>=2.0
-openpyxl>=3.1
-geopandas>=1.0
-fiona>=1.10
-shapely>=2.0
-pyproj>=3.6
-requests>=2.31
-python-multipart>=0.0.17
-aiofiles>=24.0
+# Vercel Python Functions — minimal runtime deps.
+# Vercel reads this file (not api/requirements.txt) when building api/*.py.
+# Do NOT add geopandas/fiona/shapely — they are too large for Vercel's 250MB
+# function bundle limit and are only needed for local ingest. Local deps live
+# in requirements-local.txt.
+
+supabase>=2.5.0
