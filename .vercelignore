@@ -27,5 +27,11 @@ scripts/
 # Retired nested config
 keystone_field_web/vercel.json
 
+# CRITICAL — local Supabase CLI directory shadows the pip-installed `supabase`
+# Python package on Vercel, causing "ImportError: cannot import name
+# 'create_client' from 'supabase' (unknown location)". Migrations + edge
+# functions are only needed locally for `supabase db push` / `supabase functions deploy`.
+supabase/
+
 # Python deps for Vercel functions live in api/requirements.txt, not root
 requirements.txt
