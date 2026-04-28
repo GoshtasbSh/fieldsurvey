@@ -149,6 +149,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .team-row-today{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--accent);line-height:1}
 .team-row-total{font-size:10px;color:var(--muted);margin-top:2px}
 .team-empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px}
+/* Team sub-tab toggle */
+.team-toggle{display:flex;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:14px}
+.team-toggle-btn{flex:1;padding:6px 0;border:none;border-radius:6px;cursor:pointer;font:500 12px var(--font);background:transparent;color:var(--muted);transition:.15s;display:flex;align-items:center;justify-content:center;gap:5px}
+.team-toggle-btn.active{background:var(--accent);color:#fff}
+.team-toggle-btn:not(.active):hover{background:rgba(255,255,255,.06)}
+.team-toggle-btn .tbadge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:rgba(255,255,255,.3);font-size:10px;font-weight:700;line-height:16px;text-align:center;display:none;font-family:var(--mono)}
+.team-toggle-btn.active .tbadge{display:inline-block}
 /* Team chat bubbles */
 .tchat-msg{display:flex;flex-direction:column;max-width:92%;gap:2px}
 .tchat-msg.mine{align-self:flex-end;align-items:flex-end}
@@ -157,8 +164,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .tchat-msg.mine   .tchat-bubble{background:var(--accent);color:#fff;border-radius:10px 10px 2px 10px}
 .tchat-msg.theirs .tchat-bubble{background:var(--card);border:1px solid var(--border);border-radius:2px 10px 10px 10px}
 .tchat-meta{font-size:10px;color:var(--muted);padding:0 3px}
-@keyframes badge-pop{0%{transform:scale(1.5)}100%{transform:scale(1)}}
-#chat-badge.pop{animation:badge-pop .25s ease-out}
+.tchat-img{max-width:180px;max-height:160px;border-radius:7px;margin-top:4px;cursor:pointer;display:block}
+.tchat-file{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:7px;background:rgba(255,255,255,.1);margin-top:4px;text-decoration:none;font-size:12px;color:inherit}
 
 /* Stat cards */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
@@ -697,7 +704,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
             <div class="analysis-tab" data-tab="streets">Streets</div>
             <div class="analysis-tab" data-tab="parcels">Parcels</div>
             <div class="analysis-tab" data-tab="results">Survey Results</div>
-            <div class="analysis-tab" data-tab="team" id="tab-team">Team<span id="chat-badge" style="display:none;margin-left:5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;line-height:17px;text-align:center;vertical-align:middle;font-family:var(--mono)"></span></div>
+            <div class="analysis-tab" data-tab="team" id="tab-team">Team</div>
           </div>
           <div class="analysis-content">
 
@@ -744,36 +751,67 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
               </div>
             </div>
 
-            <!-- Team: Chats (top) + Activity (bottom) -->
+            <!-- Team: Activity | Chats toggle -->
             <div class="analysis-pane" id="pane-team">
 
-              <!-- Chats section -->
-              <div style="margin-bottom:18px">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px">Chats — Today</div>
-                <div id="team-chat-messages" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px;padding-right:2px"></div>
-                <div style="display:flex;gap:8px;align-items:flex-end">
+              <!-- Sub-tab toggle -->
+              <div class="team-toggle">
+                <button class="team-toggle-btn active" id="ttog-activity"
+                        onclick="switchTeamSubtab('activity')">Activity</button>
+                <button class="team-toggle-btn" id="ttog-chats"
+                        onclick="switchTeamSubtab('chats')">
+                  Chats<span class="tbadge" id="chat-badge"></span>
+                </button>
+              </div>
+
+              <!-- Activity view (default) -->
+              <div id="team-activity-view">
+                <div id="team-content" class="team-panel">
+                  <div class="team-head">
+                    <div class="team-title">Field collectors</div>
+                    <div class="team-sub" id="team-sub">Connecting…</div>
+                  </div>
+                  <div id="team-rows" class="team-rows"></div>
+                  <div class="team-empty" id="team-empty" style="display:none;">No field points collected yet.</div>
+                </div>
+              </div>
+
+              <!-- Chats view (hidden by default) -->
+              <div id="team-chats-view" style="display:none">
+                <div id="team-chat-messages"
+                     style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;
+                            gap:6px;margin-bottom:8px;padding-right:2px"></div>
+
+                <!-- Attachment preview strip -->
+                <div id="attach-preview" style="display:none;align-items:center;gap:8px;
+                     padding:6px 10px;margin-bottom:6px;background:var(--card);
+                     border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">
+                  <span id="attach-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                  <button onclick="clearAttachment()" style="background:none;border:none;cursor:pointer;
+                          color:var(--muted);font-size:18px;line-height:1;padding:0">×</button>
+                </div>
+
+                <div style="display:flex;gap:6px;align-items:flex-end">
+                  <input type="file" id="team-chat-file"
+                         accept="image/*,application/pdf,.doc,.docx"
+                         style="display:none" onchange="onFileSelected(this)">
+                  <button onclick="document.getElementById('team-chat-file').click()"
+                          title="Attach image or document"
+                          style="padding:7px 9px;background:var(--card);border:1px solid var(--border);
+                                 border-radius:8px;cursor:pointer;color:var(--muted);font-size:15px;
+                                 line-height:1;flex-shrink:0;transition:.15s"
+                          onmouseover="this.style.borderColor='var(--accent)'"
+                          onmouseout="this.style.borderColor='var(--border)'">📎</button>
                   <textarea id="team-chat-input" placeholder="Say something to the team…" rows="1"
-                    style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font:13px var(--font);padding:7px 11px;resize:none;outline:none;max-height:80px;overflow-y:hidden;transition:border .15s"
-                    onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+                    style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;
+                           color:var(--text);font:13px var(--font);padding:7px 11px;resize:none;outline:none;
+                           max-height:80px;overflow-y:hidden;transition:border .15s"
+                    onfocus="this.style.borderColor='var(--accent)'"
+                    onblur="this.style.borderColor='var(--border)'"></textarea>
                   <button id="team-chat-send"
-                    style="padding:7px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;cursor:pointer;font:500 13px var(--font);transition:.15s;flex-shrink:0"
-                    onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Send</button>
+                    style="padding:7px 14px;background:var(--accent);border:none;border-radius:8px;
+                           color:#fff;cursor:pointer;font:500 13px var(--font);flex-shrink:0">Send</button>
                 </div>
-              </div>
-
-              <!-- Divider -->
-              <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">
-                <div style="flex:1;height:1px;background:var(--border)"></div>Activity<div style="flex:1;height:1px;background:var(--border)"></div>
-              </div>
-
-              <!-- Activity section (existing per-user panel, internals unchanged) -->
-              <div id="team-content" class="team-panel">
-                <div class="team-head">
-                  <div class="team-title">Field collectors</div>
-                  <div class="team-sub" id="team-sub">Connecting…</div>
-                </div>
-                <div id="team-rows" class="team-rows"></div>
-                <div class="team-empty" id="team-empty" style="display:none;">No field points collected yet.</div>
               </div>
 
             </div>

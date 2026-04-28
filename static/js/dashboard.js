@@ -39,8 +39,10 @@ let sbClient = null;
 let currentUserId = null;
 let currentDisplayName = 'Teammate';
 let fieldPointsData = { type: 'FeatureCollection', features: [] };
-let teamChatMessages = [];   // [{id, user_id, display_name, body, sent_at}]
-let chatUnreadCount  = 0;
+let teamChatMessages  = [];        // [{id, user_id, display_name, body, sent_at, attachment_url, attachment_type}]
+let chatUnreadCount   = 0;
+let activeTeamSubtab  = 'activity'; // 'activity' | 'chats'
+let pendingAttachment = null;       // { file, type } | null
 let fieldPresence = {}; // user_id → { display_name, last_active_at }
 let activeFilters = new Set();
 let charts = {};
@@ -577,7 +579,7 @@ async function loadTodayMessages() {
   try {
     const { data, error } = await sbClient
       .from('team_chat_messages')
-      .select('id, user_id, display_name, body, sent_at')
+      .select('id, user_id, display_name, body, sent_at, attachment_url, attachment_type')
       .gte('sent_at', todayUtc + 'T00:00:00Z')
       .order('sent_at', { ascending: true })
       .limit(200);
@@ -597,9 +599,14 @@ function renderChatMessages() {
   el.innerHTML = teamChatMessages.map(m => {
     const mine = m.user_id === currentUserId;
     const time = new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const attachHtml = m.attachment_url
+      ? (m.attachment_type === 'image'
+          ? `<img src="${m.attachment_url}" class="tchat-img" onclick="window.open(this.src,'_blank')" alt="attachment">`
+          : `<a href="${m.attachment_url}" target="_blank" rel="noopener" class="tchat-file">📄 View attachment</a>`)
+      : '';
     return `<div class="tchat-msg ${mine ? 'mine' : 'theirs'}">
       ${!mine ? `<div class="tchat-meta">${escapeHtml(m.display_name)}</div>` : ''}
-      <div class="tchat-bubble">${escapeHtml(m.body)}</div>
+      <div class="tchat-bubble">${m.body ? escapeHtml(m.body) : ''}${attachHtml}</div>
       <div class="tchat-meta">${time}</div>
     </div>`;
   }).join('');
@@ -610,12 +617,30 @@ async function sendTeamMessage() {
   if (!sbClient || !currentUserId) return;
   const input = document.getElementById('team-chat-input');
   const body  = (input?.value || '').trim();
-  if (!body) return;
+  if (!body && !pendingAttachment) return;
   input.value = '';
+
+  let attachmentUrl = null, attachmentType = null;
+  if (pendingAttachment) {
+    try {
+      const ext  = pendingAttachment.file.name.split('.').pop().toLowerCase();
+      const path = `${currentUserId}/${Date.now()}.${ext}`;
+      const { data: up, error: upErr } = await sbClient.storage
+        .from('team-chat-attachments').upload(path, pendingAttachment.file);
+      if (upErr) throw upErr;
+      const { data: pub } = sbClient.storage
+        .from('team-chat-attachments').getPublicUrl(up.path);
+      attachmentUrl  = pub.publicUrl;
+      attachmentType = pendingAttachment.type;
+    } catch (e) { console.warn('Attachment upload failed:', e); }
+    clearAttachment();
+  }
+
   try {
-    const { error } = await sbClient
-      .from('team_chat_messages')
-      .insert({ user_id: currentUserId, display_name: currentDisplayName, body });
+    const { error } = await sbClient.from('team_chat_messages').insert({
+      user_id: currentUserId, display_name: currentDisplayName,
+      body: body || '', attachment_url: attachmentUrl, attachment_type: attachmentType,
+    });
     if (error) throw error;
   } catch (e) {
     console.warn('Team chat send failed:', e);
@@ -623,22 +648,42 @@ async function sendTeamMessage() {
   }
 }
 
+function onFileSelected(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  pendingAttachment = { file, type: file.type.startsWith('image/') ? 'image' : 'document' };
+  const prev = document.getElementById('attach-preview');
+  const name = document.getElementById('attach-name');
+  if (prev && name) { name.textContent = file.name; prev.style.display = 'flex'; }
+}
+
+function clearAttachment() {
+  pendingAttachment = null;
+  const fi = document.getElementById('team-chat-file');
+  if (fi) fi.value = '';
+  const prev = document.getElementById('attach-preview');
+  if (prev) prev.style.display = 'none';
+}
+
 function onChatMessage(newRow) {
   if (teamChatMessages.some(m => m.id === newRow.id)) return;
   teamChatMessages.push(newRow);
   const teamTabActive = document.querySelector('.analysis-tab[data-tab="team"]')?.classList.contains('active');
   const panelOpen     = document.getElementById('analysis-panel')?.classList.contains('open');
-  if (teamTabActive && panelOpen) {
+  const chatsVisible  = teamTabActive && panelOpen && activeTeamSubtab === 'chats';
+  if (chatsVisible) {
     renderChatMessages();
   } else {
     chatUnreadCount++;
     const badge = document.getElementById('chat-badge');
     if (badge) {
       badge.textContent = chatUnreadCount > 9 ? '9+' : String(chatUnreadCount);
+      // tbadge is only visible when its parent .team-toggle-btn has .active —
+      // force the Chats button to show it even when inactive
       badge.style.display = 'inline-block';
-      badge.classList.remove('pop');
-      void badge.offsetWidth;
-      badge.classList.add('pop');
+      badge.style.background = '#ef4444';
+      const chatsBtn = document.getElementById('ttog-chats');
+      if (chatsBtn) chatsBtn.style.color = '#ef4444';
     }
   }
 }
@@ -646,8 +691,20 @@ function onChatMessage(newRow) {
 function clearChatBadge() {
   chatUnreadCount = 0;
   const badge = document.getElementById('chat-badge');
-  if (badge) { badge.style.display = 'none'; badge.textContent = ''; }
+  if (badge) { badge.textContent = ''; badge.style.display = ''; badge.style.background = ''; }
+  const chatsBtn = document.getElementById('ttog-chats');
+  if (chatsBtn) chatsBtn.style.color = '';
   renderChatMessages();
+}
+
+function switchTeamSubtab(tab) {
+  activeTeamSubtab = tab;
+  document.getElementById('team-activity-view').style.display = tab === 'activity' ? '' : 'none';
+  document.getElementById('team-chats-view').style.display    = tab === 'chats'    ? '' : 'none';
+  document.getElementById('ttog-activity').classList.toggle('active', tab === 'activity');
+  document.getElementById('ttog-chats').classList.toggle('active', tab === 'chats');
+  if (tab === 'chats')    clearChatBadge();
+  if (tab === 'activity' && typeof renderPerUserPanel === 'function') renderPerUserPanel();
 }
 
 function escapeHtml(s) {
@@ -1410,8 +1467,7 @@ function setupUI() {
       tab.classList.add('active');
       document.getElementById('pane-' + tab.dataset.tab)?.classList.add('active');
       if (tab.dataset.tab === 'team') {
-        if (typeof renderPerUserPanel === 'function') renderPerUserPanel();
-        clearChatBadge();
+        switchTeamSubtab('activity');
       }
     });
   });

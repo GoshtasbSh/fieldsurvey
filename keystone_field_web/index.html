@@ -602,7 +602,13 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .team-presence.offline{color:#6b7280;}
 .team-last-sep{margin:0 6px;color:var(--border-h);}
 .team-total{font-size:10px;color:var(--muted);font-weight:600;}
-/* Team chat */
+/* Team sub-tab toggle */
+.team-toggle{display:flex;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:3px;margin-bottom:16px}
+.team-toggle-btn{flex:1;padding:8px 0;border:none;border-radius:8px;cursor:pointer;font:600 13px inherit;background:transparent;color:var(--muted);transition:.15s;display:flex;align-items:center;justify-content:center;gap:5px;-webkit-tap-highlight-color:transparent}
+.team-toggle-btn.active{background:var(--accent);color:#fff}
+.team-toggle-btn .tbadge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:rgba(255,255,255,.3);font-size:10px;font-weight:700;line-height:16px;text-align:center;display:none}
+.team-toggle-btn.active .tbadge{display:inline-block}
+/* Team chat bubbles */
 .tchat-msg{display:flex;flex-direction:column;max-width:88%;gap:2px}
 .tchat-msg.mine{align-self:flex-end;align-items:flex-end}
 .tchat-msg.theirs{align-self:flex-start;align-items:flex-start}
@@ -610,6 +616,8 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .tchat-msg.mine .tchat-bubble{background:var(--accent);color:#fff;border-radius:10px 10px 2px 10px}
 .tchat-msg.theirs .tchat-bubble{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:2px 10px 10px 10px}
 .tchat-meta{font-size:10px;color:var(--muted);padding:0 3px}
+.tchat-img{max-width:200px;max-height:180px;border-radius:8px;margin-top:4px;cursor:pointer;display:block}
+.tchat-file{display:flex;align-items:center;gap:6px;padding:7px 11px;border-radius:8px;background:rgba(255,255,255,.1);margin-top:4px;text-decoration:none;font-size:12px;color:inherit}
 
 /* Export panel */
 .export-section{margin-bottom:24px;}
@@ -873,27 +881,59 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 <div class="side-panel" id="panel-team">
   <div class="panel-title">Team</div>
 
-  <!-- Chats section -->
-  <div style="margin-bottom:18px">
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px">Chats — Today</div>
-    <div id="team-chat-messages" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;margin-bottom:8px;padding-right:2px"></div>
-    <div style="display:flex;gap:8px;align-items:flex-end">
+  <!-- Sub-tab toggle -->
+  <div class="team-toggle">
+    <button class="team-toggle-btn active" id="mob-ttog-activity"
+            onclick="switchMobileTeamSubtab('activity')">Activity</button>
+    <button class="team-toggle-btn" id="mob-ttog-chats"
+            onclick="switchMobileTeamSubtab('chats')">
+      Chats<span class="tbadge" id="mob-chat-badge"></span>
+    </button>
+  </div>
+
+  <!-- Activity view (default) -->
+  <div id="mob-team-activity-view">
+    <div class="panel-sub" id="team-sub">Loading team data…</div>
+    <div class="team-grid" id="team-grid"></div>
+  </div>
+
+  <!-- Chats view (hidden by default) -->
+  <div id="mob-team-chats-view" style="display:none">
+    <div id="team-chat-messages"
+         style="max-height:calc(100vh - 260px);overflow-y:auto;display:flex;
+                flex-direction:column;gap:5px;margin-bottom:8px;padding-right:2px"></div>
+
+    <!-- Attachment preview strip -->
+    <div id="mob-attach-preview" style="display:none;align-items:center;gap:8px;
+         padding:7px 10px;margin-bottom:6px;background:var(--card);
+         border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">
+      <span id="mob-attach-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button onclick="clearMobileAttachment()" style="background:none;border:none;cursor:pointer;
+              color:var(--muted);font-size:20px;line-height:1;padding:0">×</button>
+    </div>
+
+    <div style="display:flex;gap:6px;align-items:flex-end">
+      <input type="file" id="mob-team-chat-file"
+             accept="image/*,application/pdf,.doc,.docx"
+             style="display:none" onchange="onMobileFileSelected(this)">
+      <button onclick="document.getElementById('mob-team-chat-file').click()"
+              title="Attach image or document"
+              style="padding:9px 10px;background:var(--card);border:1px solid var(--border);
+                     border-radius:8px;cursor:pointer;color:var(--muted);font-size:17px;
+                     line-height:1;flex-shrink:0;-webkit-appearance:none">📎</button>
       <textarea id="team-chat-input" placeholder="Say something to the team…" rows="1"
-        style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;padding:8px 11px;resize:none;outline:none;max-height:80px;overflow-y:hidden;-webkit-appearance:none"
-        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+        style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;
+               color:var(--text);font-size:13px;font-family:inherit;padding:8px 11px;
+               resize:none;outline:none;max-height:80px;overflow-y:hidden;-webkit-appearance:none"
+        onfocus="this.style.borderColor='var(--accent)'"
+        onblur="this.style.borderColor='var(--border)'"></textarea>
       <button onclick="sendTeamMessage()"
-        style="padding:8px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;flex-shrink:0;-webkit-appearance:none">Send</button>
+        style="padding:8px 14px;background:var(--accent);border:none;border-radius:8px;
+               color:#fff;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;
+               flex-shrink:0;-webkit-appearance:none">Send</button>
     </div>
   </div>
 
-  <!-- Divider -->
-  <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">
-    <div style="flex:1;height:1px;background:var(--border)"></div>Activity<div style="flex:1;height:1px;background:var(--border)"></div>
-  </div>
-
-  <!-- Activity section -->
-  <div class="panel-sub" id="team-sub">Loading team data…</div>
-  <div class="team-grid" id="team-grid"></div>
 </div>
 
 <!-- EXPORT / ADMIN PANEL -->
@@ -948,11 +988,10 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
     <svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
     <span>Map</span>
   </button>
-  <button class="tab-btn" id="tab-team" onclick="switchTab('team')" style="position:relative">
+  <button class="tab-btn" id="tab-team" onclick="switchTab('team')">
     <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
     <span>Team</span>
     <div class="tab-badge" id="team-badge">0</div>
-    <div id="chat-unread-dot" style="display:none;position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:#ef4444;border:1.5px solid var(--bg)"></div>
   </button>
   <button class="tab-btn" id="tab-export" onclick="switchTab('export')">
     <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1965,7 +2004,7 @@ function switchTab(name) {
 
   // Show/hide panels
   document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('active'));
-  if (name === 'team')   { document.getElementById('panel-team').classList.add('active');   renderTeam(); loadTodayMessages(); clearMobileChatBadge(); }
+  if (name === 'team')   { document.getElementById('panel-team').classList.add('active');   switchMobileTeamSubtab('activity'); loadTodayMessages(); }
   if (name === 'export') { document.getElementById('panel-export').classList.add('active'); renderExportStats(); }
 }
 
@@ -2093,12 +2132,24 @@ function teamCardHTML(m) {
 }
 
 /* ── TEAM CHAT ── */
-let _mobileChats   = [];
-let _chatUnreadCnt = 0;
+let _mobileChats        = [];
+let _chatUnreadCnt      = 0;
+let _activeTeamSubtab   = 'activity'; // 'activity' | 'chats'
+let _pendingAttachment  = null;       // { file, type } | null
 
 function _esc(s) {
   return String(s || '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function switchMobileTeamSubtab(tab) {
+  _activeTeamSubtab = tab;
+  document.getElementById('mob-team-activity-view').style.display = tab === 'activity' ? '' : 'none';
+  document.getElementById('mob-team-chats-view').style.display    = tab === 'chats'    ? '' : 'none';
+  document.getElementById('mob-ttog-activity').classList.toggle('active', tab === 'activity');
+  document.getElementById('mob-ttog-chats').classList.toggle('active', tab === 'chats');
+  if (tab === 'chats')   clearMobileChatBadge();
+  if (tab === 'activity') { renderTeam(); }
 }
 
 async function loadTodayMessages() {
@@ -2107,7 +2158,7 @@ async function loadTodayMessages() {
   try {
     const { data, error } = await sb
       .from('team_chat_messages')
-      .select('id, user_id, display_name, body, sent_at')
+      .select('id, user_id, display_name, body, sent_at, attachment_url, attachment_type')
       .gte('sent_at', todayUtc + 'T00:00:00Z')
       .order('sent_at', { ascending: true })
       .limit(200);
@@ -2128,9 +2179,14 @@ function renderChatMessages() {
   el.innerHTML = _mobileChats.map(m => {
     const mine = m.user_id === myId;
     const time = new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const attachHtml = m.attachment_url
+      ? (m.attachment_type === 'image'
+          ? `<img src="${m.attachment_url}" class="tchat-img" onclick="window.open(this.src,'_blank')" alt="attachment">`
+          : `<a href="${m.attachment_url}" target="_blank" rel="noopener" class="tchat-file">📄 View attachment</a>`)
+      : '';
     return `<div class="tchat-msg ${mine ? 'mine' : 'theirs'}">
       ${!mine ? `<div class="tchat-meta">${_esc(m.display_name)}</div>` : ''}
-      <div class="tchat-bubble">${_esc(m.body)}</div>
+      <div class="tchat-bubble">${m.body ? _esc(m.body) : ''}${attachHtml}</div>
       <div class="tchat-meta">${time}</div>
     </div>`;
   }).join('');
@@ -2141,12 +2197,33 @@ async function sendTeamMessage() {
   if (!sb || !currentUser?.id) { showToast('Sign in to chat', '#f59e0b'); return; }
   const input = document.getElementById('team-chat-input');
   const body  = (input?.value || '').trim();
-  if (!body) return;
+  if (!body && !_pendingAttachment) return;
   input.value = '';
+
+  let attachmentUrl = null, attachmentType = null;
+  if (_pendingAttachment) {
+    try {
+      const ext  = _pendingAttachment.file.name.split('.').pop().toLowerCase();
+      const path = `${currentUser.id}/${Date.now()}.${ext}`;
+      const { data: up, error: upErr } = await sb.storage
+        .from('team-chat-attachments').upload(path, _pendingAttachment.file);
+      if (upErr) throw upErr;
+      const { data: pub } = sb.storage
+        .from('team-chat-attachments').getPublicUrl(up.path);
+      attachmentUrl  = pub.publicUrl;
+      attachmentType = _pendingAttachment.type;
+    } catch (e) {
+      console.warn('Attachment upload failed:', e);
+      showToast('Could not upload attachment', '#ef4444');
+    }
+    clearMobileAttachment();
+  }
+
   try {
-    const { error } = await sb
-      .from('team_chat_messages')
-      .insert({ user_id: currentUser.id, display_name: currentUser.name, body });
+    const { error } = await sb.from('team_chat_messages').insert({
+      user_id: currentUser.id, display_name: currentUser.name,
+      body: body || '', attachment_url: attachmentUrl, attachment_type: attachmentType,
+    });
     if (error) throw error;
   } catch (e) {
     console.warn('Team chat send failed:', e);
@@ -2155,25 +2232,53 @@ async function sendTeamMessage() {
   }
 }
 
+function onMobileFileSelected(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  _pendingAttachment = { file, type: file.type.startsWith('image/') ? 'image' : 'document' };
+  const prev = document.getElementById('mob-attach-preview');
+  const name = document.getElementById('mob-attach-name');
+  if (prev && name) { name.textContent = file.name; prev.style.display = 'flex'; }
+}
+
+function clearMobileAttachment() {
+  _pendingAttachment = null;
+  const fi = document.getElementById('mob-team-chat-file');
+  if (fi) fi.value = '';
+  const prev = document.getElementById('mob-attach-preview');
+  if (prev) prev.style.display = 'none';
+}
+
 function onMobileChatMessage(newRow) {
   if (_mobileChats.some(m => m.id === newRow.id)) return;
   _mobileChats.push(newRow);
-  if (activeTab === 'team') {
+  const chatsVisible = activeTab === 'team' && _activeTeamSubtab === 'chats';
+  if (chatsVisible) {
     renderChatMessages();
   } else {
     _chatUnreadCnt++;
-    const dot = document.getElementById('chat-unread-dot');
-    if (dot) dot.style.display = 'block';
+    const badge = document.getElementById('mob-chat-badge');
+    if (badge) {
+      badge.textContent = _chatUnreadCnt > 9 ? '9+' : String(_chatUnreadCnt);
+      badge.style.display = 'inline-block';
+      badge.style.background = '#ef4444';
+      const chatsBtn = document.getElementById('mob-ttog-chats');
+      if (chatsBtn) chatsBtn.style.color = '#ef4444';
+    }
     if (newRow.user_id !== currentUser?.id) {
-      showToast(`${_esc(newRow.display_name)}: ${newRow.body.slice(0,50)}${newRow.body.length>50?'…':''}`, '#6366f1');
+      const preview = (newRow.body || '').slice(0, 50) + ((newRow.body||'').length > 50 ? '…' : '')
+                    || (newRow.attachment_type === 'image' ? '📷 Image' : '📄 Document');
+      showToast(`${_esc(newRow.display_name)}: ${preview}`, '#6366f1');
     }
   }
 }
 
 function clearMobileChatBadge() {
   _chatUnreadCnt = 0;
-  const dot = document.getElementById('chat-unread-dot');
-  if (dot) dot.style.display = 'none';
+  const badge = document.getElementById('mob-chat-badge');
+  if (badge) { badge.textContent = ''; badge.style.display = ''; badge.style.background = ''; }
+  const chatsBtn = document.getElementById('mob-ttog-chats');
+  if (chatsBtn) chatsBtn.style.color = '';
   renderChatMessages();
 }
 
