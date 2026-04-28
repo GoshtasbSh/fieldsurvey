@@ -149,6 +149,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .team-row-today{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--accent);line-height:1}
 .team-row-total{font-size:10px;color:var(--muted);margin-top:2px}
 .team-empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px}
+/* Team chat bubbles */
+.tchat-msg{display:flex;flex-direction:column;max-width:92%;gap:2px}
+.tchat-msg.mine{align-self:flex-end;align-items:flex-end}
+.tchat-msg.theirs{align-self:flex-start;align-items:flex-start}
+.tchat-bubble{padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.5;word-wrap:break-word;max-width:100%}
+.tchat-msg.mine   .tchat-bubble{background:var(--accent);color:#fff;border-radius:10px 10px 2px 10px}
+.tchat-msg.theirs .tchat-bubble{background:var(--card);border:1px solid var(--border);border-radius:2px 10px 10px 10px}
+.tchat-meta{font-size:10px;color:var(--muted);padding:0 3px}
+@keyframes badge-pop{0%{transform:scale(1.5)}100%{transform:scale(1)}}
+#chat-badge.pop{animation:badge-pop .25s ease-out}
 
 /* Stat cards */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
@@ -520,14 +530,11 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       <div class="sidebar-section">
         <div class="sidebar-title">Basemap</div>
         <div class="basemap-grid" id="basemap-grid">
-          <div class="basemap-opt active" data-style="streets">
-            <div class="thumb" style="background:url('https://basemaps.cartocdn.com/rastertiles/voyager/14/4398/6645@2x.png') center/cover"></div>Streets
-          </div>
-          <div class="basemap-opt" data-style="satellite">
+          <div class="basemap-opt active" data-style="satellite">
             <div class="thumb" style="background:url('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/14/6645/4398') center/cover"></div>Satellite
           </div>
-          <div class="basemap-opt" data-style="dark">
-            <div class="thumb" style="background:url('https://basemaps.cartocdn.com/dark_all/14/4398/6645@2x.png') center/cover"></div>Dark
+          <div class="basemap-opt" data-style="streets">
+            <div class="thumb" style="background:url('https://basemaps.cartocdn.com/rastertiles/voyager/14/4398/6645@2x.png') center/cover"></div>Streets
           </div>
           <div class="basemap-opt" data-style="light">
             <div class="thumb" style="background:url('https://basemaps.cartocdn.com/light_all/14/4398/6645@2x.png') center/cover"></div>Light
@@ -690,7 +697,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
             <div class="analysis-tab" data-tab="streets">Streets</div>
             <div class="analysis-tab" data-tab="parcels">Parcels</div>
             <div class="analysis-tab" data-tab="results">Survey Results</div>
-            <div class="analysis-tab" data-tab="team">Team</div>
+            <div class="analysis-tab" data-tab="team" id="tab-team">Team<span id="chat-badge" style="display:none;margin-left:5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;line-height:17px;text-align:center;vertical-align:middle;font-family:var(--mono)"></span></div>
           </div>
           <div class="analysis-content">
 
@@ -737,8 +744,29 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
               </div>
             </div>
 
-            <!-- Team (per-user live stats from field_survey_points + user_presence) -->
+            <!-- Team: Chats (top) + Activity (bottom) -->
             <div class="analysis-pane" id="pane-team">
+
+              <!-- Chats section -->
+              <div style="margin-bottom:18px">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px">Chats — Today</div>
+                <div id="team-chat-messages" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px;padding-right:2px"></div>
+                <div style="display:flex;gap:8px;align-items:flex-end">
+                  <textarea id="team-chat-input" placeholder="Say something to the team…" rows="1"
+                    style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font:13px var(--font);padding:7px 11px;resize:none;outline:none;max-height:80px;overflow-y:hidden;transition:border .15s"
+                    onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+                  <button id="team-chat-send"
+                    style="padding:7px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;cursor:pointer;font:500 13px var(--font);transition:.15s;flex-shrink:0"
+                    onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Send</button>
+                </div>
+              </div>
+
+              <!-- Divider -->
+              <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">
+                <div style="flex:1;height:1px;background:var(--border)"></div>Activity<div style="flex:1;height:1px;background:var(--border)"></div>
+              </div>
+
+              <!-- Activity section (existing per-user panel, internals unchanged) -->
               <div id="team-content" class="team-panel">
                 <div class="team-head">
                   <div class="team-title">Field collectors</div>
@@ -747,6 +775,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
                 <div id="team-rows" class="team-rows"></div>
                 <div class="team-empty" id="team-empty" style="display:none;">No field points collected yet.</div>
               </div>
+
             </div>
 
           </div>

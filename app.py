@@ -1409,6 +1409,22 @@ def _sb_save_version(data_type: str, payload: dict, label: str, n_points: int = 
         return None
 
 
+def _sb_cleanup_chat() -> int:
+    """Delete team_chat_messages rows older than today (UTC). Returns count deleted or -1 on error."""
+    if not sb:
+        return 0
+    try:
+        from datetime import timezone, datetime as _dt
+        today_utc = _dt.now(tz=timezone.utc).date().isoformat() + 'T00:00:00+00:00'
+        r = sb.table('team_chat_messages').delete().lt('sent_at', today_utc).execute()
+        n = len(r.data) if r.data else 0
+        log.info(f"Chat cleanup: removed {n} stale message(s)")
+        return n
+    except Exception as e:
+        log.warning(f"Chat cleanup failed: {e}")
+        return -1
+
+
 def _sb_list_versions(data_type: str) -> list:
     """List version snapshots newest-first, without payload (lightweight)."""
     if not sb:
@@ -1723,9 +1739,17 @@ async def daily_refresh():
     await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n_total)
     if analysis:
         await asyncio.to_thread(_sb_save, 'analysis', analysis)
+    await asyncio.to_thread(_sb_cleanup_chat)
     log.info(f"Daily refresh: +{len(new_rows)} field points → {n_total} total → '{label}'")
     return JSONResponse({"refreshed": True, "new_field_points": len(new_rows),
                          "total_points": n_total, "label": label})
+
+
+@app.post("/api/team/chat/cleanup")
+async def team_chat_cleanup():
+    """Backup cleanup endpoint if pg_cron is not enabled. Deletes prior-day chat messages."""
+    n = await asyncio.to_thread(_sb_cleanup_chat)
+    return JSONResponse({"cleaned": n})
 
 
 @app.get("/api/analysis-meta")

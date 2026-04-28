@@ -12,11 +12,6 @@ const BASEMAPS = {
     tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
     attr: '&copy; Esri',
   },
-  dark: {
-    name: 'Dark',
-    tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'],
-    attr: '&copy; CARTO',
-  },
   light: {
     name: 'Light',
     tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png'],
@@ -37,12 +32,15 @@ const BASEMAPS = {
 };
 
 const STATUS_COLORS = {};
-let currentBasemap = 'streets';
+let currentBasemap = 'satellite';
 let map, surveyData, parcelsData, analysisData;
 // ── Field points (real-time from Supabase field_survey_points) ──
 let sbClient = null;
 let currentUserId = null;
+let currentDisplayName = 'Teammate';
 let fieldPointsData = { type: 'FeatureCollection', features: [] };
+let teamChatMessages = [];   // [{id, user_id, display_name, body, sent_at}]
+let chatUnreadCount  = 0;
 let fieldPresence = {}; // user_id → { display_name, last_active_at }
 let activeFilters = new Set();
 let charts = {};
@@ -408,7 +406,10 @@ async function initFieldPoints() {
   try {
     const { data: { session } } = await sbClient.auth.getSession();
     currentSession = session;
-    currentUserId = session?.user?.id || null;
+    currentUserId      = session?.user?.id || null;
+    currentDisplayName = session?.user?.user_metadata?.full_name
+      || (session?.user?.email || '').split('@')[0]
+      || 'Teammate';
   } catch (e) { /* ignore */ }
 
   // Presence heartbeat (only when authenticated)
@@ -455,6 +456,9 @@ async function initFieldPoints() {
     }
   } catch (e) { /* table may not exist yet — ignore */ }
 
+  // Load today's chat messages
+  await loadTodayMessages();
+
   // Realtime
   sbClient.channel('keystone-dashboard-live')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'field_survey_points' },
@@ -469,6 +473,8 @@ async function initFieldPoints() {
         if (r && r.user_id) fieldPresence[r.user_id] = r;
         if (typeof renderPerUserPanel === 'function') renderPerUserPanel();
       })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_chat_messages' },
+      ({ new: msg }) => { if (msg?.id) onChatMessage(msg); })
     .subscribe();
 }
 
@@ -561,6 +567,87 @@ function renderPerUserPanel() {
         </div>
       </div>`;
   }).join('');
+}
+
+// ── Team Chat ──────────────────────────────────────────────────────────────
+
+async function loadTodayMessages() {
+  if (!sbClient) return;
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  try {
+    const { data, error } = await sbClient
+      .from('team_chat_messages')
+      .select('id, user_id, display_name, body, sent_at')
+      .gte('sent_at', todayUtc + 'T00:00:00Z')
+      .order('sent_at', { ascending: true })
+      .limit(200);
+    if (error) throw error;
+    teamChatMessages = data || [];
+    renderChatMessages();
+  } catch (e) { console.warn('Team chat load failed:', e); }
+}
+
+function renderChatMessages() {
+  const el = document.getElementById('team-chat-messages');
+  if (!el) return;
+  if (!teamChatMessages.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:20px 0">No messages today yet. Say hi!</div>';
+    return;
+  }
+  el.innerHTML = teamChatMessages.map(m => {
+    const mine = m.user_id === currentUserId;
+    const time = new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<div class="tchat-msg ${mine ? 'mine' : 'theirs'}">
+      ${!mine ? `<div class="tchat-meta">${escapeHtml(m.display_name)}</div>` : ''}
+      <div class="tchat-bubble">${escapeHtml(m.body)}</div>
+      <div class="tchat-meta">${time}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendTeamMessage() {
+  if (!sbClient || !currentUserId) return;
+  const input = document.getElementById('team-chat-input');
+  const body  = (input?.value || '').trim();
+  if (!body) return;
+  input.value = '';
+  try {
+    const { error } = await sbClient
+      .from('team_chat_messages')
+      .insert({ user_id: currentUserId, display_name: currentDisplayName, body });
+    if (error) throw error;
+  } catch (e) {
+    console.warn('Team chat send failed:', e);
+    if (input) input.value = body;
+  }
+}
+
+function onChatMessage(newRow) {
+  if (teamChatMessages.some(m => m.id === newRow.id)) return;
+  teamChatMessages.push(newRow);
+  const teamTabActive = document.querySelector('.analysis-tab[data-tab="team"]')?.classList.contains('active');
+  const panelOpen     = document.getElementById('analysis-panel')?.classList.contains('open');
+  if (teamTabActive && panelOpen) {
+    renderChatMessages();
+  } else {
+    chatUnreadCount++;
+    const badge = document.getElementById('chat-badge');
+    if (badge) {
+      badge.textContent = chatUnreadCount > 9 ? '9+' : String(chatUnreadCount);
+      badge.style.display = 'inline-block';
+      badge.classList.remove('pop');
+      void badge.offsetWidth;
+      badge.classList.add('pop');
+    }
+  }
+}
+
+function clearChatBadge() {
+  chatUnreadCount = 0;
+  const badge = document.getElementById('chat-badge');
+  if (badge) { badge.style.display = 'none'; badge.textContent = ''; }
+  renderChatMessages();
 }
 
 function escapeHtml(s) {
@@ -1322,10 +1409,17 @@ function setupUI() {
       document.querySelectorAll('.analysis-pane').forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('pane-' + tab.dataset.tab)?.classList.add('active');
-      if (tab.dataset.tab === 'team' && typeof renderPerUserPanel === 'function') {
-        renderPerUserPanel();
+      if (tab.dataset.tab === 'team') {
+        if (typeof renderPerUserPanel === 'function') renderPerUserPanel();
+        clearChatBadge();
       }
     });
+  });
+
+  // Team chat send button + Enter key
+  document.getElementById('team-chat-send')?.addEventListener('click', sendTeamMessage);
+  document.getElementById('team-chat-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTeamMessage(); }
   });
 
   // Basemap selector
