@@ -304,8 +304,6 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .bm-option[data-bm="osm"]       .opt-swatch{background:linear-gradient(135deg,#c8bca4,#b5a98b);}
 .bm-option[data-bm="osm"]       .opt-swatch::after{content:'';position:absolute;left:3px;right:3px;top:46%;height:3px;background:rgba(255,255,255,.5);border-radius:1px;}
 .bm-option[data-bm="satellite"] .opt-swatch{background:linear-gradient(135deg,#2d5a22,#0d2b1a);}
-.bm-option[data-bm="dark"]      .opt-swatch{background:linear-gradient(135deg,#1e2432,#0d1117);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);}
-.bm-option[data-bm="dark"]      .opt-swatch::after{content:'';position:absolute;left:4px;right:4px;top:48%;height:1px;background:rgba(255,255,255,.15);}
 .bm-option[data-bm="light"]     .opt-swatch{background:linear-gradient(135deg,#f5f0e8,#e8e0d0);}
 .bm-option[data-bm="light"]     .opt-swatch::after{content:'';position:absolute;left:3px;right:3px;top:46%;height:2px;background:rgba(0,0,0,.18);border-radius:1px;}
 .opt-text{flex:1;}
@@ -334,7 +332,6 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 }
 .trigger-swatch.osm      {background:linear-gradient(135deg,#c8bca4,#b5a98b);}
 .trigger-swatch.satellite{background:linear-gradient(135deg,#2d5a22,#0d2b1a);}
-.trigger-swatch.dark     {background:linear-gradient(135deg,#1e2432,#0d1117);}
 .trigger-swatch.light    {background:linear-gradient(135deg,#f5f0e8,#e8e0d0);}
 .trigger-name{
   font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:700;
@@ -605,6 +602,14 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .team-presence.offline{color:#6b7280;}
 .team-last-sep{margin:0 6px;color:var(--border-h);}
 .team-total{font-size:10px;color:var(--muted);font-weight:600;}
+/* Team chat */
+.tchat-msg{display:flex;flex-direction:column;max-width:88%;gap:2px}
+.tchat-msg.mine{align-self:flex-end;align-items:flex-end}
+.tchat-msg.theirs{align-self:flex-start;align-items:flex-start}
+.tchat-bubble{padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.5;word-wrap:break-word;max-width:100%}
+.tchat-msg.mine .tchat-bubble{background:var(--accent);color:#fff;border-radius:10px 10px 2px 10px}
+.tchat-msg.theirs .tchat-bubble{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:2px 10px 10px 10px}
+.tchat-meta{font-size:10px;color:var(--muted);padding:0 3px}
 
 /* Export panel */
 .export-section{margin-bottom:24px;}
@@ -749,10 +754,9 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 
         <div class="sb-lbl">Basemap</div>
         <select class="bm-sel" id="bm-sel" onchange="setBasemapBtn(this.value)">
-          <option value="osm" selected>Streets (OSM)</option>
-          <option value="dark">Dark (CARTO)</option>
+          <option value="satellite" selected>Satellite (Esri)</option>
+          <option value="osm">Streets (OSM)</option>
           <option value="light">Light (CARTO)</option>
-          <option value="satellite">Satellite (Esri)</option>
         </select>
 
         <div class="sb-lbl">Survey Legend</div>
@@ -811,15 +815,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
     <!-- Basemap selector — single trigger + popup (Option C) -->
     <div class="bm-wrap" id="bm-wrap">
       <div class="bm-popup" id="bm-popup">
-        <div class="bm-option active" data-bm="osm" onclick="setBasemapBtn('osm')">
-          <div class="opt-swatch"></div>
-          <div class="opt-text">
-            <div class="opt-lbl">Streets</div>
-            <div class="opt-sub">OpenStreetMap</div>
-          </div>
-          <div class="opt-check">✓</div>
-        </div>
-        <div class="bm-option" data-bm="satellite" onclick="setBasemapBtn('satellite')">
+        <div class="bm-option active" data-bm="satellite" onclick="setBasemapBtn('satellite')">
           <div class="opt-swatch"></div>
           <div class="opt-text">
             <div class="opt-lbl">Satellite</div>
@@ -827,11 +823,11 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
           </div>
           <div class="opt-check">✓</div>
         </div>
-        <div class="bm-option" data-bm="dark" onclick="setBasemapBtn('dark')">
+        <div class="bm-option" data-bm="osm" onclick="setBasemapBtn('osm')">
           <div class="opt-swatch"></div>
           <div class="opt-text">
-            <div class="opt-lbl">Dark</div>
-            <div class="opt-sub">CARTO Dark Matter</div>
+            <div class="opt-lbl">Streets</div>
+            <div class="opt-sub">OpenStreetMap</div>
           </div>
           <div class="opt-check">✓</div>
         </div>
@@ -845,8 +841,8 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
         </div>
       </div>
       <button class="bm-trigger" id="bm-trigger" onclick="toggleBmPopup()" aria-label="Change basemap">
-        <div class="trigger-swatch osm" id="bm-trigger-swatch"></div>
-        <span class="trigger-name" id="bm-trigger-name">Streets</span>
+        <div class="trigger-swatch satellite" id="bm-trigger-swatch"></div>
+        <span class="trigger-name" id="bm-trigger-name">Satellite</span>
         <div class="trigger-chevron">
           <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
         </div>
@@ -876,6 +872,26 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 <!-- TEAM PANEL -->
 <div class="side-panel" id="panel-team">
   <div class="panel-title">Team</div>
+
+  <!-- Chats section -->
+  <div style="margin-bottom:18px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px">Chats — Today</div>
+    <div id="team-chat-messages" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;margin-bottom:8px;padding-right:2px"></div>
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <textarea id="team-chat-input" placeholder="Say something to the team…" rows="1"
+        style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;padding:8px 11px;resize:none;outline:none;max-height:80px;overflow-y:hidden;-webkit-appearance:none"
+        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+      <button onclick="sendTeamMessage()"
+        style="padding:8px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;flex-shrink:0;-webkit-appearance:none">Send</button>
+    </div>
+  </div>
+
+  <!-- Divider -->
+  <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">
+    <div style="flex:1;height:1px;background:var(--border)"></div>Activity<div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>
+
+  <!-- Activity section -->
   <div class="panel-sub" id="team-sub">Loading team data…</div>
   <div class="team-grid" id="team-grid"></div>
 </div>
@@ -932,10 +948,11 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
     <svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
     <span>Map</span>
   </button>
-  <button class="tab-btn" id="tab-team" onclick="switchTab('team')">
+  <button class="tab-btn" id="tab-team" onclick="switchTab('team')" style="position:relative">
     <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
     <span>Team</span>
     <div class="tab-badge" id="team-badge">0</div>
+    <div id="chat-unread-dot" style="display:none;position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:#ef4444;border:1.5px solid var(--bg)"></div>
   </button>
   <button class="tab-btn" id="tab-export" onclick="switchTab('export')">
     <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1027,7 +1044,6 @@ const MAP_CENTER = [-82.0350, 29.6516];
 
 const TILES = {
   osm:       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  dark:      'https://basemaps.cartocdn.com/rastertiles/dark_matter/{z}/{x}/{y}.png',
   light:     'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
   satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 };
@@ -1112,15 +1128,13 @@ function initMap(initialPoints) {
       version: 8,
       sources: {
         'bm-osm':  { type:'raster', tiles:[TILES.osm],       tileSize:256, maxzoom:19, attribution:'© OpenStreetMap contributors' },
-        'bm-dark': { type:'raster', tiles:[TILES.dark],      tileSize:256, maxzoom:20, attribution:'© CARTO' },
         'bm-light':{ type:'raster', tiles:[TILES.light],     tileSize:256, maxzoom:20, attribution:'© CARTO' },
         'bm-sat':  { type:'raster', tiles:[TILES.satellite], tileSize:256, maxzoom:18, attribution:'Esri' },
       },
       layers: [
-        { id:'bm-osm',  type:'raster', source:'bm-osm' },
-        { id:'bm-dark', type:'raster', source:'bm-dark',  layout:{visibility:'none'} },
+        { id:'bm-sat',  type:'raster', source:'bm-sat' },
+        { id:'bm-osm',  type:'raster', source:'bm-osm',   layout:{visibility:'none'} },
         { id:'bm-light',type:'raster', source:'bm-light', layout:{visibility:'none'} },
-        { id:'bm-sat',  type:'raster', source:'bm-sat',   layout:{visibility:'none'} },
       ]
     },
     center: MAP_CENTER, zoom: 14.5, maxZoom: 19, minZoom: 10,
@@ -1365,6 +1379,8 @@ function initRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'user_presence' }, () => {
       if (typeof renderTeam === 'function') renderTeam();
     })
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'team_chat_messages' },
+      ({ new: msg }) => { if (msg?.id) onMobileChatMessage(msg); })
     .subscribe();
 }
 
@@ -1752,9 +1768,9 @@ function toggleLayer(name, on) {
 
 /* ── BASEMAP ── */
 function setBasemap(key) {
-  const ids = { osm:'bm-osm', dark:'bm-dark', light:'bm-light', satellite:'bm-sat' };
+  const ids = { osm:'bm-osm', light:'bm-light', satellite:'bm-sat' };
   Object.values(ids).forEach(id => {
-    if (map && map.getLayer(id)) map.setLayoutProperty(id,'visibility', id === (ids[key]||'bm-osm') ? 'visible' : 'none');
+    if (map && map.getLayer(id)) map.setLayoutProperty(id,'visibility', id === (ids[key]||'bm-sat') ? 'visible' : 'none');
   });
 }
 
@@ -1772,7 +1788,7 @@ function closeBmPopup() {
   document.getElementById('bm-trigger').classList.remove('open');
 }
 
-const BM_LABELS = { osm:'Streets', satellite:'Satellite', dark:'Dark', light:'Light' };
+const BM_LABELS = { osm:'Streets', satellite:'Satellite', light:'Light' };
 
 function setBasemapBtn(key) {
   setBasemap(key);
@@ -1792,8 +1808,6 @@ function switchTheme() {
   theme = theme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
   document.getElementById('theme-btn').textContent = theme === 'dark' ? '☀️' : '🌙';
-  const bm = theme === 'dark' ? 'dark' : 'light';
-  setBasemapBtn(bm);
 }
 
 /* ── SIDEBAR ── */
@@ -1951,7 +1965,7 @@ function switchTab(name) {
 
   // Show/hide panels
   document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('active'));
-  if (name === 'team')   { document.getElementById('panel-team').classList.add('active');   renderTeam(); }
+  if (name === 'team')   { document.getElementById('panel-team').classList.add('active');   renderTeam(); loadTodayMessages(); clearMobileChatBadge(); }
   if (name === 'export') { document.getElementById('panel-export').classList.add('active'); renderExportStats(); }
 }
 
@@ -2076,6 +2090,91 @@ function teamCardHTML(m) {
         <div class="team-total">${m.total} all-time</div>
       </div>
     </div>`;
+}
+
+/* ── TEAM CHAT ── */
+let _mobileChats   = [];
+let _chatUnreadCnt = 0;
+
+function _esc(s) {
+  return String(s || '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadTodayMessages() {
+  if (!sb) return;
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  try {
+    const { data, error } = await sb
+      .from('team_chat_messages')
+      .select('id, user_id, display_name, body, sent_at')
+      .gte('sent_at', todayUtc + 'T00:00:00Z')
+      .order('sent_at', { ascending: true })
+      .limit(200);
+    if (error) throw error;
+    _mobileChats = data || [];
+    renderChatMessages();
+  } catch (e) { console.warn('Team chat load failed:', e); }
+}
+
+function renderChatMessages() {
+  const el = document.getElementById('team-chat-messages');
+  if (!el) return;
+  if (!_mobileChats.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:16px 0">No messages today yet. Say hi!</div>';
+    return;
+  }
+  const myId = currentUser?.id;
+  el.innerHTML = _mobileChats.map(m => {
+    const mine = m.user_id === myId;
+    const time = new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<div class="tchat-msg ${mine ? 'mine' : 'theirs'}">
+      ${!mine ? `<div class="tchat-meta">${_esc(m.display_name)}</div>` : ''}
+      <div class="tchat-bubble">${_esc(m.body)}</div>
+      <div class="tchat-meta">${time}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendTeamMessage() {
+  if (!sb || !currentUser?.id) { showToast('Sign in to chat', '#f59e0b'); return; }
+  const input = document.getElementById('team-chat-input');
+  const body  = (input?.value || '').trim();
+  if (!body) return;
+  input.value = '';
+  try {
+    const { error } = await sb
+      .from('team_chat_messages')
+      .insert({ user_id: currentUser.id, display_name: currentUser.name, body });
+    if (error) throw error;
+  } catch (e) {
+    console.warn('Team chat send failed:', e);
+    if (input) input.value = body;
+    showToast('Could not send message', '#ef4444');
+  }
+}
+
+function onMobileChatMessage(newRow) {
+  if (_mobileChats.some(m => m.id === newRow.id)) return;
+  _mobileChats.push(newRow);
+  if (activeTab === 'team') {
+    renderChatMessages();
+  } else {
+    _chatUnreadCnt++;
+    const dot = document.getElementById('chat-unread-dot');
+    if (dot) dot.style.display = 'block';
+    if (newRow.user_id !== currentUser?.id) {
+      showToast(`${_esc(newRow.display_name)}: ${newRow.body.slice(0,50)}${newRow.body.length>50?'…':''}`, '#6366f1');
+    }
+  }
+}
+
+function clearMobileChatBadge() {
+  _chatUnreadCnt = 0;
+  const dot = document.getElementById('chat-unread-dot');
+  if (dot) dot.style.display = 'none';
+  renderChatMessages();
 }
 
 function timeAgo(iso) {
@@ -2249,6 +2348,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('bs-overlay').addEventListener('click', closeBottomSheet);
   document.getElementById('bs-close').addEventListener('click', closeBottomSheet);
   document.getElementById('bs-save').addEventListener('click', () => { if (bsCoords) savePoint(bsCoords); });
+
+  // Team chat Enter to send (Shift+Enter = newline)
+  document.getElementById('team-chat-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTeamMessage(); }
+  });
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
