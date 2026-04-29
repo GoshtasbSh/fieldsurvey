@@ -363,6 +363,13 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .pp-badge{margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:2px 6px;border-radius:6px;}
 .pp-badge-mine{background:rgba(16,185,129,.18);color:#10b981;border:1px solid rgba(16,185,129,.4);}
 .pp-badge-team{background:rgba(148,163,184,.18);color:#94a3b8;border:1px solid rgba(148,163,184,.35);}
+.pp-actions{display:flex;gap:6px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border);}
+.pp-btn{flex:1;height:30px;border-radius:8px;font-size:11px;font-weight:600;font-family:inherit;
+  cursor:pointer;transition:.15s;border:1px solid var(--border);background:var(--card);color:var(--muted);}
+.pp-btn-edit{color:var(--accent);}
+.pp-btn-edit:hover{background:rgba(99,102,241,.12);border-color:var(--accent);}
+.pp-btn-delete{color:#ef4444;}
+.pp-btn-delete:hover{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.4);}
 
 /* ── FAB ── */
 .fab{
@@ -1113,6 +1120,8 @@ let totalPts = 0, todayPts = 0;
 let _allFieldPoints = [];
 let bsOpen = false;
 let bsCoords = null;
+let _editPointId  = null;   // UUID of point being edited; null = insert mode
+let _editPointLoc = null;   // [lon, lat] of point being edited
 const isMobile = () => window.innerWidth < 768;
 
 /* ── BOOT ── */
@@ -1254,12 +1263,14 @@ function addSurveyLayers(pts) {
   map.on('click', 'survey-dots', e => {
     if (placingMode) return;
     e.preventDefault();
-    const p = e.features[0].properties;
+    const p      = e.features[0].properties;
     const coords = e.features[0].geometry.coordinates;
-    const ownerTag = (p.is_mine === true || p.is_mine === 'true')
+    const isMine = (p.is_mine === true || p.is_mine === 'true');
+    const ownerTag = isMine
       ? '<span class="pp-badge pp-badge-mine">You</span>'
       : '<span class="pp-badge pp-badge-team">Team</span>';
-    new maplibregl.Popup({ offset:14, maxWidth:'220px' })
+    const pointId = p.id;   // closure — never embedded in onclick attribute
+    const popup = new maplibregl.Popup({ offset:14, maxWidth:'240px' })
       .setLngLat(coords)
       .setHTML(`
         <div class="pp-status">
@@ -1270,8 +1281,18 @@ function addSurveyLayers(pts) {
         <div class="pp-meta">👤 ${p.collector}</div>
         <div class="pp-meta">🕐 ${p.time}</div>
         ${p.notes ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
+        ${isMine ? `<div class="pp-actions">
+          <button class="pp-btn pp-btn-edit"   id="pp-edit-btn">✎ Edit</button>
+          <button class="pp-btn pp-btn-delete" id="pp-delete-btn">✕ Delete</button>
+        </div>` : ''}
       `)
       .addTo(map);
+    if (isMine) {
+      popup.getElement().querySelector('#pp-edit-btn')
+        ?.addEventListener('click', () => { popup.remove(); openEditSheet(pointId); });
+      popup.getElement().querySelector('#pp-delete-btn')
+        ?.addEventListener('click', () => { popup.remove(); confirmDeletePoint(pointId); });
+    }
   });
   map.on('mouseenter','survey-dots',() => { if (!placingMode) map.getCanvas().style.cursor='pointer'; });
   map.on('mouseleave','survey-dots',() => { map.getCanvas().style.cursor = placingMode ? 'crosshair' : ''; });
@@ -1515,8 +1536,93 @@ function openBottomSheet(lngLat) {
 function closeBottomSheet() {
   bsOpen = false;
   bsCoords = null;
+  _editPointId  = null;
+  _editPointLoc = null;
+  document.querySelector('.bs-title').textContent = 'Register Survey Point';
+  const saveBtn = document.getElementById('bs-save');
+  if (saveBtn) {
+    saveBtn.textContent = '✓  Save Survey Point';
+    saveBtn.classList.remove('saving', 'saved');
+    saveBtn.disabled = false;
+  }
   document.getElementById('bs-overlay').classList.remove('show');
   document.getElementById('bottom-sheet').classList.remove('open');
+}
+
+function openEditSheet(id) {
+  if (!navigator.onLine) { showToast('Edit requires internet', '#f59e0b'); return; }
+  const pt = _allFieldPoints.find(x => x.id === id);
+  if (!pt) { showToast('Point not found', '#ef4444'); return; }
+
+  _editPointId  = id;
+  _editPointLoc = [pt.lon, pt.lat];
+  bsCoords      = [pt.lon, pt.lat];
+
+  document.querySelector('.bs-title').textContent = 'Edit Survey Point';
+
+  // Coords display
+  const latStr = Math.abs(pt.lat).toFixed(5) + '°' + (pt.lat >= 0 ? 'N' : 'S');
+  const lonStr = Math.abs(pt.lon).toFixed(5) + '°' + (pt.lon >= 0 ? 'E' : 'W');
+  document.getElementById('bs-coords').textContent = `📍 ${latStr}  ${lonStr}`;
+
+  const addrEl = document.getElementById('bs-addr');
+  addrEl.textContent = 'Finding address…';
+  addrEl.classList.add('loading');
+  reverseGeocode(pt.lat, pt.lon).then(addr => {
+    addrEl.classList.remove('loading');
+    addrEl.textContent = addr ? 'Near: ' + addr : '';
+  }).catch(() => { addrEl.classList.remove('loading'); addrEl.textContent = ''; });
+
+  // Show original time, not now
+  document.getElementById('bs-time').textContent =
+    new Date(pt.collected_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('bs-collector').textContent =
+    currentUser ? currentUser.name.split(' ')[0] : 'You';
+
+  // Status grid — pre-select current status
+  const grid = document.getElementById('bs-grid');
+  grid.innerHTML = STATUS_LIST.map(([name, clr]) =>
+    `<div class="bs-stn${name === pt.status ? ' sel' : ''}" data-status="${name}" onclick="pickStatus(this)">
+       <div class="bs-sdot" style="background:${clr}"></div>
+       <div class="bs-stxt">${name}</div>
+     </div>`
+  ).join('');
+
+  // Notes
+  document.getElementById('bs-notes').value = pt.notes || '';
+
+  // Save button
+  const saveBtn = document.getElementById('bs-save');
+  if (saveBtn) {
+    saveBtn.textContent = '✓  Update Point';
+    saveBtn.classList.remove('saving', 'saved');
+    saveBtn.disabled = false;
+  }
+
+  bsOpen = true;
+  document.getElementById('bs-overlay').classList.add('show');
+  document.getElementById('bottom-sheet').classList.add('open');
+}
+
+async function confirmDeletePoint(id) {
+  if (!navigator.onLine) { showToast('Delete requires internet', '#f59e0b'); return; }
+  const pt = _allFieldPoints.find(x => x.id === id);
+  if (!pt) { showToast('Point not found', '#ef4444'); return; }
+  if (!window.confirm(`Delete this "${pt.status}" point?\nThis cannot be undone.`)) return;
+  try {
+    const { error } = await sb.from('field_survey_points')
+      .delete()
+      .eq('id', id)
+      .eq('collector_id', currentUser.id);
+    if (error) throw error;
+    _allFieldPoints = _allFieldPoints.filter(x => x.id !== id);
+    removePointFromMap(id);
+    recalcCounts(_allFieldPoints);
+    showToast('Point deleted', '#ef4444');
+  } catch (err) {
+    console.warn('Delete failed:', err);
+    showToast('Delete failed — try again', '#ef4444');
+  }
 }
 
 function appendNote(text) {
@@ -1540,6 +1646,35 @@ async function savePoint(coords) {
 
   const btn = document.getElementById('bs-save');
   if (btn) { btn.classList.add('saving'); btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  // ── EDIT MODE ────────────────────────────────────────────────────────
+  if (_editPointId) {
+    if (!navigator.onLine || !sb) {
+      showToast('Edit requires internet', '#f59e0b');
+      if (btn) { btn.classList.remove('saving'); btn.disabled = false; btn.textContent = '✓  Update Point'; }
+      return;
+    }
+    try {
+      const { error } = await sb.from('field_survey_points')
+        .update({ status, notes })
+        .eq('id', _editPointId)
+        .eq('collector_id', currentUser.id);
+      if (error) throw error;
+      const i = _allFieldPoints.findIndex(x => x.id === _editPointId);
+      if (i >= 0) { _allFieldPoints[i].status = status; _allFieldPoints[i].notes = notes; }
+      replacePointOnMap({ ..._allFieldPoints[i >= 0 ? i : 0], status, notes, color });
+      recalcCounts(_allFieldPoints);
+      if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Updated!'; btn.disabled = false; }
+      showToast('Point updated', color);
+      setTimeout(() => closeBottomSheet(), 750);
+    } catch (err) {
+      console.warn('Update failed:', err);
+      showToast('Update failed — try again', '#ef4444');
+      if (btn) { btn.classList.remove('saving'); btn.disabled = false; btn.textContent = '✓  Update Point'; }
+    }
+    return;
+  }
+  // ── END EDIT MODE ─────────────────────────────────────────────────────
 
   const newPt = {
     lat: coords[1], lon: coords[0], status, notes,
