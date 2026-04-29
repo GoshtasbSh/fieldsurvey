@@ -637,14 +637,26 @@ async function sendTeamMessage() {
   }
 
   try {
-    const { error } = await sbClient.from('team_chat_messages').insert({
+    const { data, error } = await sbClient.from('team_chat_messages').insert({
       user_id: currentUserId, display_name: currentDisplayName,
       body: body || '', attachment_url: attachmentUrl, attachment_type: attachmentType,
-    });
+    }).select('id,user_id,display_name,body,sent_at,attachment_url,attachment_type').single();
     if (error) throw error;
+    if (data && !teamChatMessages.some(m => m.id === data.id)) {
+      teamChatMessages.push(data);
+      renderChatMessages();
+    }
   } catch (e) {
     console.warn('Team chat send failed:', e);
     if (input) input.value = body;
+    const el = document.getElementById('team-chat-messages');
+    if (el) {
+      const errDiv = document.createElement('div');
+      errDiv.style.cssText = 'color:#ef4444;font-size:11px;text-align:center;padding:4px 0';
+      errDiv.textContent = 'Message failed to send';
+      el.appendChild(errDiv);
+      setTimeout(() => errDiv.remove(), 3000);
+    }
   }
 }
 
@@ -703,7 +715,7 @@ function switchTeamSubtab(tab) {
   document.getElementById('team-chats-view').style.display    = tab === 'chats'    ? '' : 'none';
   document.getElementById('ttog-activity').classList.toggle('active', tab === 'activity');
   document.getElementById('ttog-chats').classList.toggle('active', tab === 'chats');
-  if (tab === 'chats')    clearChatBadge();
+  if (tab === 'chats')    { clearChatBadge(); loadTodayMessages(); }
   if (tab === 'activity' && typeof renderPerUserPanel === 'function') renderPerUserPanel();
 }
 

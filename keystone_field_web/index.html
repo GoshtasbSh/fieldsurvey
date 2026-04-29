@@ -608,6 +608,16 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .team-toggle-btn.active{background:var(--accent);color:#fff}
 .team-toggle-btn .tbadge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:rgba(255,255,255,.3);font-size:10px;font-weight:700;line-height:16px;text-align:center;display:none}
 .team-toggle-btn.active .tbadge{display:inline-block}
+/* Chat view fills panel below the toggle, input always at bottom */
+#mob-team-chats-view{
+  position:absolute;top:100px;bottom:0;left:0;right:0;
+  padding:0 16px 16px;flex-direction:column;
+  background:var(--bg);overflow:hidden;
+}
+#mob-team-chats-view #team-chat-messages{
+  flex:1;overflow-y:auto;max-height:none!important;min-height:0;
+  display:flex;flex-direction:column;gap:5px;padding-right:2px;margin-bottom:8px;
+}
 /* Team chat bubbles */
 .tchat-msg{display:flex;flex-direction:column;max-width:88%;gap:2px}
 .tchat-msg.mine{align-self:flex-end;align-items:flex-end}
@@ -899,9 +909,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 
   <!-- Chats view (hidden by default) -->
   <div id="mob-team-chats-view" style="display:none">
-    <div id="team-chat-messages"
-         style="max-height:calc(100vh - 260px);overflow-y:auto;display:flex;
-                flex-direction:column;gap:5px;margin-bottom:8px;padding-right:2px"></div>
+    <div id="team-chat-messages"></div>
 
     <!-- Attachment preview strip -->
     <div id="mob-attach-preview" style="display:none;align-items:center;gap:8px;
@@ -2145,7 +2153,7 @@ function _esc(s) {
 function switchMobileTeamSubtab(tab) {
   _activeTeamSubtab = tab;
   document.getElementById('mob-team-activity-view').style.display = tab === 'activity' ? '' : 'none';
-  document.getElementById('mob-team-chats-view').style.display    = tab === 'chats'    ? '' : 'none';
+  document.getElementById('mob-team-chats-view').style.display    = tab === 'chats'    ? 'flex' : 'none';
   document.getElementById('mob-ttog-activity').classList.toggle('active', tab === 'activity');
   document.getElementById('mob-ttog-chats').classList.toggle('active', tab === 'chats');
   if (tab === 'chats')   clearMobileChatBadge();
@@ -2220,11 +2228,15 @@ async function sendTeamMessage() {
   }
 
   try {
-    const { error } = await sb.from('team_chat_messages').insert({
+    const { data, error } = await sb.from('team_chat_messages').insert({
       user_id: currentUser.id, display_name: currentUser.name,
       body: body || '', attachment_url: attachmentUrl, attachment_type: attachmentType,
-    });
+    }).select('id,user_id,display_name,body,sent_at,attachment_url,attachment_type').single();
     if (error) throw error;
+    if (data && !_mobileChats.some(m => m.id === data.id)) {
+      _mobileChats.push(data);
+      renderChatMessages();
+    }
   } catch (e) {
     console.warn('Team chat send failed:', e);
     if (input) input.value = body;
@@ -2265,11 +2277,7 @@ function onMobileChatMessage(newRow) {
       const chatsBtn = document.getElementById('mob-ttog-chats');
       if (chatsBtn) chatsBtn.style.color = '#ef4444';
     }
-    if (newRow.user_id !== currentUser?.id) {
-      const preview = (newRow.body || '').slice(0, 50) + ((newRow.body||'').length > 50 ? '…' : '')
-                    || (newRow.attachment_type === 'image' ? '📷 Image' : '📄 Document');
-      showToast(`${_esc(newRow.display_name)}: ${preview}`, '#6366f1');
-    }
+    // chat notifications disabled
   }
 }
 
