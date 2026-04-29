@@ -1120,8 +1120,9 @@ let totalPts = 0, todayPts = 0;
 let _allFieldPoints = [];
 let bsOpen = false;
 let bsCoords = null;
-let _editPointId  = null;   // UUID of point being edited; null = insert mode
-let _editPointLoc = null;   // [lon, lat] of point being edited
+let _editPointId       = null;   // UUID of point being edited; null = insert mode
+let _editPointLoc      = null;   // [lon, lat] of point being edited
+let _activePopupPointId = null;  // ID of the point whose popup is currently open
 const isMobile = () => window.innerWidth < 768;
 
 /* ── BOOT ── */
@@ -1269,8 +1270,10 @@ function addSurveyLayers(pts) {
     const ownerTag = isMine
       ? '<span class="pp-badge pp-badge-mine">You</span>'
       : '<span class="pp-badge pp-badge-team">Team</span>';
-    const pointId = p.id;   // closure — never embedded in onclick attribute
-    const popup = new maplibregl.Popup({ offset:14, maxWidth:'240px' })
+    // Store ID in module variable so onclick handlers can read it without
+    // embedding the ID string inside an onclick attribute (XSS-safe).
+    _activePopupPointId = p.id;
+    new maplibregl.Popup({ offset:14, maxWidth:'240px' })
       .setLngLat(coords)
       .setHTML(`
         <div class="pp-status">
@@ -1282,17 +1285,11 @@ function addSurveyLayers(pts) {
         <div class="pp-meta">🕐 ${p.time}</div>
         ${p.notes ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
         ${isMine ? `<div class="pp-actions">
-          <button class="pp-btn pp-btn-edit"   id="pp-edit-btn">✎ Edit</button>
-          <button class="pp-btn pp-btn-delete" id="pp-delete-btn">✕ Delete</button>
+          <button class="pp-btn pp-btn-edit"   onclick="_handlePopupEdit()">✎ Edit</button>
+          <button class="pp-btn pp-btn-delete" onclick="_handlePopupDelete()">✕ Delete</button>
         </div>` : ''}
       `)
       .addTo(map);
-    if (isMine) {
-      popup.getElement().querySelector('#pp-edit-btn')
-        ?.addEventListener('click', () => { popup.remove(); openEditSheet(pointId); });
-      popup.getElement().querySelector('#pp-delete-btn')
-        ?.addEventListener('click', () => { popup.remove(); confirmDeletePoint(pointId); });
-    }
   });
   map.on('mouseenter','survey-dots',() => { if (!placingMode) map.getCanvas().style.cursor='pointer'; });
   map.on('mouseleave','survey-dots',() => { map.getCanvas().style.cursor = placingMode ? 'crosshair' : ''; });
@@ -1623,6 +1620,17 @@ async function confirmDeletePoint(id) {
     console.warn('Delete failed:', err);
     showToast('Delete failed — try again', '#ef4444');
   }
+}
+
+function _handlePopupEdit() {
+  const id = _activePopupPointId;
+  document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
+  openEditSheet(id);
+}
+function _handlePopupDelete() {
+  const id = _activePopupPointId;
+  document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
+  confirmDeletePoint(id);
 }
 
 function appendNote(text) {
