@@ -1725,7 +1725,7 @@ async function openHistoryModal() {
 async function restoreVersion(id, label, type) {
   if (!confirm(`Restore "${label}"?\n\nThis will set it as the active dataset. The current data is already saved in history.`)) return;
   try {
-    const res = await fetch(`/api/versions/${id}/restore`, { method: 'POST' });
+    const res = await fetch(`/api/versions/restore?id=${id}`, { method: 'POST' });
     const data = await res.json();
     if (!data.restored) throw new Error('Restore failed');
 
@@ -2527,7 +2527,7 @@ async function uploadFile(zone, endpoint, file) {
     if (xhrRef.pulse) clearInterval(xhrRef.pulse);
     if (isIAQ) hideAnalysisOverlay();
     zone.classList.remove('success');
-    zone.innerHTML = `<h4 style="color:var(--red)">Upload failed</h4><p style="font-size:12px">${e.message}</p><p style="font-size:11px;color:var(--muted);margin-top:6px">Check the Render logs for details.</p>`;
+    zone.innerHTML = `<h4 style="color:var(--red)">Upload failed</h4><p style="font-size:12px">${e.message}</p><p style="font-size:11px;color:var(--muted);margin-top:6px">Check the Vercel function logs for details.</p>`;
     setTimeout(() => { zone.innerHTML = origHtml; zone.classList.remove('success'); }, 8000);
   }
 }
