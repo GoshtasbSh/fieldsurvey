@@ -71,3 +71,13 @@ def json_response(handler, status: int, body: Any, *, cache: str = "no-store") -
 
 def empty_geojson() -> dict:
     return {"type": "FeatureCollection", "features": []}
+
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Haversine distance in metres between two WGS-84 lat/lon points."""
+    from math import radians, sin, cos, sqrt, atan2
+    R = 6_371_000
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * R * atan2(sqrt(a), sqrt(1 - a))

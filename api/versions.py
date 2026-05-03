@@ -20,6 +20,12 @@ class handler(BaseHTTPRequestHandler):
                 .limit(100)
                 .execute()
             )
-            json_response(self, 200, r.data or [])
+            rows = r.data or []
+            # Dashboard expects {community_contact: [...], iaq_survey: [...]}
+            grouped = {
+                "community_contact": [x for x in rows if x["data_type"] == "community_contact"],
+                "iaq_survey":        [x for x in rows if x["data_type"] == "iaq_survey"],
+            }
+            json_response(self, 200, grouped)
         except Exception as e:
             json_response(self, 500, {"error": str(e)})

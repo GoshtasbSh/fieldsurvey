@@ -69,6 +69,31 @@ function fmtCurrency(n) {
   return '$' + Number(n).toLocaleString();
 }
 
+function showToast(msg, durationMs = 5000) {
+  let el = document.getElementById('ks-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ks-toast';
+    el.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);' +
+      'background:var(--card,#1e293b);color:var(--text,#e2e8f0);padding:10px 18px;' +
+      'border-radius:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.45);' +
+      'z-index:9999;pointer-events:none;opacity:0;transition:opacity .25s;max-width:420px;text-align:center;';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.style.opacity = '0'; }, durationMs);
+}
+
+// Return a GeoJSON copy with matched IAQ points removed.
+// When an IAQ response was merged into the community-contact layer (iaq_matched=true),
+// the contact already shows as "Completed" green — no duplicate IAQ circle needed.
+function iaqUnmatched(data) {
+  if (!data || !data.features) return data;
+  return { ...data, features: data.features.filter(f => !f.properties.iaq_matched) };
+}
+
 // ── Map init ────────────────────────────────────────────────────────────────
 function initMap() {
   const bm = BASEMAPS[currentBasemap];
@@ -264,6 +289,31 @@ function addLayers() {
       'circle-opacity': 0.9,
     },
   });
+
+  // IAQ Risk overlay — same source as survey-points, hidden by default.
+  // Shows contacts that have a matched Qualtric survey, colored by IAQ risk tier.
+  // Toggle via the "Air Quality Risk" checkbox in the Layers panel.
+  map.addLayer({
+    id: 'survey-iaq-risk', type: 'circle', source: 'survey',
+    layout: { visibility: 'none' },
+    filter: ['==', ['get', 'has_iaq_survey'], true],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 16, 11, 19, 16],
+      'circle-color': [
+        'match', ['get', 'iaq_risk_tier'],
+        'High',   '#ef4444',
+        'Medium', '#f97316',
+        'Low',    '#10b981',
+        '#6b7280'
+      ],
+      'circle-stroke-width': 2,
+      'circle-stroke-color': 'rgba(255,255,255,0.7)',
+      'circle-opacity': 0.92,
+    },
+  });
+  map.on('click', 'survey-iaq-risk', onPointClick);
+  map.on('mouseenter', 'survey-iaq-risk', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'survey-iaq-risk', () => map.getCanvas().style.cursor = '');
 
   // Point labels (address)
   map.addLayer({
@@ -827,6 +877,8 @@ function buildParcelColorExpr(field) {
 
 // ── Popup HTML builders ─────────────────────────────────────────────────────
 function buildSurveyTab(p) {
+  const iaqRiskColor = p.iaq_risk_tier === 'High' ? '#ef4444'
+    : p.iaq_risk_tier === 'Medium' ? '#f97316' : '#10b981';
   return `
     <div class="popup-body">
       ${p.status_detail ? `<div class="popup-row"><span class="popup-label">First Attempt</span><span class="popup-value">${p.status_detail}</span></div>` : ''}
@@ -835,6 +887,19 @@ function buildSurveyTab(p) {
       ${p.notes ? `<div class="popup-row"><span class="popup-label">Notes</span><span class="popup-value">${p.notes}</span></div>` : ''}
       <div class="popup-row"><span class="popup-label">Street</span><span class="popup-value">${p.street_name}</span></div>
       <div class="popup-row"><span class="popup-label">Status</span><span class="popup-value"><span class="popup-badge" style="background:${p.color}22;color:${p.color};border:1px solid ${p.color}44">${p.status}</span></span></div>
+      ${p.has_iaq_survey ? `
+      <div class="popup-row" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
+        <span class="popup-label">IAQ Survey</span>
+        <span class="popup-value" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="popup-badge" style="background:#10b98122;color:#10b981;border:1px solid #10b98144">✓ Qualtric matched</span>
+          <span style="font-size:11px;color:var(--muted)">Risk&nbsp;<strong style="color:${iaqRiskColor}">${p.iaq_overall_risk}/100</strong> · <span style="color:${iaqRiskColor}">${p.iaq_risk_tier}</span></span>
+        </span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px;font-size:11px;color:var(--muted)">
+        <span>Health&nbsp;<strong>${p.iaq_health_score}</strong></span>
+        <span>IAQ&nbsp;<strong>${p.iaq_iaq_score}</strong></span>
+        <span>Struct&nbsp;<strong>${p.iaq_struct_score}</strong></span>
+      </div>` : ''}
     </div>`;
 }
 
@@ -891,6 +956,13 @@ function attachPopupTabEvents(popup) {
 
 // ── Click handlers ──────────────────────────────────────────────────────────
 function onPointClick(e) {
+  // survey-points and survey-iaq-risk share the same source. When both layers are
+  // visible at the same location, MapLibre fires click events for each layer
+  // separately — both call this handler. Mark the underlying DOM event so the
+  // second call is a no-op. (MapLibre wraps the same DOM event for all layers.)
+  if (e.originalEvent && e.originalEvent._ksPopupHandled) return;
+  if (e.originalEvent) e.originalEvent._ksPopupHandled = true;
+
   e.preventDefault && e.preventDefault();
   const f = e.features[0];
   const sp = f.properties;
@@ -1182,6 +1254,7 @@ function applyFilters() {
 const LAYER_DEFS = {
   iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points'] },
   iaq_highlights: { toggle: 'layer-iaq-highlighted',  mapLayers: ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'] },
+  iaq_risk:       { toggle: 'layer-iaq-risk',         mapLayers: ['survey-iaq-risk'] },
   contact_survey: { toggle: 'layer-points',           mapLayers: ['survey-points'] },
   parcels:        { toggle: 'layer-parcels',          mapLayers: ['parcels-fill', 'parcels-outline'] },
   clusters:       { toggle: 'layer-clusters',         mapLayers: ['cluster-circles', 'cluster-count'] },
@@ -1210,6 +1283,14 @@ function setLayerVisibility(name, visible) {
     if (leg) leg.style.display = visible ? 'block' : 'none';
     if (visible) setLayerVisibility('contact_survey', false);
   }
+  // survey-iaq-risk shares the survey source — hide it whenever contact_survey is hidden
+  // so the chatbot set_layer_visibility action is fully consistent.
+  if (name === 'contact_survey' && !visible) {
+    if (map.getLayer('survey-iaq-risk'))
+      map.setLayoutProperty('survey-iaq-risk', 'visibility', 'none');
+    const rt = document.getElementById('layer-iaq-risk');
+    if (rt) rt.checked = false;
+  }
 }
 
 // ── Layer toggles ───────────────────────────────────────────────────────────
@@ -1222,6 +1303,7 @@ function setupLayerToggles() {
     'layer-labels': ['survey-labels'],
     'layer-iaq': ['iaq-points'],
     'layer-iaq-highlighted': ['iaq-highlighted'],
+    'layer-iaq-risk': ['survey-iaq-risk'],
   };
 
   Object.entries(toggles).forEach(([id, layers]) => {
@@ -1238,6 +1320,13 @@ function setupLayerToggles() {
         map.setLayoutProperty('cluster-circles', 'visibility', 'none');
         map.setLayoutProperty('cluster-count', 'visibility', 'none');
         document.getElementById('layer-clusters').checked = false;
+      }
+      // When contact layer is hidden, also hide the IAQ-risk overlay (it reads the same source)
+      if (id === 'layer-points' && !e.target.checked) {
+        if (map.getLayer('survey-iaq-risk'))
+          map.setLayoutProperty('survey-iaq-risk', 'visibility', 'none');
+        const riskToggle = document.getElementById('layer-iaq-risk');
+        if (riskToggle) riskToggle.checked = false;
       }
 
       // Show/hide layer-specific legends
@@ -2381,6 +2470,18 @@ async function uploadFile(zone, endpoint, file) {
       buildSurveyResultsTab(iaqAnalysis);
       document.getElementById('chat-btn')?.classList.add('has-data');
 
+      // If contacts were upgraded to Completed by Qualtric matching, reload the
+      // community contact layer so the map shows updated green dots immediately.
+      if (data.n_upgraded > 0) {
+        const pts = await (await fetch('/api/survey-points')).json();
+        surveyData = pts;
+        map.getSource('survey')?.setData(pts);
+        map.getSource('survey-clustered')?.setData(pts);
+        analysisData = await (await fetch('/api/analysis')).json();
+        buildAnalysis();
+        showToast(`${data.n_upgraded} community contact${data.n_upgraded > 1 ? 's' : ''} automatically marked Completed (Qualtric survey matched)`);
+      }
+
       zone.classList.add('success');
       zone.innerHTML = `<h4>IAQ Data Loaded!</h4>
         <p>${data.points || 0} responses mapped · ${data.streets_analyzed || 0} streets</p>
@@ -2433,9 +2534,11 @@ async function uploadFile(zone, endpoint, file) {
 
 // ── IAQ layers ──────────────────────────────────────────────────────────────
 function addIAQLayers() {
+  // Exclude IAQ features already merged into the contact layer (iaq_matched=true).
+  // Those addresses show as green Completed dots in survey-points / survey-iaq-risk.
   map.addSource('iaq-source', {
     type: 'geojson',
-    data: iaqData || { type: 'FeatureCollection', features: [] },
+    data: iaqUnmatched(iaqData) || { type: 'FeatureCollection', features: [] },
   });
 
   // Main IAQ points (colored by risk tier)
@@ -2495,7 +2598,7 @@ function addIAQLayers() {
 function updateIAQOnMap() {
   if (!iaqData) return;
   if (map.getSource('iaq-source')) {
-    map.getSource('iaq-source').setData(iaqData);
+    map.getSource('iaq-source').setData(iaqUnmatched(iaqData));
     // Do NOT auto-show the layer — the sidebar toggle controls visibility.
     // Only show if the toggle checkbox is already checked (e.g. warm-state reload).
     const toggle = document.getElementById('layer-iaq');

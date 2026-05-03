@@ -617,6 +617,136 @@ def _haversine_m(lat1, lon1, lat2, lon2):
     return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
 
+def _match_iaq_to_contacts(iaq_features: list, contact_features: list,
+                            threshold_m: float = 50) -> dict:
+    """
+    Match each IAQ feature to exactly one community-contact feature.
+
+    Strategy (in order of priority):
+      1. Exact address    — Q212 house# + street_core == contact address
+      2. Fuzzy address    — same house#, street similarity ≥0.70
+      3. Spatial fallback — haversine ≤ threshold_m metres (for GPS respondents)
+
+    Each contact is matched AT MOST ONCE (first IAQ hit wins).
+    Returns {iaq_feature_index: contact_feature_index}.
+    """
+    addr_lookup: dict = {}
+    by_house: dict = {}
+    for ci, cf in enumerate(contact_features):
+        addr = cf['properties'].get('address', '')
+        parsed = _parse_addr_parts(addr)
+        if parsed:
+            h, c = parsed
+            addr_lookup[(h, c)] = ci
+            by_house.setdefault(h, []).append((c, ci))
+
+    used_contacts: set = set()
+    matches: dict = {}
+
+    for ii, iaq_f in enumerate(iaq_features):
+        q212 = iaq_f['properties'].get('raw_address', '')
+        iaq_lon, iaq_lat = iaq_f['geometry']['coordinates']
+        matched_ci = None
+
+        if q212:
+            parsed = _parse_addr_parts(q212)
+            if parsed:
+                h, s = parsed
+                if (h, s) in addr_lookup:
+                    ci = addr_lookup[(h, s)]
+                    if ci not in used_contacts:
+                        matched_ci = ci
+                if matched_ci is None:
+                    best_sc, best_ci = 0.0, None
+                    for (c_core, ci) in by_house.get(h, []):
+                        sc = difflib.SequenceMatcher(None, s, c_core).ratio()
+                        if sc > best_sc and ci not in used_contacts:
+                            best_sc, best_ci = sc, ci
+                    if best_sc >= 0.70 and best_ci is not None:
+                        matched_ci = best_ci
+
+        if matched_ci is None:
+            best_d, best_ci = float('inf'), None
+            for ci, cf in enumerate(contact_features):
+                if ci in used_contacts:
+                    continue
+                c_lon, c_lat = cf['geometry']['coordinates']
+                d = _haversine_m(iaq_lat, iaq_lon, c_lat, c_lon)
+                if d < best_d:
+                    best_d, best_ci = d, ci
+            if best_d <= threshold_m and best_ci is not None:
+                matched_ci = best_ci
+
+        if matched_ci is not None:
+            matches[ii] = matched_ci
+            used_contacts.add(matched_ci)
+
+    return matches
+
+
+def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
+                                matches: dict) -> int:
+    """
+    Apply IAQ↔contact matches in-place.
+    - Upgrades contact status to 'Completed' for every matched pair
+      (Qualtric response = survey completion regardless of current status).
+    - Attaches IAQ summary scores to the contact for popup display.
+    - Sets iaq_matched=True on the IAQ feature so the frontend can hide it
+      from the IAQ layer (the contact layer already shows the merged point).
+    Returns the number of contacts upgraded.
+    """
+    upgraded = 0
+    for iaq_idx, contact_idx in matches.items():
+        cf = survey_feats[contact_idx]
+        iaq_f = iaq_features[iaq_idx]
+        ip = iaq_f['properties']
+
+        cf['properties']['status']           = 'Completed'
+        cf['properties']['color']            = STATUS['Completed']
+        cf['properties']['has_iaq_survey']   = True
+        cf['properties']['iaq_overall_risk'] = ip.get('overall_risk', 0)
+        cf['properties']['iaq_risk_tier']    = ip.get('risk_tier', '')
+        cf['properties']['iaq_health_score'] = ip.get('health_score', 0)
+        cf['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
+        cf['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+
+        iaq_f['properties']['iaq_matched'] = True
+        upgraded += 1
+
+    log.info(f"IAQ↔Contact merge: {upgraded}/{len(matches)} contacts upgraded to Completed")
+    return upgraded
+
+
+def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
+                                  threshold_m: float = 50) -> int:
+    """
+    Upgrade field survey point status to Completed when an IAQ survey exists
+    within threshold_m metres (spatial-only — field points have no address field).
+    Returns the number of field points upgraded.
+    """
+    upgraded = 0
+    for ff in field_features:
+        if ff['properties'].get('status') == 'Completed':
+            continue
+        f_lon, f_lat = ff['geometry']['coordinates']
+        for iaq_f in iaq_features:
+            i_lon, i_lat = iaq_f['geometry']['coordinates']
+            if _haversine_m(f_lat, f_lon, i_lat, i_lon) <= threshold_m:
+                ip = iaq_f['properties']
+                ff['properties']['status']           = 'Completed'
+                ff['properties']['color']            = STATUS['Completed']
+                ff['properties']['has_iaq_survey']   = True
+                ff['properties']['iaq_overall_risk'] = ip.get('overall_risk', 0)
+                ff['properties']['iaq_risk_tier']    = ip.get('risk_tier', '')
+                ff['properties']['iaq_health_score'] = ip.get('health_score', 0)
+                ff['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
+                ff['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+                upgraded += 1
+                break
+    log.info(f"Field↔IAQ merge: {upgraded} field points upgraded to Completed")
+    return upgraded
+
+
 # ── IAQ survey pipeline ────────────────────────────────────────────────────────
 
 def process_iaq_survey(csv_bytes: bytes):
@@ -748,6 +878,8 @@ def process_iaq_survey(csv_bytes: bytes):
                 'hospital_visit':  ('yes' if 'yes' in str(row.get('Hospital Respiratory', '') or '').lower()
                                     else 'no'),
                 'coord_source':    coord_source,
+                'raw_address':     ' '.join(str(q212).split()) if q212 and str(q212).strip().lower() not in ('', 'ttt', 'nan', 'read to respondent') else '',
+                'iaq_matched':     False,
             }
         })
 
@@ -1553,6 +1685,9 @@ async def lifespan(application):
             csv_bytes = IAQ_FILE.read_bytes()
             result = await loop.run_in_executor(None, process_iaq_survey, csv_bytes)
             iaq_data, iaq_analysis, street_stats, iaq_validation = result
+            # Strip raw_address (used for matching only — must not be persisted)
+            for _f in iaq_data.get('features', []):
+                _f['properties'].pop('raw_address', None)
             n = len(iaq_data.get('features', []))
             iaq_payload = {
                 'geojson': iaq_data, 'analysis': iaq_analysis,
@@ -1567,6 +1702,34 @@ async def lifespan(application):
             log.warning(f"Auto IAQ processing failed: {e}")
     else:
         log.info("IAQ survey data: not in Supabase — upload required")
+
+    # ── One-time migration: apply IAQ↔Contact matching to existing Supabase data ──
+    # If both datasets are loaded and no contact has been tagged with has_iaq_survey
+    # yet, this is either a fresh first-run or an older deployment that didn't have
+    # the merge logic.  Run the match now so the dashboard immediately shows the
+    # correct "Completed" statuses without requiring a manual re-upload.
+    if (survey_data.get('features') and iaq_data.get('features') and
+            not any(f['properties'].get('has_iaq_survey')
+                    for f in survey_data.get('features', []))):
+        log.info("Startup: running IAQ↔Contact migration for existing data...")
+        try:
+            _contact_feats = list(survey_data['features'])
+            _matches = _match_iaq_to_contacts(iaq_data['features'], _contact_feats)
+            _n_up = _upgrade_contacts_from_iaq(_contact_feats, iaq_data['features'], _matches)
+            if _n_up:
+                survey_data['features'] = _contact_feats
+                # Re-save IAQ data with iaq_matched flags set
+                _iaq_payload_updated = {
+                    'geojson': iaq_data,
+                    'analysis': iaq_analysis,
+                    'street_stats': street_stats,
+                    'validation': iaq_validation,
+                }
+                await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
+                await asyncio.to_thread(_sb_save, 'iaq_survey', _iaq_payload_updated)
+                log.info(f"Startup migration complete: {_n_up} contacts upgraded to Completed")
+        except Exception as e:
+            log.warning(f"Startup IAQ migration failed (non-fatal): {e}")
 
     analysis = compute_analysis(survey_data, parcels_data)
 
@@ -1725,13 +1888,23 @@ async def daily_refresh():
                              "last_analysis": last_at})
 
     new_features = _field_pts_to_geojson_features(new_rows)
+
+    # Upgrade any new field point that has a matching IAQ survey within 50 m.
+    # This covers the future flow: surveyor records the GPS point → resident later
+    # fills the Qualtric survey online → next daily refresh promotes the point.
+    if iaq_data and iaq_data.get('features'):
+        _apply_iaq_to_field_features(new_features, iaq_data['features'])
+
     merged = {
         'type': 'FeatureCollection',
         'features': list(survey_data.get('features', [])) + new_features,
     }
     today   = _date.today().isoformat()
     n_total = len(merged['features'])
-    label   = f"Daily Update {today} — {len(new_rows)} new field visits ({n_total} total)"
+    n_iaq_upgraded = sum(1 for f in new_features if f['properties'].get('has_iaq_survey'))
+    label   = (f"Daily Update {today} — {len(new_rows)} new field visits"
+               + (f" ({n_iaq_upgraded} Qualtric-matched)" if n_iaq_upgraded else "")
+               + f" ({n_total} total)")
 
     survey_data = merged
     analysis    = compute_analysis(survey_data, parcels_data)
@@ -1799,6 +1972,35 @@ async def upload_iaq(file: UploadFile = File(...)):
         raise HTTPException(400, f"Processing failed: {e}")
 
     n = len(iaq_data.get("features", []))
+
+    # ── Match IAQ responses to community contacts ─────────────────────────────
+    # For every Qualtric response that can be linked to a contact address (by Q212
+    # text or by GPS proximity ≤50 m), upgrade the contact status to "Completed"
+    # and attach IAQ scores for popup display.  The matched IAQ feature is flagged
+    # iaq_matched=True so the frontend hides it from the IAQ layer (it is already
+    # shown as the Completed green dot in the contact layer).
+    n_upgraded = 0
+    contact_feats = list((survey_data or {}).get('features', []))
+    if contact_feats and iaq_data.get('features'):
+        matches = _match_iaq_to_contacts(iaq_data['features'], contact_feats)
+        n_upgraded = _upgrade_contacts_from_iaq(contact_feats, iaq_data['features'], matches)
+        if n_upgraded:
+            survey_data['features'] = contact_feats
+            analysis = compute_analysis(survey_data, parcels_data)
+            contact_label = (f"IAQ-merged {_date.today().isoformat()} — "
+                             f"{n_upgraded} contacts upgraded · {file.filename}")
+            await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
+            await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data,
+                                    contact_label, len(contact_feats))
+            if analysis:
+                await asyncio.to_thread(_sb_save, 'analysis', analysis)
+
+    # Strip raw_address before persisting — it was only needed for address matching.
+    # Storing full home addresses of respondents contradicts the anonymisation policy
+    # and would expose PII to every authenticated dashboard user via Supabase.
+    for _f in iaq_data.get('features', []):
+        _f['properties'].pop('raw_address', None)
+
     iaq_payload = {
         'geojson':         iaq_data,
         'analysis':        iaq_analysis,
@@ -1810,13 +2012,14 @@ async def upload_iaq(file: UploadFile = File(...)):
     await asyncio.to_thread(_sb_save, 'iaq_survey', iaq_payload)
     await asyncio.to_thread(_sb_save_version, 'iaq_survey', iaq_payload, iaq_label, n)
     n_streets = len([s for s, d in street_stats.items() if not d.get("insufficient_data")])
-    log.info(f"IAQ data ready: {n} points, {n_streets} streets — kept in memory only")
+    log.info(f"IAQ data ready: {n} points, {n_streets} streets — {n_upgraded} contacts upgraded")
 
     return {
         "status": "ok",
         "points": n,
         "streets_analyzed": n_streets,
         "mean_risk": iaq_analysis.get("scores", {}).get("mean_risk", 0),
+        "n_upgraded": n_upgraded,
         "validation": iaq_validation,
     }
 

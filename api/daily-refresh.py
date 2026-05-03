@@ -13,7 +13,7 @@ import os
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import supabase_admin, load_cached, json_response, empty_geojson
+from _lib import supabase_admin, load_cached, json_response, empty_geojson, haversine_m
 
 
 def _field_row_to_feature(row: dict) -> dict:
@@ -72,7 +72,26 @@ def _run_refresh() -> dict:
     # Load existing cached survey-points blob and append
     existing = load_cached("survey_points") or empty_geojson()
     features = list(existing.get("features") or [])
-    features.extend(_field_row_to_feature(r) for r in new_rows)
+    new_features = [_field_row_to_feature(r) for r in new_rows]
+
+    # Upgrade new field points that have a Qualtric IAQ survey within 50 m.
+    iaq_stored = load_cached("iaq_survey") or {}
+    iaq_feats = (iaq_stored.get("geojson") or {}).get("features") or []
+    n_iaq_upgraded = 0
+    if iaq_feats:
+        for ff in new_features:
+            if ff["properties"].get("status") == "Completed":
+                continue
+            f_lon, f_lat = ff["geometry"]["coordinates"]
+            for iaq_f in iaq_feats:
+                i_lon, i_lat = iaq_f["geometry"]["coordinates"]
+                if haversine_m(f_lat, f_lon, i_lat, i_lon) <= 50:
+                    ff["properties"]["status"] = "Completed"
+                    ff["properties"]["has_iaq_survey"] = True
+                    n_iaq_upgraded += 1
+                    break
+
+    features.extend(new_features)
     merged = {"type": "FeatureCollection", "features": features}
 
     label = f"Daily Update {date.today().isoformat()} — {len(new_rows)} new field visits ({len(features)} total)"
