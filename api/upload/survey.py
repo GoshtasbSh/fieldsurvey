@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from _lib import supabase_admin, supabase_anon, json_response
-from _processing import parse_multipart_file, load_parcel_index, process_survey_bytes
+from _processing import parse_multipart_file, load_parcel_index, process_survey_bytes, compute_contact_analysis
 
 
 class handler(BaseHTTPRequestHandler):
@@ -58,6 +58,12 @@ class handler(BaseHTTPRequestHandler):
             'label':     label,
             'n_points':  n,
         }).execute()
+        # Save analysis blob so dashboard stats panel reflects new contact data
+        contact_analysis = compute_contact_analysis(survey_data.get('features', []))
+        sb.table('keystone_dashboard_data').upsert(
+            {'data_type': 'analysis', 'payload': contact_analysis},
+            on_conflict='data_type',
+        ).execute()
 
         json_response(self, 200, {
             'status':   'ok',

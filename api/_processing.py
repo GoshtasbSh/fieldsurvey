@@ -777,6 +777,41 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     return geojson, analysis, streets, n_upgraded
 
 
+def compute_contact_analysis(contact_features: list) -> dict:
+    """
+    Compute contact-level analysis stats from a feature list.
+    Matches the shape of app.py's compute_analysis() output so the
+    dashboard's GET /api/analysis reads correct data after a Vercel upload.
+    Parcel stats are omitted (parcel data is loaded separately by the browser).
+    """
+    sc: dict = {}
+    for f in contact_features:
+        s = f['properties'].get('status', 'Unknown')
+        sc[s] = sc.get(s, 0) + 1
+
+    st_count: dict = {}
+    st_status: dict = {}
+    for f in contact_features:
+        sn = f['properties'].get('street_name', 'Unknown')
+        s  = f['properties'].get('status', 'Unknown')
+        st_count[sn] = st_count.get(sn, 0) + 1
+        st_status.setdefault(sn, {})[s] = st_status.get(sn, {}).get(s, 0) + 1
+
+    total = len(contact_features)
+    comp  = sc.get('Completed', 0)
+    return {
+        'total_points':    total,
+        'completion_rate': round(comp / total * 100, 1) if total else 0,
+        'status_counts':   sc,
+        'status_colors':   STATUS,
+        'streets': [
+            {'name': n, 'count': c, 'statuses': st_status.get(n, {})}
+            for n, c in sorted(st_count.items(), key=lambda x: -x[1])
+        ],
+        'parcel_stats': {},
+    }
+
+
 def process_survey_bytes(file_bytes: bytes, filename: str,
                          parcel_idx: ParcelIndex) -> dict:
     """

@@ -15,8 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from _lib import supabase_admin, supabase_anon, load_cached, json_response
 from _processing import (
     parse_multipart_file, load_parcel_index,
-    process_iaq_bytes,
-    _compute_street_stats,
+    process_iaq_bytes, compute_contact_analysis,
 )
 
 
@@ -94,6 +93,13 @@ class handler(BaseHTTPRequestHandler):
                 'label':     f'IAQ-merged {today} — {n_upgraded} contacts upgraded · {filename}',
                 'n_points':  len(contact_feats),
             }).execute()
+            # Recompute and save analysis blob so dashboard stats panel reflects
+            # the new Completed counts immediately (mirrors app.py's _sb_save('analysis',...))
+            contact_analysis = compute_contact_analysis(contact_feats)
+            sb.table('keystone_dashboard_data').upsert(
+                {'data_type': 'analysis', 'payload': contact_analysis},
+                on_conflict='data_type',
+            ).execute()
 
         n_streets = len([s for s, d in streets.items() if not d.get('insufficient_data')])
         json_response(self, 200, {
