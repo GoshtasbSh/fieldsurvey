@@ -2037,26 +2037,89 @@ function pulsePoint(coords, color) {
 }
 
 /* ── COUNTS ── */
-// Counts show ONLY the signed-in user's points. Other users' points are still
-// visible on the map (desaturated), but the filter bar + legend counts + export
-// stats represent personal progress. Legend 'lc-*' ids reflect today's totals.
+// Two separate ideas of "count":
+//   • totalPts / todayPts  → MY personal progress (drives "0 total · 0 today")
+//   • counts (unified)     → CSV community contacts + every field-collected
+//                            point (deduped at 30 m so a field point shadows
+//                            the CSV row it sits on top of). Drives the
+//                            Survey Legend and the top filter chips so the
+//                            field app matches the desktop dashboard.
+function computeUnifiedFieldCounts() {
+  const out = {};
+  Object.keys(STATUS_COLORS).forEach(s => out[s] = 0);
+  const csv   = communityFeatures || [];
+  const field = _allFieldPoints   || [];
+  if (!csv.length && !field.length) return out;
+
+  // ~40 m spatial grid for field points; the 30 m radius is covered by
+  // checking the cell + 8 neighbours.
+  const CELL = 0.00040;
+  const cellKey = (lat, lon) => `${Math.round(lat / CELL)}|${Math.round(lon / CELL)}`;
+  const fieldByCell = new Map();
+  field.forEach((f, i) => {
+    const lat = +f.lat, lon = +f.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const k = cellKey(lat, lon);
+    if (!fieldByCell.has(k)) fieldByCell.set(k, []);
+    fieldByCell.get(k).push(i);
+  });
+
+  const used = new Set();
+  const distM = (lat1, lon1, lat2, lon2) => {
+    const dy = (lat2 - lat1) * 111320;
+    const dx = (lon2 - lon1) * 111320 * Math.cos(lat1 * Math.PI / 180);
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  csv.forEach(f => {
+    const coords = f.geometry?.coordinates || [];
+    const lon = +coords[0], lat = +coords[1];
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const ky = Math.round(lat / CELL), kx = Math.round(lon / CELL);
+    let matched = -1, bestDist = Infinity;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const arr = fieldByCell.get(`${ky + dy}|${kx + dx}`);
+        if (!arr) continue;
+        for (const idx of arr) {
+          if (used.has(idx)) continue;
+          const fp = field[idx];
+          const d = distM(lat, lon, +fp.lat, +fp.lon);
+          if (d <= 30 && d < bestDist) { bestDist = d; matched = idx; }
+        }
+      }
+    }
+    const status = matched >= 0
+      ? (field[matched].status || f.properties?.status || 'Unknown')
+      : (f.properties?.status || 'Unknown');
+    if (matched >= 0) used.add(matched);
+    out[status] = (out[status] || 0) + 1;
+  });
+
+  // Standalone field points (no coincident CSV row)
+  field.forEach((p, i) => {
+    if (used.has(i)) return;
+    const s = p.status || 'Unknown';
+    out[s] = (out[s] || 0) + 1;
+  });
+  return out;
+}
+
 function recalcCounts(pts) {
-  counts = {};
-  Object.keys(STATUS_COLORS).forEach(s => counts[s] = 0);
   const myId   = currentUser?.id || null;
   const myGsid = (IS_GUEST && GUEST?.session_id) || null;
   const today  = new Date().toDateString();
-  // "Mine" includes pins this signed-in user OR this guest session
-  // collected. Without the guest_session_id check, a guest's pins all
-  // had collector_id=NULL → none counted as mine → legend stayed at 0.
-  const mine = pts.filter(p =>
+  const mine = (pts || []).filter(p =>
        (myId   && p.collector_id     === myId)
     || (myGsid && p.guest_session_id === myGsid)
   );
   const mineToday = mine.filter(p => new Date(p.collected_at).toDateString() === today);
-  mineToday.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
   totalPts = mine.length;
   todayPts = mineToday.length;
+  // Survey Legend + filter chips show unified totals so every user
+  // (admin, member, guest) sees the same community-contact picture
+  // the desktop dashboard does.
+  counts = computeUnifiedFieldCounts();
   renderCounts();
 }
 
@@ -2077,7 +2140,10 @@ function renderCounts() {
   document.getElementById('lc-FollowUp').textContent     = counts['Follow Up'] || 0;
   document.getElementById('lc-Other').textContent        = counts['Other'] || 0;
   document.getElementById('lc-Unknown').textContent      = counts['Unknown'] || 0;
-  document.getElementById('fc-all').textContent          = totalPts;
+  // "All" chip = unified community-contact total (CSV + field, deduped),
+  // mirroring desktop. Personal totals live in sb-stat-total below.
+  const unifiedAll = Object.values(counts || {}).reduce((s, n) => s + (n || 0), 0);
+  document.getElementById('fc-all').textContent          = unifiedAll;
   document.getElementById('fc-Completed').textContent    = counts['Completed'] || 0;
   document.getElementById('fc-NoAnswer').textContent     = counts['No Answer'] || 0;
   document.getElementById('fc-Inaccessible').textContent = counts['Inaccessible'] || 0;
@@ -2110,6 +2176,10 @@ async function loadCommunityContacts() {
     const gj = await r.json();
     communityFeatures = gj.features || [];
     updateCcPanel();
+    // Survey Legend + filter chips fold CSV community contacts together
+    // with field points, so a fresh CSV fetch must trigger a recompute —
+    // otherwise the legend stays at zero until a field point is added.
+    recalcCounts(_allFieldPoints);
     if (communityFeatures.length) {
       addCommunityLayerGeoJSON(gj);
       const tgl = document.getElementById('tgl-community');
