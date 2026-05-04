@@ -1396,20 +1396,26 @@ function addSurveyLayers(pts) {
     // Pass the point ID as a literal into each onclick so the handler is
     // unambiguous even if _activePopupPointId is somehow overwritten.
     const eid = CSS.escape(String(p.id));
+    // p.collector is a free-form name (any team member or guest can set
+    // it), p.notes is free text, and p.status / p.color are bounded but
+    // come over the wire as strings. Escape every interpolation, clamp
+    // the colour to a real hex, and escape the id we drop into onclick.
+    const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(p.color || '')) ? p.color : '#9ca3af';
+    const idAttr = _esc(String(p.id || '')).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     new maplibregl.Popup({ offset:14, maxWidth:'240px' })
       .setLngLat(coords)
       .setHTML(`
         <div class="pp-status">
-          <div class="pp-dot" style="background:${p.color};box-shadow:0 0 5px ${p.color}55"></div>
-          <div class="pp-s" style="color:${p.color}">${p.status}</div>
+          <div class="pp-dot" style="background:${colorSafe};box-shadow:0 0 5px ${colorSafe}55"></div>
+          <div class="pp-s" style="color:${colorSafe}">${_esc(p.status)}</div>
           ${ownerTag}
         </div>
-        <div class="pp-meta">👤 ${p.collector}</div>
-        <div class="pp-meta">🕐 ${p.time}</div>
-        ${p.notes ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
+        <div class="pp-meta">👤 ${_esc(p.collector)}</div>
+        <div class="pp-meta">🕐 ${_esc(p.time)}</div>
+        ${p.notes ? `<div class="pp-notes">"${_esc(p.notes)}"</div>` : ''}
         ${isMine ? `<div class="pp-actions">
-          <button class="pp-btn pp-btn-edit"   onclick="_handlePopupEdit('${p.id}')">✎ Edit</button>
-          <button class="pp-btn pp-btn-delete" onclick="_handlePopupDelete('${p.id}')">✕ Delete</button>
+          <button class="pp-btn pp-btn-edit"   onclick="_handlePopupEdit('${idAttr}')">✎ Edit</button>
+          <button class="pp-btn pp-btn-delete" onclick="_handlePopupDelete('${idAttr}')">✕ Delete</button>
         </div>` : ''}
       `)
       .addTo(map);
@@ -1474,16 +1480,21 @@ function addCommunityLayerGeoJSON(gj) {
         'Follow Up':'#06b6d4','Other':'#ec4899',
       };
       const col = STATUS_MAP[p.status] || '#9ca3af';
+      // Bound the colour to a real hex string and escape every CSV-
+      // sourced field — addresses and notes can contain anything once
+      // an upload is processed, and the IAQ flow rebuilds them on every
+      // refresh, so we can't rely on a one-time scrub.
+      const colSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(col)) ? col : '#9ca3af';
       new maplibregl.Popup({ offset:14, maxWidth:'240px' })
         .setLngLat(c)
         .setHTML(`
           <div class="pp-status">
-            <div class="pp-dot" style="background:${col};box-shadow:0 0 5px ${col}55"></div>
-            <div class="pp-s" style="color:${col}">${p.status||'Unknown'}</div>
+            <div class="pp-dot" style="background:${colSafe};box-shadow:0 0 5px ${colSafe}55"></div>
+            <div class="pp-s" style="color:${colSafe}">${_esc(p.status||'Unknown')}</div>
           </div>
-          <div class="pp-meta">📍 ${p.address||'—'}</div>
-          ${p.date && p.date !== 'nan' ? `<div class="pp-meta">📅 ${p.date}</div>` : ''}
-          ${p.notes && p.notes !== 'nan' && p.notes !== '' ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
+          <div class="pp-meta">📍 ${_esc(p.address||'—')}</div>
+          ${p.date && p.date !== 'nan' ? `<div class="pp-meta">📅 ${_esc(p.date)}</div>` : ''}
+          ${p.notes && p.notes !== 'nan' && p.notes !== '' ? `<div class="pp-notes">"${_esc(p.notes)}"</div>` : ''}
         `).addTo(map);
     });
     map.on('mouseenter','community-dots',() => { if (!placingMode) map.getCanvas().style.cursor='pointer'; });
@@ -2469,7 +2480,11 @@ function showToast(msg, color, queued = false) {
   const wrap = document.getElementById('toast-wrap');
   const el   = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `<div class="toast-dot" style="background:${color};box-shadow:0 0 5px ${color}88"></div><span>${msg}${queued ? ' — queued' : ''}</span>`;
+  // msg can come from any code path including server error strings;
+  // escape it and clamp the colour so a crafted error like
+  // `<img src=x onerror=...>` passed to showToast can't execute.
+  const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(color || '')) ? color : '#9ca3af';
+  el.innerHTML = `<div class="toast-dot" style="background:${colorSafe};box-shadow:0 0 5px ${colorSafe}88"></div><span>${_esc(msg)}${queued ? ' — queued' : ''}</span>`;
   wrap.appendChild(el);
   setTimeout(() => el.remove(), 3200);
 }
@@ -2804,9 +2819,17 @@ function activeLabel(iso) {
 }
 
 function teamCardHTML(m) {
+  // Status keys can come from any team member's writes, names from
+  // guest claim flow, last-action labels from server formatting —
+  // escape all of them and clamp colours to real hex.
   const statusPills = Object.entries(m.statuses || {})
     .sort((a,b)=>b[1]-a[1]).slice(0,4)
-    .map(([s,n]) => `<div class="team-status-pill"><div class="team-status-dot" style="background:${STATUS_COLORS[s]||'#9ca3af'}"></div>${STATUS_INITIALS[s]||s}: ${n}</div>`)
+    .map(([s,n]) => {
+      const c = STATUS_COLORS[s] || '#9ca3af';
+      const cSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(c)) ? c : '#9ca3af';
+      const label = STATUS_INITIALS[s] || s;
+      return `<div class="team-status-pill"><div class="team-status-dot" style="background:${cSafe}"></div>${_esc(label)}: ${Number(n)||0}</div>`;
+    })
     .join('');
   const active = m.active_label || 'offline';
   const activeClass = active === 'active now' ? 'active-now' : (active === 'offline' ? 'offline' : 'idle');
@@ -2815,20 +2838,20 @@ function teamCardHTML(m) {
   const last = m.last || '—';
   return `
     <div class="team-card ${m.is_mine ? 'is-mine' : ''}">
-      <div class="team-av">${m.initials || '?'}</div>
+      <div class="team-av">${_esc(m.initials || '?')}</div>
       <div class="team-info">
-        <div class="team-name">${name}${mineTag}</div>
+        <div class="team-name">${_esc(name)}${mineTag}</div>
         <div class="team-last">
-          <span class="team-presence ${activeClass}">● ${active}</span>
+          <span class="team-presence ${activeClass}">● ${_esc(active)}</span>
           <span class="team-last-sep">·</span>
-          <span>${last}</span>
+          <span>${_esc(last)}</span>
         </div>
         <div class="team-status-bar">${statusPills}</div>
       </div>
       <div class="team-counts">
-        <div class="team-today">${m.today}</div>
+        <div class="team-today">${Number(m.today)||0}</div>
         <div class="team-today-lbl">today</div>
-        <div class="team-total">${m.total} all-time</div>
+        <div class="team-total">${Number(m.total)||0} all-time</div>
       </div>
     </div>`;
 }
@@ -3095,9 +3118,10 @@ function renderExportStats() {
     return;
   }
   host.innerHTML = nonZero
-    .map(([s, n, c]) =>
-      `<span class="exp-breakdown-chip"><span class="exp-breakdown-dot" style="background:${c}"></span>${s} ${n}</span>`
-    ).join('');
+    .map(([s, n, c]) => {
+      const cSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '#9ca3af';
+      return `<span class="exp-breakdown-chip"><span class="exp-breakdown-dot" style="background:${cSafe}"></span>${_esc(s)} ${Number(n)||0}</span>`;
+    }).join('');
 }
 
 async function emailData() {

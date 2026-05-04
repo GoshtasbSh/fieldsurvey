@@ -549,18 +549,23 @@ function onFieldPointClick(e) {
     ? '<span style="margin-left:auto;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;background:rgba(16,185,129,.18);color:#10b981;border:1px solid rgba(16,185,129,.4);text-transform:uppercase;letter-spacing:.4px;">You</span>'
     : '<span style="margin-left:auto;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;background:rgba(148,163,184,.18);color:#94a3b8;border:1px solid rgba(148,163,184,.35);text-transform:uppercase;letter-spacing:.4px;">Team</span>';
   const when = p.collected_at ? new Date(p.collected_at).toLocaleString() : '';
+  // p.color is bounded to STATUS_COLORS values (server-controlled palette);
+  // every other field point property is attacker-controlled (collector
+  // name supplied by guests, free-text notes, and statuses written by
+  // any team member) so each interpolation MUST go through escapeHtml.
+  const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(p.color || '')) ? p.color : '#9ca3af';
   new maplibregl.Popup({ offset: 14, maxWidth: '260px' })
     .setLngLat(coords)
     .setHTML(`
       <div style="padding:10px 12px;font-family:var(--font);">
         <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
-          <div style="width:10px;height:10px;border-radius:50%;background:${p.color};box-shadow:0 0 6px ${p.color}66;"></div>
-          <div style="font-size:13px;font-weight:700;color:${p.color};">${p.status}</div>
+          <div style="width:10px;height:10px;border-radius:50%;background:${colorSafe};box-shadow:0 0 6px ${colorSafe}66;"></div>
+          <div style="font-size:13px;font-weight:700;color:${colorSafe};">${escapeHtml(p.status)}</div>
           ${badge}
         </div>
-        <div style="font-size:11px;color:var(--muted);">👤 ${p.collector}</div>
-        <div style="font-size:11px;color:var(--muted);">🕐 ${when}</div>
-        ${p.notes ? `<div style="font-size:11px;font-style:italic;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);">"${p.notes}"</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);">👤 ${escapeHtml(p.collector)}</div>
+        <div style="font-size:11px;color:var(--muted);">🕐 ${escapeHtml(when)}</div>
+        ${p.notes ? `<div style="font-size:11px;font-style:italic;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);">"${escapeHtml(p.notes)}"</div>` : ''}
       </div>
     `)
     .addTo(map);
@@ -816,20 +821,27 @@ function renderPerUserPanel() {
   if (subEl) subEl.textContent = `${todayTotal} today · ${rows.length} surveyor${rows.length === 1 ? '' : 's'}`;
 
   rowsEl.innerHTML = rows.map(m => {
+    // Status names come from any team member's writes — escape both the
+    // label and the count, and clamp the colour to a real hex value so a
+    // crafted status can't break out of the inline-style attribute.
     const topStatuses = Object.entries(m.statuses || {}).sort((a,b)=>b[1]-a[1]).slice(0,3)
-      .map(([s,n]) => `<span style="color:${STATUS_COLORS[s]||'#9ca3af'}">${s} ${n}</span>`)
+      .map(([s,n]) => {
+        const c = STATUS_COLORS[s] || '#9ca3af';
+        const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(c)) ? c : '#9ca3af';
+        return `<span style="color:${colorSafe}">${escapeHtml(s)} ${Number(n) || 0}</span>`;
+      })
       .join(' · ');
     return `
       <div class="team-row ${m.is_mine ? 'mine' : ''}">
-        <div class="team-av">${m.initials || '?'}</div>
+        <div class="team-av">${escapeHtml(m.initials || '?')}</div>
         <div class="team-main">
           <div class="team-row-name">${escapeHtml(m.name)}${m.is_mine ? '<span class="team-row-you">You</span>' : ''}</div>
-          <div class="team-row-presence ${m.presence_cls}">● ${m.presence_label}</div>
+          <div class="team-row-presence ${m.presence_cls}">● ${escapeHtml(m.presence_label)}</div>
           <div class="team-row-stats">${topStatuses || '<span style="color:var(--muted)">no points yet</span>'}</div>
         </div>
         <div class="team-row-right">
-          <div class="team-row-today">${m.today}</div>
-          <div class="team-row-total">${m.total} all-time</div>
+          <div class="team-row-today">${Number(m.today) || 0}</div>
+          <div class="team-row-total">${Number(m.total) || 0} all-time</div>
         </div>
       </div>`;
   }).join('');
@@ -1123,6 +1135,15 @@ function buildParcelColorExpr(field) {
 function buildSurveyTab(p) {
   const iaqRiskColor = p.iaq_risk_tier === 'High' ? '#ef4444'
     : p.iaq_risk_tier === 'Medium' ? '#f97316' : '#10b981';
+  // p.color is bounded to STATUS_COLORS but defence-in-depth: only allow
+  // a real hex string — any other shape becomes the default gray.
+  const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(p.color || '')) ? p.color : '#9ca3af';
+  // Risk and score values are server-computed numbers; coerce so a
+  // crafted string in the geojson can never break HTML/CSS context.
+  const overallRisk = Number(p.iaq_overall_risk) || 0;
+  const healthScore = Number(p.iaq_health_score) || 0;
+  const iaqScore    = Number(p.iaq_iaq_score)    || 0;
+  const structScore = Number(p.iaq_struct_score) || 0;
   return `
     <div class="popup-body">
       ${p.status_detail ? `<div class="popup-row"><span class="popup-label">First Attempt</span><span class="popup-value">${escapeHtml(p.status_detail)}</span></div>` : ''}
@@ -1130,19 +1151,19 @@ function buildSurveyTab(p) {
       ${p.date ? `<div class="popup-row"><span class="popup-label">Date</span><span class="popup-value">${escapeHtml(p.date)}</span></div>` : ''}
       ${p.notes ? `<div class="popup-row"><span class="popup-label">Notes</span><span class="popup-value">${escapeHtml(p.notes)}</span></div>` : ''}
       <div class="popup-row"><span class="popup-label">Street</span><span class="popup-value">${escapeHtml(p.street_name)}</span></div>
-      <div class="popup-row"><span class="popup-label">Status</span><span class="popup-value"><span class="popup-badge" style="background:${escapeHtml(p.color)}22;color:${escapeHtml(p.color)};border:1px solid ${escapeHtml(p.color)}44">${escapeHtml(p.status)}</span></span></div>
+      <div class="popup-row"><span class="popup-label">Status</span><span class="popup-value"><span class="popup-badge" style="background:${colorSafe}22;color:${colorSafe};border:1px solid ${colorSafe}44">${escapeHtml(p.status)}</span></span></div>
       ${p.has_iaq_survey ? `
       <div class="popup-row" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
         <span class="popup-label">IAQ Survey</span>
         <span class="popup-value" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <span class="popup-badge" style="background:#10b98122;color:#10b981;border:1px solid #10b98144">✓ Qualtric matched</span>
-          <span style="font-size:11px;color:var(--muted)">Risk&nbsp;<strong style="color:${iaqRiskColor}">${p.iaq_overall_risk}/100</strong> · <span style="color:${iaqRiskColor}">${p.iaq_risk_tier}</span></span>
+          <span style="font-size:11px;color:var(--muted)">Risk&nbsp;<strong style="color:${iaqRiskColor}">${overallRisk}/100</strong> · <span style="color:${iaqRiskColor}">${escapeHtml(p.iaq_risk_tier)}</span></span>
         </span>
       </div>
       <div style="display:flex;gap:8px;margin-top:6px;font-size:11px;color:var(--muted)">
-        <span>Health&nbsp;<strong>${p.iaq_health_score}</strong></span>
-        <span>IAQ&nbsp;<strong>${p.iaq_iaq_score}</strong></span>
-        <span>Struct&nbsp;<strong>${p.iaq_struct_score}</strong></span>
+        <span>Health&nbsp;<strong>${healthScore}</strong></span>
+        <span>IAQ&nbsp;<strong>${iaqScore}</strong></span>
+        <span>Struct&nbsp;<strong>${structScore}</strong></span>
       </div>` : ''}
     </div>`;
 }
@@ -1251,25 +1272,32 @@ function buildSurveyAnswersTab(iaqProps) {
 }
 
 function buildParcelTab(p) {
+  // fmt() returns the raw value when the input isn't a number, so any
+  // string field (parcel_id, owner, land_use) reaches the DOM unescaped.
+  // Wrap each non-numeric field in escapeHtml. Currency/area outputs go
+  // through fmtCurrency/Math.round/Number — those are intrinsically safe.
   return `
     <div class="popup-body">
-      <div class="popup-row"><span class="popup-label">Parcel ID</span><span class="popup-value" style="font-family:var(--mono)">${fmt(p.parcel_id)}</span></div>
-      <div class="popup-row"><span class="popup-label">Owner</span><span class="popup-value">${fmt(p.owner)}</span></div>
-      <div class="popup-row"><span class="popup-label">Land Use</span><span class="popup-value">${fmt(p.land_use || p.use_code)}</span></div>
+      <div class="popup-row"><span class="popup-label">Parcel ID</span><span class="popup-value" style="font-family:var(--mono)">${escapeHtml(fmt(p.parcel_id))}</span></div>
+      <div class="popup-row"><span class="popup-label">Owner</span><span class="popup-value">${escapeHtml(fmt(p.owner))}</span></div>
+      <div class="popup-row"><span class="popup-label">Land Use</span><span class="popup-value">${escapeHtml(fmt(p.land_use || p.use_code))}</span></div>
       <div class="popup-row"><span class="popup-label">Just Value</span><span class="popup-value" style="color:var(--green)">${fmtCurrency(p.just_value)}</span></div>
       <div class="popup-row"><span class="popup-label">Land Value</span><span class="popup-value">${fmtCurrency(p.land_value)}</span></div>
       <div class="popup-row"><span class="popup-label">Assessed</span><span class="popup-value">${fmtCurrency(p.assessed_value)}</span></div>
-      <div class="popup-row"><span class="popup-label">Living Area</span><span class="popup-value">${p.living_area ? fmt(p.living_area) + ' sqft' : '—'}</span></div>
-      <div class="popup-row"><span class="popup-label">Year Built</span><span class="popup-value">${fmt(p.year_built)}</span></div>
-      <div class="popup-row"><span class="popup-label">Buildings</span><span class="popup-value">${fmt(p.num_buildings)}</span></div>
+      <div class="popup-row"><span class="popup-label">Living Area</span><span class="popup-value">${p.living_area ? escapeHtml(fmt(p.living_area)) + ' sqft' : '—'}</span></div>
+      <div class="popup-row"><span class="popup-label">Year Built</span><span class="popup-value">${escapeHtml(fmt(p.year_built))}</span></div>
+      <div class="popup-row"><span class="popup-label">Buildings</span><span class="popup-value">${escapeHtml(fmt(p.num_buildings))}</span></div>
       <div class="popup-row"><span class="popup-label">Lot Size</span><span class="popup-value">${p.lot_sqft ? fmt(Math.round(p.lot_sqft)) + ' sqft' : '—'}</span></div>
-      <div class="popup-row"><span class="popup-label">Last Sale</span><span class="popup-value">${p.last_sale_price > 0 ? fmtCurrency(p.last_sale_price) + (p.last_sale_year ? ' (' + p.last_sale_year + ')' : '') : '—'}</span></div>
+      <div class="popup-row"><span class="popup-label">Last Sale</span><span class="popup-value">${p.last_sale_price > 0 ? fmtCurrency(p.last_sale_price) + (p.last_sale_year ? ' (' + (Number(p.last_sale_year) || '') + ')' : '') : '—'}</span></div>
     </div>`;
 }
 
 function buildTabbedPopup(address, tabs, activeTab) {
+  // Tab labels are call-site literals; escape defensively in case a
+  // future caller passes a dynamic value. Pane content already comes
+  // pre-built from the tab builders, which escape user fields themselves.
   const tabHeaders = tabs.map((t, i) =>
-    `<div class="popup-tab ${i === activeTab ? 'active' : ''}" data-idx="${i}">${t.label}</div>`
+    `<div class="popup-tab ${i === activeTab ? 'active' : ''}" data-idx="${i}">${escapeHtml(t.label)}</div>`
   ).join('');
   const tabPanes = tabs.map((t, i) =>
     `<div class="popup-pane ${i === activeTab ? 'active' : ''}" data-idx="${i}">${t.content}</div>`
@@ -1277,7 +1305,7 @@ function buildTabbedPopup(address, tabs, activeTab) {
 
   return `<div class="popup-card">
     <div class="popup-header">
-      <h3>${address}</h3>
+      <h3>${escapeHtml(address)}</h3>
     </div>
     <div class="popup-tabs">${tabHeaders}</div>
     <div class="popup-panes">${tabPanes}</div>
@@ -1654,11 +1682,16 @@ function buildUnifiedStatusControls() {
     row.setAttribute('data-status-row', status);
     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;color:var(--text2);transition:opacity .15s';
 
+    // STATUS_COLORS may be extended at runtime with keys from
+    // analysisData.status_colors (server-derived from CSV statuses), so
+    // both the key and the colour can be attacker-shaped — escape and
+    // validate each.
+    const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(color || '')) ? color : '#9ca3af';
     row.innerHTML = `
-      <input type="color" value="${color}" data-status="${status}"
+      <input type="color" value="${colorSafe}" data-status="${escapeHtml(status)}"
         style="width:20px;height:16px;border:1px solid var(--border);border-radius:3px;background:none;cursor:pointer;padding:0;flex-shrink:0;-webkit-appearance:none">
-      <span class="sym-label" style="flex:1;cursor:pointer;user-select:none">${status}</span>
-      <span class="legend-count" style="font-family:var(--mono);color:var(--muted);font-size:11px">${count}</span>`;
+      <span class="sym-label" style="flex:1;cursor:pointer;user-select:none">${escapeHtml(status)}</span>
+      <span class="legend-count" style="font-family:var(--mono);color:var(--muted);font-size:11px">${Number(count) || 0}</span>`;
 
     // Color picker
     row.querySelector('input[type="color"]').addEventListener('input', (e) => {
@@ -2276,7 +2309,7 @@ async function openHistoryModal() {
     }
     body.innerHTML = html;
   } catch (e) {
-    body.innerHTML = `<div class="version-empty" style="color:var(--red)">Failed to load history: ${e.message}</div>`;
+    body.innerHTML = `<div class="version-empty" style="color:var(--red)">Failed to load history: ${escapeHtml(e?.message || String(e))}</div>`;
   }
 }
 
@@ -2554,9 +2587,12 @@ function applyHeatmapClusterFilter() {
     if (map.getLayer('cluster-circles')) {
       if (clusterStatus !== 'all' && STATUS_COLORS[clusterStatus]) {
         map.setPaintProperty('cluster-circles', 'circle-color', STATUS_COLORS[clusterStatus]);
-        // Update legend info
+        // Update legend info — clusterStatus may originate from server-
+        // derived status_colors keys, escape both label and colour.
         const info = document.getElementById('cluster-legend-info');
-        if (info) info.innerHTML = `<div style="font-size:11px;color:var(--text2)">Showing <strong style="color:${STATUS_COLORS[clusterStatus]}">${clusterStatus}</strong> points only</div>`;
+        const cc = STATUS_COLORS[clusterStatus];
+        const ccSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(cc || '')) ? cc : '#9ca3af';
+        if (info) info.innerHTML = `<div style="font-size:11px;color:var(--text2)">Showing <strong style="color:${ccSafe}">${escapeHtml(clusterStatus)}</strong> points only</div>`;
       } else {
         // Restore dominant-status coloring
         map.setPaintProperty('cluster-circles', 'circle-color', [
@@ -2591,9 +2627,13 @@ function buildParcelColorLegend() {
     Object.entries(PARCEL_LU_COLORS).forEach(([lu, color]) => {
       const row = document.createElement('div');
       row.className = 'sym-color-row';
+      // PARCEL_LU_COLORS is a static dictionary today, but escape both
+      // sides defensively in case future code seeds it from server data.
+      const c = customParcelColors[lu] || color;
+      const cSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '#9ca3af';
       row.innerHTML = `
-        <input type="color" value="${customParcelColors[lu] || color}" data-lu="${lu}">
-        <span class="sym-label">${lu}</span>`;
+        <input type="color" value="${cSafe}" data-lu="${escapeHtml(lu)}">
+        <span class="sym-label">${escapeHtml(lu)}</span>`;
       row.querySelector('input').addEventListener('input', (e) => {
         customParcelColors[lu] = e.target.value;
         PARCEL_LU_COLORS[lu] = e.target.value;
@@ -3093,16 +3133,20 @@ async function uploadFile(zone, endpoint, file) {
       }
 
       zone.classList.add('success');
+      // Coerce every interpolated value to a number so the success toast
+      // can never echo attacker-shaped HTML out of the upload response.
       zone.innerHTML = `<h4>IAQ Data Loaded!</h4>
-        <p>${data.points || 0} responses mapped · ${data.streets_analyzed || 0} streets</p>
-        <p style="font-size:11px;color:var(--muted)">Mean risk score: ${data.mean_risk || 0}/100</p>`;
+        <p>${Number(data.points) || 0} responses mapped · ${Number(data.streets_analyzed) || 0} streets</p>
+        <p style="font-size:11px;color:var(--muted)">Mean risk score: ${Number(data.mean_risk) || 0}/100</p>`;
 
       // Show summary popup
       showSummaryPopup(data, iaqAnalysis);
 
     } else {
       zone.classList.add('success');
-      zone.innerHTML = `<h4>Uploaded!</h4><p>${file.name}</p><p style="font-size:11px;color:var(--muted)">Loading data…</p>`;
+      // file.name comes from the user's chosen upload — escape so a
+      // crafted filename like `<img src=x onerror=...>.csv` can't inject.
+      zone.innerHTML = `<h4>Uploaded!</h4><p>${escapeHtml(file.name)}</p><p style="font-size:11px;color:var(--muted)">Loading data…</p>`;
 
       await refreshAllData();
 
@@ -3128,7 +3172,9 @@ async function uploadFile(zone, endpoint, file) {
     if (xhrRef.pulse) clearInterval(xhrRef.pulse);
     if (isIAQ) hideAnalysisOverlay();
     zone.classList.remove('success');
-    zone.innerHTML = `<h4 style="color:var(--red)">Upload failed</h4><p style="font-size:12px">${e.message}</p><p style="font-size:11px;color:var(--muted);margin-top:6px">Check the Vercel function logs for details.</p>`;
+    // Server error message can include user-supplied input echoed back
+    // (e.g. malformed CSV column names). Escape before injecting.
+    zone.innerHTML = `<h4 style="color:var(--red)">Upload failed</h4><p style="font-size:12px">${escapeHtml(e?.message || String(e))}</p><p style="font-size:11px;color:var(--muted);margin-top:6px">Check the Vercel function logs for details.</p>`;
     setTimeout(() => { zone.innerHTML = origHtml; zone.classList.remove('success'); }, 8000);
   }
 }
