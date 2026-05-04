@@ -18,3 +18,4 @@ output/iaq_*
 graphify-out/
 mockups/
 .claude/
+.vercel
