@@ -488,6 +488,44 @@ function setFieldPointsData() {
   if (src) src.setData(fieldPointsData);
 }
 
+// Pull every field-collected point from the public dashboard endpoint
+// (/api/field-points uses the service-role key so it works even when the
+// browser has no Supabase session and would be blocked by RLS). Returns
+// true when at least one feature was loaded so callers can decide whether
+// to merge / overwrite the in-memory dataset.
+async function loadFieldPointsFromServer() {
+  try {
+    const r = await fetch('/api/field-points', { cache: 'no-store' });
+    if (!r.ok) return false;
+    const fc = await r.json();
+    const feats = (fc && Array.isArray(fc.features)) ? fc.features : [];
+    fieldPointsData = {
+      type: 'FeatureCollection',
+      features: feats.map(f => {
+        // Server returns ready-made GeoJSON; rebuild via fieldPointFeature so
+        // is_mine + the cached color stay consistent with realtime upserts.
+        const g = f.geometry || {};
+        const c = Array.isArray(g.coordinates) ? g.coordinates : [null, null];
+        const p = f.properties || {};
+        return fieldPointFeature({
+          id: p.id,
+          lat: c[1], lon: c[0],
+          status: p.status,
+          notes: p.notes,
+          collector_id: p.collector_id,
+          collector_name: p.collector,
+          collected_at: p.collected_at,
+        }, currentUserId);
+      }).filter(f => Number.isFinite(f.geometry.coordinates[0]) && Number.isFinite(f.geometry.coordinates[1])),
+    };
+    setFieldPointsData();
+    return fieldPointsData.features.length > 0;
+  } catch (e) {
+    console.warn('GET /api/field-points failed:', e);
+    return false;
+  }
+}
+
 function upsertFieldPoint(p) {
   const feat = fieldPointFeature(p, currentUserId);
   const idx = fieldPointsData.features.findIndex(f => f.properties.id === feat.properties.id);
@@ -529,6 +567,31 @@ function onFieldPointClick(e) {
 }
 
 async function initFieldPoints() {
+  // Always pull the live total from the server first — this works even for
+  // anon viewers / users not yet in team_members (RLS would silently block
+  // a direct Supabase read), so the analysis panel and legend reflect real
+  // field activity from the very first frame.
+  const serverLoaded = await loadFieldPointsFromServer();
+  if (serverLoaded) {
+    if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
+    if (typeof buildLegend === 'function') buildLegend();
+    if (typeof applyFilters === 'function') applyFilters();
+    if (typeof buildAnalysis === 'function') {
+      try { buildAnalysis(); } catch (e) { /* analysisData may not be ready */ }
+    }
+  }
+
+  // Poll the same endpoint every 30 s so unauthenticated viewers — who
+  // don't get Supabase realtime — still see new field points within half
+  // a minute. When a Supabase realtime subscription is alive (signed-in
+  // team members) this is just a low-cost safety net.
+  if (window.__keystoneFieldPointsPoll) clearInterval(window.__keystoneFieldPointsPoll);
+  window.__keystoneFieldPointsPoll = setInterval(async () => {
+    if (document.hidden) return;
+    const ok = await loadFieldPointsFromServer();
+    if (ok && typeof onFieldPointsChanged === 'function') onFieldPointsChanged();
+  }, 30000);
+
   // Boot Supabase client from /api/config (dashboard runs authenticated as viewer;
   // field_survey_points has public read, so unauthenticated SDK can still subscribe
   // and read under the anon RLS policy's effective behavior).
@@ -588,38 +651,44 @@ async function initFieldPoints() {
     document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
   }
 
-  // Initial load — paginate so we never silently drop points past a fixed limit.
-  try {
-    const PAGE = 1000;
-    const HARD_CAP = 100000;
-    const all = [];
-    let from = 0;
-    while (from < HARD_CAP) {
-      const { data, error } = await sbClient
-        .from('field_survey_points')
-        .select('id, lat, lon, status, notes, collector_id, collector_name, collected_at')
-        .order('collected_at', { ascending: false })
-        .range(from, from + PAGE - 1);
-      if (error || !Array.isArray(data) || data.length === 0) break;
-      all.push(...data);
-      if (data.length < PAGE) break;
-      from += PAGE;
-    }
-    if (all.length >= HARD_CAP) {
-      console.warn(`field_survey_points: pagination capped at ${HARD_CAP} rows`);
-    }
-    fieldPointsData = {
-      type: 'FeatureCollection',
-      features: all.map(p => fieldPointFeature(p, currentUserId)),
-    };
-    setFieldPointsData();
-    // First-load: surveyData is usually loaded by now; stamp coincident
-    // contacts so the survey-points layer hides duplicate CSV dots from
-    // the very first frame. onFieldPointsChanged() handles all later updates.
-    if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
-    if (typeof buildLegend === 'function') buildLegend();
-    if (typeof applyFilters === 'function') applyFilters();
-  } catch (e) { console.warn('Initial field-points fetch failed:', e); }
+  // Initial load via Supabase direct (paginated). Skipped when the server
+  // endpoint already populated the dataset above — direct reads can be
+  // blocked by RLS and would clobber good data with an empty array.
+  if (!fieldPointsData.features.length) {
+    try {
+      const PAGE = 1000;
+      const HARD_CAP = 100000;
+      const all = [];
+      let from = 0;
+      while (from < HARD_CAP) {
+        const { data, error } = await sbClient
+          .from('field_survey_points')
+          .select('id, lat, lon, status, notes, collector_id, collector_name, collected_at')
+          .order('collected_at', { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error || !Array.isArray(data) || data.length === 0) break;
+        all.push(...data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      if (all.length >= HARD_CAP) {
+        console.warn(`field_survey_points: pagination capped at ${HARD_CAP} rows`);
+      }
+      if (all.length) {
+        fieldPointsData = {
+          type: 'FeatureCollection',
+          features: all.map(p => fieldPointFeature(p, currentUserId)),
+        };
+        setFieldPointsData();
+        // First-load: surveyData is usually loaded by now; stamp coincident
+        // contacts so the survey-points layer hides duplicate CSV dots from
+        // the very first frame. onFieldPointsChanged() handles all later updates.
+        if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
+        if (typeof buildLegend === 'function') buildLegend();
+        if (typeof applyFilters === 'function') applyFilters();
+      }
+    } catch (e) { console.warn('Initial field-points fetch failed:', e); }
+  }
 
   // Presence
   try {
@@ -667,6 +736,18 @@ function onFieldPointsChanged() {
   if (typeof buildLegend === 'function') buildLegend();
   if (typeof updateStatusRowHighlights === 'function') updateStatusRowHighlights();
   if (typeof applyFilters === 'function') applyFilters();
+  // Bottom analysis panel + Update Data modal community-contact card both
+  // need to reflect the new live total. Guard each call so a partially-
+  // initialised page (e.g. before /api/analysis returns) doesn't throw.
+  if (typeof buildAnalysis === 'function') {
+    try { buildAnalysis(); } catch (e) { console.warn('buildAnalysis on field-point change failed:', e); }
+  }
+  // Only re-render the modal if it's currently open — renderDataSummary()
+  // hits Supabase, no need to do that on every realtime tick.
+  const updModal = document.getElementById('import-modal');
+  if (updModal && updModal.classList.contains('show') && typeof renderDataSummary === 'function') {
+    try { renderDataSummary(); } catch (e) { console.warn('renderDataSummary on field-point change failed:', e); }
+  }
 }
 
 // ── Team panel (desktop) ──
@@ -984,6 +1065,15 @@ async function renderDataSummary() {
       const payload = row.payload || {};
       if (c.countPath === 'features') n = (payload.features || []).length;
       else if (c.countPath === 'geojson.features') n = ((payload.geojson || {}).features || []).length;
+      // For community contacts, fold in real-time field-collected points so
+      // the card reflects what's on the map, not just the CSV upload.
+      // Unified count = sum of unified status counts (CSV + standalone field
+      // points, deduped by 30 m proximity).
+      if (key === 'community_contact') {
+        const live = computeUnifiedStatusCounts();
+        const liveTotal = Object.values(live).reduce((s, v) => s + v, 0);
+        if (liveTotal > n) n = liveTotal;
+      }
       if (countEl) { countEl.textContent = n.toLocaleString(); countEl.classList.remove('empty'); }
       if (whenEl) whenEl.textContent = `Updated ${_fmtRelative(row.updated_at)}`;
       if (fileEl && key !== 'parcels') fileEl.textContent = payload.source_filename || 'Processed dataset';
@@ -1790,23 +1880,40 @@ function buildAnalysis() {
   if (!analysisData) return;
   const a = analysisData;
 
+  // Unified totals: CSV community contacts + standalone field-collected
+  // points (deduped by 30 m proximity). This matches the legend so the
+  // analysis panel reflects real-time field activity, not the stale
+  // CSV-only snapshot from /api/analysis.
+  const live = computeUnifiedStatusCounts();
+  const haveLive = (surveyData?.features?.length || 0) + (fieldPointsData?.features?.length || 0) > 0;
+  const status_counts = haveLive ? live : (a.status_counts || {});
+  const total_points  = haveLive
+    ? Object.values(status_counts).reduce((s, n) => s + n, 0)
+    : (a.total_points || 0);
+  const completed     = status_counts.Completed || 0;
+  const completion_rate = total_points > 0
+    ? +((completed / total_points) * 100).toFixed(1)
+    : 0;
+
   // Summary bar text
   document.getElementById('analysis-summary').textContent =
-    `${a.total_points} points | ${a.completion_rate}% completed | ${a.parcel_stats?.total || 0} parcels`;
+    `${total_points} points | ${completion_rate}% completed | ${a.parcel_stats?.total || 0} parcels`;
 
   // Stat cards
   const cards = document.getElementById('stat-cards');
   cards.innerHTML = `
-    <div class="stat-card"><div class="label">Total Addresses</div><div class="value">${a.total_points}</div></div>
-    <div class="stat-card"><div class="label">Completed</div><div class="value" style="color:var(--green)">${a.status_counts.Completed || 0}</div><div class="sub">${a.completion_rate}% rate</div></div>
-    <div class="stat-card"><div class="label">No Answer</div><div class="value" style="color:var(--orange)">${a.status_counts['No Answer'] || 0}</div></div>
-    <div class="stat-card"><div class="label">Inaccessible</div><div class="value" style="color:var(--red)">${a.status_counts.Inaccessible || 0}</div></div>
-    <div class="stat-card"><div class="label">Follow Up</div><div class="value" style="color:var(--cyan)">${a.status_counts['Follow Up'] || 0}</div></div>
+    <div class="stat-card"><div class="label">Total Addresses</div><div class="value">${total_points}</div></div>
+    <div class="stat-card"><div class="label">Completed</div><div class="value" style="color:var(--green)">${status_counts.Completed || 0}</div><div class="sub">${completion_rate}% rate</div></div>
+    <div class="stat-card"><div class="label">No Answer</div><div class="value" style="color:var(--orange)">${status_counts['No Answer'] || 0}</div></div>
+    <div class="stat-card"><div class="label">Inaccessible</div><div class="value" style="color:var(--red)">${status_counts.Inaccessible || 0}</div></div>
+    <div class="stat-card"><div class="label">Follow Up</div><div class="value" style="color:var(--cyan)">${status_counts['Follow Up'] || 0}</div></div>
     <div class="stat-card"><div class="label">Parcels Loaded</div><div class="value">${fmt(a.parcel_stats?.total || 0)}</div></div>
   `;
 
-  // Status pie chart
-  buildStatusChart(a);
+  // Status pie chart uses unified counts; streets/parcels stay CSV-derived
+  // (per-street and per-parcel breakdowns come from analysisData and don't
+  // include unmatched field points yet).
+  buildStatusChart({ status_counts });
   buildStreetsChart(a);
   buildStreetsTable(a);
   buildParcelAnalysis(a);
