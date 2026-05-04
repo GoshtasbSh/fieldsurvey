@@ -212,6 +212,12 @@ async function refreshAllData() {
     map.getSource('survey-clustered')?.setData(surveyData);
     map.getSource('parcels')?.setData(parcelsData);
 
+    // Refresh replaced surveyData wholesale, so the has_field_point flags
+    // stamped earlier are gone. Re-stamp before the legend is rebuilt so the
+    // unified counts and the survey-points filter both reflect the current
+    // CSV ↔ field-point dedup state.
+    if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
+
     updateIAQOnMap();
     buildLegend();
     buildAnalysis();
@@ -1078,7 +1084,10 @@ function buildSurveyAnswersTab(iaqProps) {
     const rows = fields
       .map(k => {
         const v = iaqProps?.[k];
-        if (v == null || v === '' || v === false) return '';
+        // Skip only truly empty answers — keep legitimate "no" / boolean false
+        // (e.g., a respondent who has no respiratory illness should still
+        // appear in the popup with that answer rendered).
+        if (v == null || v === '') return '';
         const q = qtext[k] || friendly(k);
         return `<div class="popup-row" style="align-items:flex-start">
           <span class="popup-label" style="max-width:55%;font-size:10px;line-height:1.3" title="${escapeHtml(q)}">${escapeHtml(q.length > 70 ? q.slice(0, 67) + '…' : q)}</span>
@@ -1427,7 +1436,10 @@ function stampCoincidentContacts() {
     }
   }
   if (changed) {
-    const src = (typeof map !== 'undefined') && map.getSource && map.getSource('survey-points');
+    // The geojson source is registered as 'survey' (line ~268); 'survey-points'
+    // is the LAYER id, not the source. Pushing setData on the source forces
+    // MapLibre to re-evaluate the has_field_point filter against fresh data.
+    const src = (typeof map !== 'undefined') && map.getSource && map.getSource('survey');
     if (src) src.setData(surveyData);
   }
   return changed;
