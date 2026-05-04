@@ -1189,20 +1189,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   startPresenceHeartbeat();
 });
 
-/* ── GUEST: heartbeat + banner + load own points ── */
-function showGuestBanner() {
-  // Reuse the topbar — append a small chip indicating guest status.
-  // We don't add new DOM if the topbar isn't around (e.g. if a future
-  // refactor removes it); stay defensive.
-  try {
-    const av = document.getElementById('user-av');
-    if (av) av.style.outline = '2px solid #f59e0b';
-    const sbName = document.getElementById('sb-name');
-    if (sbName && _guestExpiresAt) {
-      sbName.textContent = `${GUEST.name} (Guest)`;
-    }
-  } catch {}
-}
+/* ── GUEST: heartbeat + load own points ── */
+// No visible UI differentiation for guests — by user request the field
+// app must look identical for everyone. The only difference is internal
+// data routing (proxy endpoints + no realtime). The chat/team panel
+// renders an empty-state for guests in renderTeam() instead of fake data.
+function showGuestBanner() { /* intentionally empty — kept for call-site stability */ }
 async function loadGuestPoints() {
   try {
     const r = await fetch('/api/guest', {
@@ -2499,8 +2491,19 @@ async function renderTeam() {
   const grid = document.getElementById('team-grid');
   const sub  = document.getElementById('team-sub');
 
+  if (IS_GUEST) {
+    // Guests have no Supabase auth → can't read team_chat / presence /
+    // collector breakdowns. Show a friendly empty-state instead of fake
+    // demo data. The user's own pins remain visible on the map.
+    sub.textContent = 'Team activity is for signed-in members';
+    grid.innerHTML = '<div style="padding:18px;text-align:center;color:#8b949e;font-size:13px;line-height:1.55">Team chat and surveyor activity are available to signed-in members.<br>Sign up at <code style="background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px">/login</code> to join the team.</div>';
+    const badge = document.getElementById('team-badge');
+    if (badge) { badge.textContent = ''; badge.classList.remove('show'); }
+    return;
+  }
   if (!sb) {
-    // Demo data
+    // No Supabase configured at all (e.g. local demo): keep the original
+    // demo cards. This branch is unreachable in production deploys.
     const demo = [
       { name:'James R.',    initials:'JR', today:4, total:12, last:'Completed – 5 min ago',   statuses:{'Completed':3,'No Answer':1} },
       { name:'Maria S.',    initials:'MS', today:5, total:15, last:'No Answer – 12 min ago',  statuses:{'Completed':2,'Not Interested':1,'Vacant':2} },
@@ -2938,7 +2941,10 @@ function geolocate() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('hamburger').addEventListener('click', toggleSidebar);
   document.getElementById('backdrop').addEventListener('click', () => { if (sidebarOpen) toggleSidebar(); });
-  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : tryGPSFirst(); });
+  // Tap-to-place is the primary add-point flow: tapping the FAB enters
+  // placement mode so the user can tap anywhere on the map. The separate
+  // "Locate me" map button (#btn-locate) provides GPS centering on demand.
+  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : enterPlaceMode(); });
   document.getElementById('theme-btn').addEventListener('click', switchTheme);
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('btn-locate').addEventListener('click', geolocate);

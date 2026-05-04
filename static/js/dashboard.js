@@ -543,6 +543,18 @@ async function initFieldPoints() {
   }
   sbClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
 
+  // Guest-mode gate: a guest surveyor session in sessionStorage means
+  // this device only has ephemeral access (no Supabase auth). Guests
+  // never have access to the desktop dashboard — bounce them back to
+  // the field app so they don't see admin/PI workflows.
+  try {
+    const guest = sessionStorage.getItem('keystone_guest_session');
+    if (guest) {
+      window.location.replace('/field/');
+      return;
+    }
+  } catch { /* sessionStorage may be blocked — fall through to session check */ }
+
   // Identify the user if they have an existing session (cookie/localStorage shared
   // with the field PWA subdomain). Viewer-only is fine — is_mine simply stays false.
   let currentSession = null;
