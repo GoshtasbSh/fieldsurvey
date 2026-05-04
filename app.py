@@ -20,7 +20,7 @@ import asyncio
 import shutil
 import logging
 import difflib
-from datetime import date as _date
+from datetime import datetime as _datetime, timezone as _tz
 from pathlib import Path
 from collections import defaultdict
 from math import radians, sin, cos, sqrt, atan2
@@ -380,25 +380,28 @@ def _compute_health_score(row):
 def _compute_iaq_score(row):
     """Indoor air quality score 0–100 (higher = worse IAQ)."""
     score = 0.0
+    # Normalize \xa0 (non-breaking space) → regular space so both column-name
+    # variants exported by Qualtrics resolve correctly — matches _processing.py.
+    _nr = {str(k).replace('\xa0', ' '): v for k, v in row.items()}
     # Mold: +30
-    mold = row.get('Mold')
+    mold = _nr.get('Mold')
     if mold and not pd.isna(mold) and str(mold).strip() not in ('', 'nan'):
         score += 30
     # Leakage per area: +7.5 each (4 areas, max 30)
     for col in ['Leakage 2_1', 'Leakage 2_2', 'Leakage 2_3', 'Leakage 2_4']:
-        val = str(row.get(col, '') or '').lower().strip()
+        val = str(_nr.get(col, '') or '').lower().strip()
         if val and val not in ('none', 'nan', ''):
             score += 7.5
-    # Cooling system age (column has non-breaking space \xa0): old = +4, unknown = +2
-    for col in ['Cooling System\xa0_1', 'Cooling System\xa0_2',
-                'Cooling System\xa0_3', 'Cooling System\xa0_4']:
-        val = str(row.get(col, '') or '').lower()
+    # Cooling system age: old = +4, unknown = +2
+    for col in ['Cooling System _1', 'Cooling System _2',
+                'Cooling System _3', 'Cooling System _4']:
+        val = str(_nr.get(col, '') or '').lower()
         if 'more than 15' in val:
             score += 4
         elif "don't know" in val or 'not applicable' in val:
             score += 2
     # Gas/propane cooking: +10
-    if any(kw in str(row.get('Cooking ', '') or '').lower() for kw in ('gas', 'propane')):
+    if any(kw in str(_nr.get('Cooking ', '') or '').lower() for kw in ('gas', 'propane')):
         score += 10
     return round(min(score, 100))
 
@@ -749,20 +752,271 @@ def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
 
 # ── IAQ survey pipeline ────────────────────────────────────────────────────────
 
+# Local mirror of api/_processing.EXPECTED_IAQ_COLUMNS. Kept in sync manually
+# until app.py and _processing.py share a single source of truth.
+_EXPECTED_IAQ_COLUMNS_LOCAL = {
+    'critical': ['Finished', 'Q212', 'LocationLatitude', 'LocationLongitude'],
+    'health':   ['Headache', 'RespIll', 'asthma', 'wheeze', 'Tired',
+                 'Hospital Respiratory'],
+    'iaq':      ['Mold',
+                 'Leakage 2_1', 'Leakage 2_2', 'Leakage 2_3', 'Leakage 2_4',
+                 'Cooling System _1', 'Cooling System _2',
+                 'Cooling System _3', 'Cooling System _4',
+                 'Cooking '],
+    'struct':   ['QID192', 'QID128', 'QID141'],
+}
+
+
+def _validate_iaq_columns_local(df_columns) -> dict:
+    have = {str(c).replace('\xa0', ' ').strip() for c in df_columns}
+    missing = {}
+    for group, cols in _EXPECTED_IAQ_COLUMNS_LOCAL.items():
+        gone = [c for c in cols if c.replace('\xa0', ' ').strip() not in have]
+        if gone:
+            missing[group] = gone
+    return missing
+
+
+# ── Survey-question metadata (local mirror of api/_processing.SURVEY_QUESTIONS) ──
+# Maps a normalized field_name → (orig_csv_col_idx, question_text). Pinned by
+# original CSV column index because many of these columns export with blank
+# or duplicate Qualtrics headers (matrix sub-items as ' _1', ' _2', …; some
+# standalone questions ship with a literal single-space header). Question text
+# comes from the descriptor row of the CSV — used for chart subtitles in the
+# dashboard. Must stay in sync with the Vercel-side dict; verified via
+# scripts/verify_parity.py.
+SURVEY_QUESTIONS = {
+    # ── Residency & Housing (R1–R8) ───────────────────────────────────────────
+    'years_in_hre':       (27, 'How long have you lived in High Ridge Estates? (years)'),
+    'reloc_factor_emp':   (29, 'Relocation factor — Employment opportunities nearby'),
+    'reloc_factor_aff':   (30, 'Relocation factor — Affordable housing'),
+    'reloc_factor_qol':   (31, 'Relocation factor — Quality of Life'),
+    'reloc_factor_fam':   (32, 'Relocation factor — Proximity to family and friends'),
+    'reloc_factor_ret':   (33, 'Relocation factor — Retirement'),
+    'reloc_factor_env':   (34, 'Relocation factor — Environmental quality and access to nature'),
+    'reloc_factor_inh':   (35, 'Relocation factor — Inherited property'),
+    'reloc_factor_oth':   (36, 'Relocation factor — Other'),
+    'mh_skirting':        (42, 'If you live in a mobile home, does your home have its skirting intact?'),
+    'anticipated_stay':   (44, 'How long do you anticipate continuing to live in your current house?'),
+    'safety_env':         (56, 'Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?'),
+    'safety_social':      (57, 'Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?'),
+    'afford_urgency':     (58, 'How would you rate the urgency of having affordable housing in High Ridge Estates?'),
+    'afford_strategy':    (59, 'In your opinion, what is the most effective strategy to improve housing affordability in HRE?'),
+
+    # ── Community Living: home-resilience interventions matrix (C1, 11 items) ─
+    'intv_roof_walls':    (67, 'Intervention — Strengthen the roof and walls against severe weather'),
+    'intv_windows_doors': (68, 'Intervention — Upgrade windows and doors to be more energy-efficient'),
+    'intv_rain_gardens':  (69, 'Intervention — Install rain gardens to manage stormwater on my property'),
+    'intv_hvac':          (70, 'Intervention — Improve heating/cooling system(s)'),
+    'intv_plumbing_elec': (71, 'Intervention — Improve plumbing or electrical systems for reliability'),
+    'intv_well_septic':   (72, 'Intervention — Replace well/septic'),
+    'intv_ccua_water':    (73, 'Intervention — Connect to city water through CCUA'),
+    'intv_fence':         (74, 'Intervention — Add a fence for safety'),
+    'intv_trees_shade':   (75, 'Intervention — Plant more trees around my home for shade and cooling'),
+    'intv_trim_trees':    (76, 'Intervention — Trim trees'),
+    'intv_drainage':      (77, 'Intervention — Improved drainage'),
+
+    # ── Community Living: experiences in HRE matrix (C2, 10 items) ────────────
+    'exp_flooding':        (84, 'Experience — Flooding of house due to any disaster (e.g., hurricane)'),
+    'exp_flood_help':      (85, 'Experience — In case of flooding, received help for cleaning'),
+    'exp_extreme_heat':    (86, 'Experience — Extreme heat in recent years'),
+    'exp_school_change':   (87, "Experience — Changing your kids' school due to moving"),
+    'exp_law_enf':         (88, 'Experience — Calling law enforcement because of problem with neighbors'),
+    'exp_insurance_loss':  (89, 'Experience — Losing home owners insurance due to age of home'),
+    'exp_well_dry':        (90, 'Experience — Well drying up'),
+    'exp_pests':           (91, 'Experience — A problem with pests in your home'),
+    'exp_water_leaks':     (92, 'Experience — A problem with water leaks'),
+    'exp_loose_animals':   (93, 'Experience — A problem with loose animals'),
+
+    # ── Well-being & Mobility (W1, W2) ────────────────────────────────────────
+    'car_access':          (133, 'Do you (or your household) own or have regular access to a car?'),
+    'hurricane_transport': (134, 'During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?'),
+
+    # ── Demographics+ (D1, D2) ────────────────────────────────────────────────
+    'education':           (142, 'What is the highest level of education you have completed?'),
+    'employment':           (143, 'Which best describes your employment status?'),
+}
+
+INTERVENTION_HIGHLIGHTS = ('intv_roof_walls', 'intv_ccua_water')
+EXPERIENCE_HIGHLIGHTS = ('exp_law_enf', 'exp_insurance_loss', 'exp_well_dry',
+                         'exp_pests', 'exp_water_leaks', 'exp_loose_animals')
+
+INTERVENTION_FIELDS = (
+    'intv_roof_walls', 'intv_windows_doors', 'intv_rain_gardens',
+    'intv_hvac', 'intv_plumbing_elec', 'intv_well_septic',
+    'intv_ccua_water', 'intv_fence', 'intv_trees_shade',
+    'intv_trim_trees', 'intv_drainage',
+)
+EXPERIENCE_FIELDS = (
+    'exp_flooding', 'exp_flood_help', 'exp_extreme_heat', 'exp_school_change',
+    'exp_law_enf', 'exp_insurance_loss', 'exp_well_dry',
+    'exp_pests', 'exp_water_leaks', 'exp_loose_animals',
+)
+RELOC_FIELDS = (
+    'reloc_factor_emp', 'reloc_factor_aff', 'reloc_factor_qol',
+    'reloc_factor_fam', 'reloc_factor_ret', 'reloc_factor_env',
+    'reloc_factor_inh', 'reloc_factor_oth',
+)
+
+CHART_SOURCES = {
+    # Overview
+    'mean_risk':        'composite of Health, IAQ, and Structural sub-scores',
+    'mean_health':      'composite of RespIll, asthma, wheeze, Headache, Tired, Hospital Respiratory',
+    'mean_iaq':         'composite of Mold, Leakage 2_1–4, Cooling System _1–4, Cooking',
+    'mean_struct':      'composite of QID192 (year built), QID128 (housing type), QID141 (condition)',
+    'risk_tiers':       'derived: 0.35·Health + 0.35·IAQ + 0.30·Structural — tiered Low/Medium/High',
+    'ownership':        'Ownership — "What is your current housing ownership status?"',
+    # Health
+    'symptoms':         'RespIll, asthma, wheeze, Mold, Hospital Respiratory — symptom prevalence',
+    'respiratory_pct':  'RespIll — "How often does anyone in your home have respiratory illness symptoms?"',
+    'asthma_pct':       'asthma — "How often does anyone in your home have asthma symptoms?"',
+    'wheeze_pct':       'wheeze — "How often does anyone in your home wheeze?"',
+    'mold_pct':         'Mold — "Evidence of mold in any area of the home?"',
+    'hospital_pct':     'Hospital Respiratory — "Has anyone in your home visited a hospital for respiratory issues?"',
+    # IAQ
+    'mold_by_street':   'Mold — aggregated per street (≥3 responses)',
+    'year_built':       'QID192 — "When was your house built?"',
+    # Structural
+    'housing_types':    'QID128 — "What type of house do you live in?"',
+    'conditions':       'QID141 — "How would you describe the condition of your current house in terms of maintenance and repair?"',
+    'struct_by_street': 'composite QID192 + QID128 + QID141 — aggregated per street (≥3 responses)',
+    # Streets
+    'risk_by_street':   'composite Overall risk — aggregated per street (≥3 responses)',
+    'compare_street':   'mean Health, IAQ, Structural — aggregated per street (≥3 responses)',
+    # Validation (no source survey question — these are data-quality metrics)
+    'coord_source':     '— (data-quality metric, no survey question)',
+    'unmatched':        '— (data-quality metric, no survey question)',
+    'match_rate':       '— (data-quality metric, no survey question)',
+}
+
+
+def _val_at_orig_idx(full_row, orig_idx):
+    """Pull a raw cell value from the pre-PII-drop DataFrame row by ORIGINAL
+    CSV column index. Used for blank-header / duplicate-header columns where
+    name-based lookup is unreliable. Returns clean string ('' on miss/NaN)."""
+    try:
+        v = full_row.iloc[orig_idx]
+    except (IndexError, KeyError, AttributeError):
+        return ''
+    if v is None or pd.isna(v):
+        return ''
+    s = str(v).strip()
+    return '' if s.lower() in ('nan', 'none') else s
+
+
+def _parse_years_numeric(v):
+    """Parse a free-text years answer into a float; None on failure."""
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if not s or s in ('nan', 'none'):
+        return None
+    s = (s.replace('years', '').replace('year', '')
+          .replace('yrs', '').replace('yr', '')
+          .strip().rstrip('+').strip())
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_survey_extras(full_row) -> dict:
+    """Extract every SURVEY_QUESTIONS field from the pre-PII row by index;
+    derives years_in_hre_num for histogram aggregation."""
+    out = {field: _val_at_orig_idx(full_row, idx)
+           for field, (idx, _) in SURVEY_QUESTIONS.items()}
+    out['years_in_hre_num'] = _parse_years_numeric(out.get('years_in_hre'))
+    return out
+
+
+def _read_qualtric_csv(file_bytes: bytes):
+    """Encoding-tolerant Qualtric CSV reader with two-row-header auto-detection.
+    Mirrors api/_processing._read_qualtric_csv so local and Vercel parse identically."""
+    if not file_bytes:
+        raise ValueError("Empty CSV body — no bytes received.")
+    if file_bytes[:3] == b'\xef\xbb\xbf':
+        file_bytes = file_bytes[3:]
+    encodings = ('utf-8-sig', 'utf-8', 'utf-16', 'cp1252', 'latin-1')
+    last_err = None
+    head = None
+    used_enc = None
+    for enc in encodings:
+        try:
+            head = pd.read_csv(io.BytesIO(file_bytes), encoding=enc,
+                               nrows=4, header=None, dtype=str,
+                               keep_default_na=False, low_memory=False)
+            used_enc = enc
+            break
+        except (UnicodeDecodeError, UnicodeError) as e:
+            last_err = e
+        except Exception as e:
+            last_err = e
+    if head is None or used_enc is None:
+        raise ValueError(
+            f"Cannot decode CSV (tried {', '.join(encodings)}). "
+            f"Last error: {last_err}. Re-export from Qualtrics as CSV (UTF-8)."
+        )
+    skip = []
+    row2_has_importid = (
+        len(head) > 2
+        and 'ImportId' in ' '.join(str(v) for v in head.iloc[2].tolist())
+    )
+    if len(head) > 1:
+        row1 = ' '.join(str(v) for v in head.iloc[1].tolist())
+        if row2_has_importid or 'ImportId' in row1 or any(
+            len(str(v)) > 40 for v in head.iloc[1].tolist()
+        ):
+            skip.append(1)
+    if row2_has_importid:
+        skip.append(2)
+    return (pd.read_csv(io.BytesIO(file_bytes), encoding=used_enc,
+                        skiprows=skip, low_memory=False) if skip
+            else pd.read_csv(io.BytesIO(file_bytes), encoding=used_enc, low_memory=False))
+
+
 def process_iaq_survey(csv_bytes: bytes):
     """
     Process Qualtrics IAQ survey CSV entirely in memory (never written to disk).
 
     Qualtrics CSV structure:
       Row 0  – machine column names  → header
-      Row 1  – human-readable labels → skip
-      Row 2  – ImportId metadata     → skip
+      Row 1  – human-readable labels → skip (auto-detected)
+      Row 2  – ImportId metadata     → skip (auto-detected)
       Row 3+ – actual survey data
 
-    Returns (geojson, analysis, street_stats, validation)
+    Returns (geojson, analysis, street_stats, validation).
+    `analysis['validation_warnings']` is populated when expected Qualtrics
+    columns are missing — same shape as the Vercel `process_iaq_bytes`
+    so the dashboard reads a single, deterministic schema regardless of
+    which deployment processed the upload.
     """
-    raw = pd.read_csv(io.BytesIO(csv_bytes), skiprows=[1, 2], low_memory=False)
-    df = raw[raw['Finished'].astype(str).str.lower() == 'true'].copy().reset_index(drop=True)
+    raw = _read_qualtric_csv(csv_bytes)
+    if 'Finished' not in raw.columns:
+        raise ValueError(
+            "CSV is missing the 'Finished' column. "
+            "Re-export: Qualtrics → Data → Export & Import → Export Data → CSV."
+        )
+
+    # Column-manifest validation (parity with api/_processing.py).
+    missing_columns = _validate_iaq_columns_local(raw.columns)
+    if missing_columns:
+        log.warning(f"IAQ: missing Qualtrics columns: {missing_columns}")
+    _fin = raw['Finished'].astype(str).str.strip().str.lower()
+    _mask = _fin.isin(['true', '1'])
+    # df_full keeps every column (incl. PII + blank/duplicate-named matrix
+    # columns) so we can index by ORIGINAL CSV position for SURVEY_QUESTIONS.
+    # df strips PII columns and is what existing name-based code reads.
+    df_full = raw[_mask].copy().reset_index(drop=True)
+    df = df_full.copy()
+    if df.empty:
+        log.warning(
+            f"IAQ: empty after Finished filter — sample values: "
+            f"{list(raw['Finished'].astype(str).unique()[:8])}"
+        )
+        raise ValueError(
+            "No completed responses found in the CSV. "
+            "Only rows where Finished='True' or Finished=1 are processed."
+        )
     log.info(f"IAQ survey: {len(df)}/{len(raw)} finished responses")
 
     # Drop PII immediately
@@ -783,7 +1037,10 @@ def process_iaq_survey(csv_bytes: bytes):
     known_streets = _build_known_streets(contact_lookup)
     log.info(f"IAQ: {len(known_streets)} canonical street names loaded for typo correction")
 
-    for _, row in df.iterrows():
+    for i, (_, row) in enumerate(df.iterrows()):
+        # Extract survey-question fields by ORIGINAL CSV column index from
+        # the pre-PII-drop row; matches indices in SURVEY_QUESTIONS.
+        survey_extras = _extract_survey_extras(df_full.iloc[i])
         health = _compute_health_score(row)
         iaq = _compute_iaq_score(row)
         struct = _compute_struct_score(row)
@@ -818,8 +1075,8 @@ def process_iaq_survey(csv_bytes: bytes):
                 coords = [round(_gps_snap[0], 6), round(_gps_snap[1], 6)]
                 coord_source = 'gps_snapped'
         else:
-            q212_str = str(q212).strip()
-            if q212_str and q212_str.lower() not in ('', 'ttt', 'nan'):
+            q212_str = ' '.join(str(q212).split())  # collapse all whitespace (matches _processing.py)
+            if q212_str and q212_str.lower() not in ('', 'ttt', 'nan', 'read to respondent'):
                 # Tier 2: text-match Q212 address against geocoded contact list
                 lng_m, lat_m, matched_addr, match_type = _address_match(q212_str, contact_lookup)
                 if lng_m is not None:
@@ -845,6 +1102,7 @@ def process_iaq_survey(csv_bytes: bytes):
 
         if coords is None:
             geocode_fails += 1
+            log.warning(f"[geocode] FAILED iaq: '{str(q212)[:80]}'")
             continue
 
         # Anonymised properties — no name, no email, no full address
@@ -880,6 +1138,7 @@ def process_iaq_survey(csv_bytes: bytes):
                 'coord_source':    coord_source,
                 'raw_address':     ' '.join(str(q212).split()) if q212 and str(q212).strip().lower() not in ('', 'ttt', 'nan', 'read to respondent') else '',
                 'iaq_matched':     False,
+                **survey_extras,
             }
         })
 
@@ -889,8 +1148,25 @@ def process_iaq_survey(csv_bytes: bytes):
              f"Census geocoded: {geocode_fallbacks - geocode_fails}, "
              f"failed/skipped: {geocode_fails}")
 
-    geojson = {'type': 'FeatureCollection', 'features': features}
+    # Compute analysis BEFORE stripping per-respondent survey-question fields
+    # (the analysis aggregator reads them); strip after so the persisted
+    # geojson stays small and per-respondent answers stay private. raw_address
+    # is preserved here because _cross_validate() needs it; it is stripped at
+    # the upload-endpoint level (see lines stripping raw_address before save).
     analysis_result = _compute_iaq_analysis(features)
+    _survey_extra_keys = tuple(SURVEY_QUESTIONS.keys()) + ('years_in_hre_num',)
+    for f in features:
+        for k in _survey_extra_keys:
+            f['properties'].pop(k, None)
+    geojson = {'type': 'FeatureCollection', 'features': features}
+    if missing_columns:
+        analysis_result['validation_warnings'] = {
+            'missing_columns': missing_columns,
+            'message': (
+                'Some expected Qualtrics columns are missing — affected scores '
+                'default to 0. Verify the export format.'
+            ),
+        }
     streets = _compute_street_stats(features)
     validation = _cross_validate(features)
     return geojson, analysis_result, streets, validation
@@ -955,6 +1231,68 @@ def _compute_iaq_analysis(features):
     owners = sum(1 for p in props if p.get('ownership') == 'Owner')
     renters = sum(1 for p in props if p.get('ownership') == 'Renter')
 
+    # ── New survey-question aggregations (R/C/W/D blocks) ─────────────────────
+    def _bin_counts(field):
+        c = defaultdict(int)
+        for p in props:
+            v = str(p.get(field, '') or '').strip()
+            if v:
+                c[v] += 1
+        return dict(c)
+
+    def _yes_no_counts(field):
+        out = {'yes': 0, 'no': 0, 'not_sure': 0, 'other': 0, 'na': 0}
+        for p in props:
+            v = str(p.get(field, '') or '').strip().lower()
+            if not v:
+                out['na'] += 1
+            elif v == 'yes':
+                out['yes'] += 1
+            elif v == 'no':
+                out['no'] += 1
+            elif 'not sure' in v:
+                out['not_sure'] += 1
+            else:
+                out['other'] += 1
+        return out
+
+    def _pct_yes(field):
+        if not n:
+            return 0.0
+        hits = sum(1 for p in props
+                   if 'yes' in str(p.get(field, '') or '').lower())
+        return round(hits / n * 100, 1)
+
+    def _pct_want(field):
+        if not n:
+            return 0.0
+        hits = 0
+        for p in props:
+            v = str(p.get(field, '') or '').lower()
+            if not v:
+                continue
+            if 'not' in v or "don't" in v or 'do not' in v:
+                continue
+            if 'want' in v or 'like' in v or 'yes' in v:
+                hits += 1
+        return round(hits / n * 100, 1)
+
+    yrs_vals = [p['years_in_hre_num'] for p in props
+                if isinstance(p.get('years_in_hre_num'), (int, float))]
+    yrs_n = len(yrs_vals)
+    yrs_sorted = sorted(yrs_vals)
+    yrs_mean = round(sum(yrs_vals) / yrs_n, 1) if yrs_n else 0
+    yrs_median = (yrs_sorted[yrs_n // 2] if yrs_n % 2
+                  else (yrs_sorted[yrs_n // 2 - 1] + yrs_sorted[yrs_n // 2]) / 2) if yrs_n else 0
+    yrs_bins = defaultdict(int)
+    for v in yrs_vals:
+        if v < 1:    yrs_bins['<1 yr'] += 1
+        elif v < 5:  yrs_bins['1–4'] += 1
+        elif v < 10: yrs_bins['5–9'] += 1
+        elif v < 20: yrs_bins['10–19'] += 1
+        elif v < 30: yrs_bins['20–29'] += 1
+        else:        yrs_bins['30+'] += 1
+
     return {
         'n_responses': n,
         'geocoded': n,
@@ -983,6 +1321,55 @@ def _compute_iaq_analysis(features):
             'year_built': dict(yr_dist),
         },
         'ownership': {'owner': owners, 'renter': renters, 'other': n - owners - renters},
+
+        # ── Residency & Housing (R1–R8) ───────────────────────────────────────
+        'residency': {
+            'years_in_hre': {
+                'n_valid':     yrs_n,
+                'mean':        yrs_mean,
+                'median':      round(float(yrs_median), 1),
+                'distribution': dict(yrs_bins),
+            },
+            'anticipated_stay': _bin_counts('anticipated_stay'),
+            'mh_skirting':      _bin_counts('mh_skirting'),
+            'reloc_factors':    {f: _bin_counts(f) for f in RELOC_FIELDS},
+        },
+        'housing_safety': {
+            'env':    _bin_counts('safety_env'),
+            'social': _bin_counts('safety_social'),
+        },
+        'affordability': {
+            'urgency':  _bin_counts('afford_urgency'),
+            'strategy': _bin_counts('afford_strategy'),
+        },
+
+        # ── Community Living (C1, C2) ─────────────────────────────────────────
+        'interventions': {
+            'pct_want':    {f: _pct_want(f) for f in INTERVENTION_FIELDS},
+            'highlights':  list(INTERVENTION_HIGHLIGHTS),
+            'order':       list(INTERVENTION_FIELDS),
+        },
+        'experiences': {
+            'pct_yes':     {f: _pct_yes(f) for f in EXPERIENCE_FIELDS},
+            'highlights':  list(EXPERIENCE_HIGHLIGHTS),
+            'order':       list(EXPERIENCE_FIELDS),
+        },
+
+        # ── Well-being & Mobility (W1, W2) ────────────────────────────────────
+        'mobility': {
+            'car_access':          _yes_no_counts('car_access'),
+            'hurricane_transport': _yes_no_counts('hurricane_transport'),
+        },
+
+        # ── Demographics+ (D1, D2) ────────────────────────────────────────────
+        'demographics_ext': {
+            'education':  _bin_counts('education'),
+            'employment': _bin_counts('employment'),
+        },
+
+        # ── Question-text + chart-source provenance for the dashboard ────────
+        'survey_questions': {f: q for f, (_, q) in SURVEY_QUESTIONS.items()},
+        'chart_sources':    dict(CHART_SOURCES),
     }
 
 
@@ -1546,8 +1933,7 @@ def _sb_cleanup_chat() -> int:
     if not sb:
         return 0
     try:
-        from datetime import timezone, datetime as _dt
-        today_utc = _dt.now(tz=timezone.utc).date().isoformat() + 'T00:00:00+00:00'
+        today_utc = _datetime.now(_tz.utc).date().isoformat() + 'T00:00:00+00:00'
         r = sb.table('team_chat_messages').delete().lt('sent_at', today_utc).execute()
         n = len(r.data) if r.data else 0
         log.info(f"Chat cleanup: removed {n} stale message(s)")
@@ -1899,7 +2285,7 @@ async def daily_refresh():
         'type': 'FeatureCollection',
         'features': list(survey_data.get('features', [])) + new_features,
     }
-    today   = _date.today().isoformat()
+    today   = _datetime.now(_tz.utc).date().isoformat()
     n_total = len(merged['features'])
     n_iaq_upgraded = sum(1 for f in new_features if f['properties'].get('has_iaq_survey'))
     label   = (f"Daily Update {today} — {len(new_rows)} new field visits"
@@ -1941,7 +2327,7 @@ async def api_community_contacts(filter: str = "all"):
     """Return community contact GeoJSON; filter=today limits to today's date entries."""
     features = (survey_data or {}).get('features', [])
     if filter == "today":
-        today = _date.today().isoformat()
+        today = _datetime.now(_tz.utc).date().isoformat()
         features = [f for f in features if f.get('properties', {}).get('date', '') == today]
     return JSONResponse({"type": "FeatureCollection", "features": features, "total": len(features)})
 
@@ -1949,7 +2335,14 @@ async def api_community_contacts(filter: str = "all"):
 @app.post("/api/upload/iaq")
 async def upload_iaq(file: UploadFile = File(...)):
     """Upload and process the Keystone Heights Survey Qualtrics CSV (in-memory only)."""
-    global iaq_data, iaq_analysis, street_stats, iaq_validation
+    global survey_data, iaq_data, iaq_analysis, street_stats, iaq_validation
+
+    # Refresh contacts from Supabase before processing so this local instance
+    # picks up uploads made through Vercel since startup. Keeps local↔Vercel
+    # parity; cost is one extra read per IAQ upload.
+    sb_contacts = await asyncio.to_thread(_sb_load, 'community_contact')
+    if sb_contacts and sb_contacts.get('features'):
+        survey_data = sb_contacts
 
     # Enforce upload order: community contact data must be loaded first so the
     # IAQ processor can cross-reference geocoded addresses for validation.
@@ -1965,11 +2358,21 @@ async def upload_iaq(file: UploadFile = File(...)):
 
     csv_bytes = await file.read()
 
+    # Three-tier exception split (mirrors api/upload/iaq.py): only application-
+    # authored ValueError messages reach the client. Pandas parse errors get a
+    # friendly hint. Anything else is logged and surfaced as a generic 500 — we
+    # must not echo cell values back to the user before PII stripping completes.
     try:
         iaq_data, iaq_analysis, street_stats, iaq_validation = process_iaq_survey(csv_bytes)
-    except Exception as e:
-        log.error(f"IAQ processing error: {e}")
-        raise HTTPException(400, f"Processing failed: {e}")
+    except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
+        log.warning(f"IAQ pandas parse error: {e}")
+        raise HTTPException(400, "Could not parse CSV. Re-export from Qualtrics as CSV (UTF-8).")
+    except ValueError as e:
+        log.warning(f"IAQ validation: {e}")
+        raise HTTPException(400, str(e))
+    except Exception:
+        log.exception("IAQ processing error")
+        raise HTTPException(500, "Processing failed — check server logs.")
 
     n = len(iaq_data.get("features", []))
 
@@ -1987,7 +2390,7 @@ async def upload_iaq(file: UploadFile = File(...)):
         if n_upgraded:
             survey_data['features'] = contact_feats
             analysis = compute_analysis(survey_data, parcels_data)
-            contact_label = (f"IAQ-merged {_date.today().isoformat()} — "
+            contact_label = (f"IAQ-merged {_datetime.now(_tz.utc).date().isoformat()} — "
                              f"{n_upgraded} contacts upgraded · {file.filename}")
             await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
             await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data,
@@ -2008,11 +2411,87 @@ async def upload_iaq(file: UploadFile = File(...)):
         'validation':      iaq_validation,
         'source_filename': file.filename,
     }
-    iaq_label = f"IAQ Upload {_date.today().isoformat()} — {n} responses · {file.filename}"
+    iaq_label = f"IAQ Upload {_datetime.now(_tz.utc).date().isoformat()} — {n} responses · {file.filename}"
     await asyncio.to_thread(_sb_save, 'iaq_survey', iaq_payload)
     await asyncio.to_thread(_sb_save_version, 'iaq_survey', iaq_payload, iaq_label, n)
     n_streets = len([s for s, d in street_stats.items() if not d.get("insufficient_data")])
-    log.info(f"IAQ data ready: {n} points, {n_streets} streets — {n_upgraded} contacts upgraded")
+
+    # Upgrade live field_survey_points within 50 m of any IAQ feature so the
+    # mobile/desktop dashboards mark them Completed in real time. Mirrors the
+    # Vercel iaq.py block so behavior is identical across deployments.
+    n_field_upgraded = 0
+    iaq_feats_for_field = iaq_data.get('features', [])
+    if sb and iaq_feats_for_field:
+        # Paginate — PostgREST caps default SELECT at 1000 rows.
+        field_rows: list = []
+        PAGE = 1000
+        HARD_CAP = 100000
+        offset = 0
+        try:
+            while offset < HARD_CAP:
+                page_res = await asyncio.to_thread(
+                    lambda o=offset: sb.table('field_survey_points')
+                                       .select('id, lat, lon, status')
+                                       .range(o, o + PAGE - 1)
+                                       .execute()
+                )
+                page = page_res.data or []
+                if not page:
+                    break
+                field_rows.extend(page)
+                if len(page) < PAGE:
+                    break
+                offset += PAGE
+            if len(field_rows) >= HARD_CAP:
+                log.warning(f"field_survey_points pagination capped at {HARD_CAP}")
+        except Exception as e:
+            log.warning(f"field_survey_points read failed: {e}")
+            field_rows = []
+
+        if field_rows:
+            field_feats = [
+                {
+                    'type': 'Feature',
+                    'geometry': {'type': 'Point',
+                                 'coordinates': [r['lon'], r['lat']]},
+                    'properties': {'field_point_id': r['id'],
+                                   'status': r.get('status') or 'Unknown'},
+                }
+                for r in field_rows
+                if r.get('lon') is not None and r.get('lat') is not None
+            ]
+            n_field_upgraded = _apply_iaq_to_field_features(field_feats, iaq_feats_for_field)
+            upgraded_ids = [
+                ff['properties']['field_point_id']
+                for ff in field_feats
+                if (ff['properties'].get('has_iaq_survey')
+                    and ff['properties'].get('status') == 'Completed')
+            ]
+            if upgraded_ids:
+                try:
+                    await asyncio.to_thread(
+                        lambda ids=upgraded_ids:
+                            sb.table('field_survey_points')
+                              .update({'status': 'Completed'})
+                              .in_('id', ids)
+                              .execute()
+                    )
+                except Exception as e:
+                    log.warning(f"bulk field-point upgrade failed n={len(upgraded_ids)}: {e}")
+            if n_field_upgraded > 0:
+                try:
+                    await asyncio.to_thread(
+                        _sb_save_version, 'field_survey',
+                        {'n_field_upgraded': n_field_upgraded},
+                        f"IAQ-merged {_datetime.now(_tz.utc).date().isoformat()} — "
+                        f"{n_field_upgraded} field points completed · {file.filename}",
+                        n_field_upgraded,
+                    )
+                except Exception as e:
+                    log.warning(f"field_survey version insert failed: {e}")
+
+    log.info(f"IAQ data ready: {n} points, {n_streets} streets — "
+             f"{n_upgraded} contacts upgraded, {n_field_upgraded} field points upgraded")
 
     return {
         "status": "ok",
@@ -2020,6 +2499,7 @@ async def upload_iaq(file: UploadFile = File(...)):
         "streets_analyzed": n_streets,
         "mean_risk": iaq_analysis.get("scores", {}).get("mean_risk", 0),
         "n_upgraded": n_upgraded,
+        "n_field_upgraded": n_field_upgraded,
         "validation": iaq_validation,
     }
 
@@ -2475,7 +2955,7 @@ async def upload_survey(file: UploadFile = File(...)):
         except Exception: pass
         analysis = compute_analysis(survey_data, parcels_data)
         n = len(survey_data.get("features", []))
-        label = f"Upload {_date.today().isoformat()} — {n} contacts · {file.filename}"
+        label = f"Upload {_datetime.now(_tz.utc).date().isoformat()} — {n} contacts · {file.filename}"
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
         if analysis:

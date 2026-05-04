@@ -127,11 +127,20 @@ async function loadData() {
       fetch('/api/iaq-points'),
       fetch('/api/iaq-analysis'),
     ]);
-    surveyData = await ptsRes.json();
-    parcelsData = await parRes.json();
-    analysisData = await anaRes.json();
-    iaqData = await iaqPtsRes.json();
-    const iaqAnaData = await iaqAnaRes.json();
+    const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
+    const _safeJson = async (res, fallback) => {
+      if (!res.ok) {
+        console.warn(`API ${res.url} → HTTP ${res.status}`);
+        showToast(`Warning: could not load ${res.url.split('/').pop()} (${res.status})`, 7000);
+        return fallback;
+      }
+      try { return await res.json(); } catch { return fallback; }
+    };
+    surveyData   = await _safeJson(ptsRes,    EMPTY_GJ);
+    parcelsData  = await _safeJson(parRes,    EMPTY_GJ);
+    analysisData = await _safeJson(anaRes,    {});
+    iaqData      = await _safeJson(iaqPtsRes, EMPTY_GJ);
+    const iaqAnaData = await _safeJson(iaqAnaRes, {});
     if (iaqAnaData.loaded) iaqAnalysis = iaqAnaData;
 
     if (analysisData.status_colors) {
@@ -166,6 +175,61 @@ async function loadData() {
   } catch (e) {
     console.error('Data load error:', e);
     document.querySelector('#loading p').textContent = 'Error loading data. Is the server running?';
+  }
+}
+
+// ── Re-fetch all dashboard data and re-render in place ─────────────────────
+// Used after uploads / version restores / cron-triggered refreshes so the
+// dashboard reflects the latest Supabase state without a full page reload.
+// Preserves viewport (center/zoom) and active layer toggles.
+async function refreshAllData() {
+  const center = map.getCenter();
+  const zoom   = map.getZoom();
+  const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
+
+  try {
+    const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
+      fetch('/api/survey-points'),
+      fetch('/api/parcels'),
+      fetch('/api/analysis'),
+      fetch('/api/iaq-points'),
+      fetch('/api/iaq-analysis'),
+    ]);
+    const safe = async (res, fb) => {
+      if (!res || !res.ok) return fb;
+      try { return await res.json(); } catch { return fb; }
+    };
+    surveyData    = await safe(ptsRes, EMPTY_GJ);
+    parcelsData   = await safe(parRes, EMPTY_GJ);
+    analysisData  = await safe(anaRes, {});
+    iaqData       = await safe(iaqPtsRes, EMPTY_GJ);
+    const iaqAna  = await safe(iaqAnaRes, {});
+    if (iaqAna.loaded) iaqAnalysis = iaqAna;
+
+    if (analysisData.status_colors) Object.assign(STATUS_COLORS, analysisData.status_colors);
+
+    map.getSource('survey')?.setData(surveyData);
+    map.getSource('survey-clustered')?.setData(surveyData);
+    map.getSource('parcels')?.setData(parcelsData);
+
+    updateIAQOnMap();
+    buildLegend();
+    buildAnalysis();
+    if (iaqData?.features?.length) buildSurveyResultsTab(iaqAnalysis);
+
+    // Stale chatbot IAQ symptom filter would highlight wrong points on fresh data.
+    if (currentIAQFilter && typeof clearIAQHighlights === 'function') clearIAQHighlights();
+
+    // Re-apply current status filter / search query to the freshly-loaded data
+    // so the user's filter state survives an upload-triggered refresh.
+    if (typeof applyFilters === 'function') applyFilters();
+    // Re-apply legend row dimming — buildLegend() resets all rows to full opacity.
+    if (typeof updateStatusRowHighlights === 'function') updateStatusRowHighlights();
+
+    // Restore viewport without animation so it feels like an in-place refresh.
+    map.jumpTo({ center, zoom });
+  } catch (e) {
+    console.warn('refreshAllData failed:', e);
   }
 }
 
@@ -481,20 +545,31 @@ async function initFieldPoints() {
     document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
   }
 
-  // Initial load
+  // Initial load — paginate so we never silently drop points past a fixed limit.
   try {
-    const { data, error } = await sbClient
-      .from('field_survey_points')
-      .select('id, lat, lon, status, notes, collector_id, collector_name, collected_at')
-      .order('collected_at', { ascending: false })
-      .limit(5000);
-    if (!error && Array.isArray(data)) {
-      fieldPointsData = {
-        type: 'FeatureCollection',
-        features: data.map(p => fieldPointFeature(p, currentUserId)),
-      };
-      setFieldPointsData();
+    const PAGE = 1000;
+    const HARD_CAP = 100000;
+    const all = [];
+    let from = 0;
+    while (from < HARD_CAP) {
+      const { data, error } = await sbClient
+        .from('field_survey_points')
+        .select('id, lat, lon, status, notes, collector_id, collector_name, collected_at')
+        .order('collected_at', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error || !Array.isArray(data) || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+      from += PAGE;
     }
+    if (all.length >= HARD_CAP) {
+      console.warn(`field_survey_points: pagination capped at ${HARD_CAP} rows`);
+    }
+    fieldPointsData = {
+      type: 'FeatureCollection',
+      features: all.map(p => fieldPointFeature(p, currentUserId)),
+    };
+    setFieldPointsData();
   } catch (e) { console.warn('Initial field-points fetch failed:', e); }
 
   // Presence
@@ -649,10 +724,13 @@ function renderChatMessages() {
   el.innerHTML = teamChatMessages.map(m => {
     const mine = m.user_id === currentUserId;
     const time = new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const attachHtml = m.attachment_url
+    // Validate scheme + escape — never trust DB-stored URLs in template strings.
+    const attUrl = safeUrl(m.attachment_url);
+    const attHrefEsc = escapeHtml(attUrl);
+    const attachHtml = attUrl
       ? (m.attachment_type === 'image'
-          ? `<img src="${m.attachment_url}" class="tchat-img" onclick="window.open(this.src,'_blank')" alt="attachment">`
-          : `<a href="${m.attachment_url}" target="_blank" rel="noopener" class="tchat-file">📄 View attachment</a>`)
+          ? `<img src="${attHrefEsc}" class="tchat-img" onclick="window.open(this.src,'_blank')" alt="attachment">`
+          : `<a href="${attHrefEsc}" target="_blank" rel="noopener" class="tchat-file">📄 View attachment</a>`)
       : '';
     return `<div class="tchat-msg ${mine ? 'mine' : 'theirs'}">
       ${!mine ? `<div class="tchat-meta">${escapeHtml(m.display_name)}</div>` : ''}
@@ -664,7 +742,10 @@ function renderChatMessages() {
 }
 
 async function sendTeamMessage() {
-  if (!sbClient || !currentUserId) return;
+  if (!sbClient || !currentUserId) {
+    showToast('Sign in to chat with the team', 5000);
+    return;
+  }
   const input = document.getElementById('team-chat-input');
   const body  = (input?.value || '').trim();
   if (!body && !pendingAttachment) return;
@@ -774,6 +855,15 @@ function escapeHtml(s) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+// Validate a URL is http(s); otherwise return '' so a javascript:/data:
+// payload can never reach an href / src attribute.
+function safeUrl(u) {
+  try {
+    const url = new URL(String(u || ''), window.location.origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+  } catch { return ''; }
+}
+
 // ── Data-summary panel in the Update Data modal ──────────────────────────────
 function _fmtRelative(iso) {
   if (!iso) return '';
@@ -798,6 +888,13 @@ async function renderDataSummary() {
     iaq_survey:        document.querySelector('[data-dataset="iaq_survey"]'),
     parcels:           document.querySelector('[data-dataset="parcels"]'),
   };
+  if (!sbClient) {
+    for (const key of Object.keys(cards)) {
+      const countEl = document.getElementById(cards[key].count);
+      if (countEl) { countEl.textContent = '—'; countEl.classList.add('empty'); }
+    }
+    return;
+  }
   for (const key of Object.keys(cards)) {
     const c = cards[key]; const el = parent[key];
     const countEl = document.getElementById(c.count);
@@ -806,7 +903,6 @@ async function renderDataSummary() {
     if (whenEl) whenEl.textContent = '';
     if (el) { el.classList.remove('fresh','empty'); }
   }
-  if (!sbClient) return;
   try {
     const { data, error } = await sbClient
       .from('keystone_dashboard_data')
@@ -881,12 +977,12 @@ function buildSurveyTab(p) {
     : p.iaq_risk_tier === 'Medium' ? '#f97316' : '#10b981';
   return `
     <div class="popup-body">
-      ${p.status_detail ? `<div class="popup-row"><span class="popup-label">First Attempt</span><span class="popup-value">${p.status_detail}</span></div>` : ''}
-      ${p.second_attempt ? `<div class="popup-row"><span class="popup-label">Second Attempt</span><span class="popup-value">${p.second_attempt}</span></div>` : ''}
-      ${p.date ? `<div class="popup-row"><span class="popup-label">Date</span><span class="popup-value">${p.date}</span></div>` : ''}
-      ${p.notes ? `<div class="popup-row"><span class="popup-label">Notes</span><span class="popup-value">${p.notes}</span></div>` : ''}
-      <div class="popup-row"><span class="popup-label">Street</span><span class="popup-value">${p.street_name}</span></div>
-      <div class="popup-row"><span class="popup-label">Status</span><span class="popup-value"><span class="popup-badge" style="background:${p.color}22;color:${p.color};border:1px solid ${p.color}44">${p.status}</span></span></div>
+      ${p.status_detail ? `<div class="popup-row"><span class="popup-label">First Attempt</span><span class="popup-value">${escapeHtml(p.status_detail)}</span></div>` : ''}
+      ${p.second_attempt ? `<div class="popup-row"><span class="popup-label">Second Attempt</span><span class="popup-value">${escapeHtml(p.second_attempt)}</span></div>` : ''}
+      ${p.date ? `<div class="popup-row"><span class="popup-label">Date</span><span class="popup-value">${escapeHtml(p.date)}</span></div>` : ''}
+      ${p.notes ? `<div class="popup-row"><span class="popup-label">Notes</span><span class="popup-value">${escapeHtml(p.notes)}</span></div>` : ''}
+      <div class="popup-row"><span class="popup-label">Street</span><span class="popup-value">${escapeHtml(p.street_name)}</span></div>
+      <div class="popup-row"><span class="popup-label">Status</span><span class="popup-value"><span class="popup-badge" style="background:${escapeHtml(p.color)}22;color:${escapeHtml(p.color)};border:1px solid ${escapeHtml(p.color)}44">${escapeHtml(p.status)}</span></span></div>
       ${p.has_iaq_survey ? `
       <div class="popup-row" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
         <span class="popup-label">IAQ Survey</span>
@@ -990,8 +1086,14 @@ function onPointClick(e) {
 }
 
 function onParcelClick(e) {
-  // Don't open parcel popup if a survey point was also clicked
-  const pointFeats = map.queryRenderedFeatures(e.point, { layers: ['survey-points'] });
+  // Don't open parcel popup if a survey point was also clicked.
+  // Include `survey-iaq-risk` since dedup hides matched contacts from
+  // `survey-points` and renders them only on the IAQ-risk layer.
+  const pointLayers = ['survey-points', 'survey-iaq-risk']
+    .filter(l => map.getLayer(l));
+  const pointFeats = pointLayers.length
+    ? map.queryRenderedFeatures(e.point, { layers: pointLayers })
+    : [];
   if (pointFeats.length > 0) return; // let onPointClick handle it
 
   const f = e.features[0];
@@ -1114,29 +1216,6 @@ function switchBasemap(style) {
   currentBasemap = style;
   const bm = BASEMAPS[style];
 
-  // Save current data sources and layers
-  const savedSources = {};
-  const savedLayers = [];
-  const dataSrcIds = ['parcels', 'survey', 'survey-clustered'];
-  const dataLayerIds = [
-    'parcels-fill', 'parcels-outline',
-    'heatmap', 'cluster-circles', 'cluster-count',
-    'survey-points', 'survey-labels',
-  ];
-
-  dataLayerIds.forEach(id => {
-    const l = map.getLayer(id);
-    if (l) {
-      savedLayers.push({
-        id, type: l.type, source: l.source,
-        layout: { ...map.getLayoutProperty(id, 'visibility') !== undefined ? { visibility: map.getLayoutProperty(id, 'visibility') } : {} },
-        paint: {},
-        filter: map.getFilter(id) || undefined,
-        minzoom: l.minzoom, maxzoom: l.maxzoom,
-      });
-    }
-  });
-
   // Update basemap source tiles
   const src = map.getSource('basemap');
   if (src) {
@@ -1157,6 +1236,11 @@ function switchBasemap(style) {
   // Update active button
   document.querySelectorAll('.basemap-opt').forEach(el => el.classList.remove('active'));
   document.querySelector(`.basemap-opt[data-style="${style}"]`)?.classList.add('active');
+
+  // Re-apply active filters so heatmap and cluster sources reflect the current
+  // filter state after the basemap swap (handles the orphaned-source case).
+  if (typeof applyFilters === 'function') applyFilters();
+  if (typeof applyHeatmapClusterFilter === 'function') applyHeatmapClusterFilter();
 }
 
 // ── Legend (unified: color picker + filter) ─────────────────────────────────
@@ -1246,12 +1330,31 @@ function applyFilters() {
     ]);
   }
 
-  map.setFilter('survey-points', filter.length > 1 ? filter : null);
-  map.setFilter('survey-labels', filter.length > 1 ? filter : null);
+  // De-duplicate same-address points: when the IAQ risk overlay is visible,
+  // the merged contact is already drawn by `survey-iaq-risk` (colored by
+  // IAQ risk tier). Hide it from `survey-points` so the user sees ONE
+  // point per address, not two stacked circles.
+  const iaqRiskVisible = map.getLayer('survey-iaq-risk') &&
+    map.getLayoutProperty('survey-iaq-risk', 'visibility') === 'visible';
+  const pointsFilter = iaqRiskVisible
+    ? [...filter, ['!=', ['get', 'has_iaq_survey'], true]]
+    : filter;
+
+  // Guard each setFilter with a getLayer check — early toggles before
+  // loadData/addLayers finishes can otherwise throw on missing layers.
+  if (map.getLayer('survey-points'))
+    map.setFilter('survey-points', pointsFilter.length > 1 ? pointsFilter : null);
+  if (map.getLayer('survey-labels'))
+    map.setFilter('survey-labels', filter.length > 1 ? filter : null);
+  if (map.getLayer('survey-iaq-risk'))
+    map.setFilter('survey-iaq-risk', filter.length > 1
+      ? [...filter, ['==', ['get', 'has_iaq_survey'], true]]
+      : ['==', ['get', 'has_iaq_survey'], true]);
 }
 
 // ── Central layer definition map ─────────────────────────────────────────────
 const LAYER_DEFS = {
+  field_points:   { toggle: 'layer-field-points',     mapLayers: ['field-points-glow', 'field-points-dots'] },
   iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points'] },
   iaq_highlights: { toggle: 'layer-iaq-highlighted',  mapLayers: ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'] },
   iaq_risk:       { toggle: 'layer-iaq-risk',         mapLayers: ['survey-iaq-risk'] },
@@ -1291,6 +1394,11 @@ function setLayerVisibility(name, visible) {
     const rt = document.getElementById('layer-iaq-risk');
     if (rt) rt.checked = false;
   }
+  // Refresh dedup filters whenever the iaq_risk or contact_survey state
+  // changes (chatbot path also goes through here).
+  if (name === 'iaq_risk' || name === 'contact_survey') {
+    if (typeof applyFilters === 'function') applyFilters();
+  }
 }
 
 // ── Layer toggles ───────────────────────────────────────────────────────────
@@ -1302,8 +1410,9 @@ function setupLayerToggles() {
     'layer-clusters': ['cluster-circles', 'cluster-count'],
     'layer-labels': ['survey-labels'],
     'layer-iaq': ['iaq-points'],
-    'layer-iaq-highlighted': ['iaq-highlighted'],
+    'layer-iaq-highlighted': ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'],
     'layer-iaq-risk': ['survey-iaq-risk'],
+    'layer-field-points': ['field-points-glow', 'field-points-dots'],
   };
 
   Object.entries(toggles).forEach(([id, layers]) => {
@@ -1335,6 +1444,12 @@ function setupLayerToggles() {
       }
       if (id === 'layer-clusters') {
         document.getElementById('cluster-legend').style.display = e.target.checked ? 'block' : 'none';
+      }
+
+      // Re-run filters so dedup (hide IAQ-merged contacts from survey-points
+      // when IAQ-risk overlay is on) activates immediately.
+      if (id === 'layer-iaq-risk' || id === 'layer-points') {
+        applyFilters();
       }
     });
   });
@@ -1435,12 +1550,12 @@ function buildStreetsTable(a) {
   if (!tbody) return;
   tbody.innerHTML = (a.streets || []).map(s => `
     <tr>
-      <td>${s.name}</td>
-      <td style="font-family:var(--mono)">${s.count}</td>
-      <td style="color:var(--green)">${s.statuses.Completed || 0}</td>
-      <td style="color:var(--orange)">${s.statuses['No Answer'] || 0}</td>
-      <td style="color:var(--red)">${s.statuses.Inaccessible || 0}</td>
-      <td>${s.count - (s.statuses.Completed || 0) - (s.statuses['No Answer'] || 0) - (s.statuses.Inaccessible || 0)}</td>
+      <td>${escapeHtml(s.name)}</td>
+      <td style="font-family:var(--mono)">${Number(s.count) || 0}</td>
+      <td style="color:var(--green)">${Number(s.statuses.Completed) || 0}</td>
+      <td style="color:var(--orange)">${Number(s.statuses['No Answer']) || 0}</td>
+      <td style="color:var(--red)">${Number(s.statuses.Inaccessible) || 0}</td>
+      <td>${(Number(s.count)||0) - (Number(s.statuses.Completed)||0) - (Number(s.statuses['No Answer'])||0) - (Number(s.statuses.Inaccessible)||0)}</td>
     </tr>
   `).join('');
 }
@@ -1677,44 +1792,62 @@ async function openHistoryModal() {
     if (contactVersions.length === 0 && iaqVersions.length === 0) {
       html = '<div class="version-empty">No history yet — data will appear here after the first upload or daily refresh.</div>';
     } else {
-      if (contactVersions.length > 0) {
-        html += '<div class="version-section-title">Community Contact Data</div><div class="version-list">';
-        contactVersions.forEach((v, i) => {
+      // Render via DOM API instead of string interpolation — labels (sourced
+      // from CSV filenames) are user-supplied data and could contain markup
+      // or quotes that would otherwise XSS or break the inline onclick.
+      const renderSection = (title, versions, kind) => {
+        if (!versions.length) return '';
+        const sec = document.createElement('div');
+        const h = document.createElement('div');
+        h.className = 'version-section-title';
+        if (kind === 'iaq') h.style.marginTop = '20px';
+        h.textContent = title;
+        sec.appendChild(h);
+        const list = document.createElement('div');
+        list.className = 'version-list';
+        versions.forEach((v, i) => {
           const d = new Date(v.created_at);
-          const dateStr = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const dateStr = d.toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' });
           const isCurrent = i === 0;
-          html += `<div class="version-item">
-            <div>
-              <div class="version-item-label">${v.label || 'Analysis snapshot'}</div>
-              <div class="version-item-meta">${dateStr}</div>
-            </div>
-            <span class="version-item-pts">${(v.n_points || 0).toLocaleString()} pts</span>
-            ${isCurrent
-              ? '<span style="font-size:11px;color:var(--green);font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,.1)">Current</span>'
-              : `<button class="btn btn-sm" onclick="restoreVersion(${v.id},'${(v.label||'').replace(/'/g,"\\'")}','contact')">Restore</button>`}
-          </div>`;
+          const item = document.createElement('div'); item.className = 'version-item';
+          const left = document.createElement('div');
+          const labelEl = document.createElement('div');
+          labelEl.className = 'version-item-label';
+          labelEl.textContent = v.label || (kind === 'iaq' ? 'IAQ snapshot' : 'Analysis snapshot');
+          const metaEl = document.createElement('div');
+          metaEl.className = 'version-item-meta';
+          metaEl.textContent = dateStr;
+          left.append(labelEl, metaEl);
+          const pts = document.createElement('span');
+          pts.className = 'version-item-pts';
+          pts.textContent = `${(v.n_points || 0).toLocaleString()} pts`;
+          item.append(left, pts);
+          if (isCurrent) {
+            const cur = document.createElement('span');
+            cur.style.cssText = 'font-size:11px;color:var(--green);font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,.1)';
+            cur.textContent = 'Current';
+            item.appendChild(cur);
+          } else {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm';
+            btn.textContent = 'Restore';
+            btn.addEventListener('click', () => restoreVersion(v.id, v.label || '', kind));
+            item.appendChild(btn);
+          }
+          list.appendChild(item);
         });
-        html += '</div>';
+        sec.appendChild(list);
+        return sec;
+      };
+      const sec1 = renderSection('Community Contact Data', contactVersions, 'contact');
+      const sec2 = renderSection('IAQ Survey Data',         iaqVersions,     'iaq');
+      body.innerHTML = '';
+      if (sec1) body.appendChild(sec1);
+      if (sec2) body.appendChild(sec2);
+      if (!sec1 && !sec2) {
+        body.innerHTML = '<div class="version-empty">No history yet — data will appear here after the first upload or daily refresh.</div>';
       }
-      if (iaqVersions.length > 0) {
-        html += '<div class="version-section-title" style="margin-top:20px">IAQ Survey Data</div><div class="version-list">';
-        iaqVersions.forEach((v, i) => {
-          const d = new Date(v.created_at);
-          const dateStr = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-          const isCurrent = i === 0;
-          html += `<div class="version-item">
-            <div>
-              <div class="version-item-label">${v.label || 'IAQ snapshot'}</div>
-              <div class="version-item-meta">${dateStr}</div>
-            </div>
-            <span class="version-item-pts">${(v.n_points || 0).toLocaleString()} pts</span>
-            ${isCurrent
-              ? '<span style="font-size:11px;color:var(--green);font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,.1)">Current</span>'
-              : `<button class="btn btn-sm" onclick="restoreVersion(${v.id},'${(v.label||'').replace(/'/g,"\\'")}','iaq')">Restore</button>`}
-          </div>`;
-        });
-        html += '</div>';
-      }
+      return;
     }
     body.innerHTML = html;
   } catch (e) {
@@ -1725,7 +1858,18 @@ async function openHistoryModal() {
 async function restoreVersion(id, label, type) {
   if (!confirm(`Restore "${label}"?\n\nThis will set it as the active dataset. The current data is already saved in history.`)) return;
   try {
-    const res = await fetch(`/api/versions/restore?id=${id}`, { method: 'POST' });
+    // Restore endpoint requires auth — pass the Supabase JWT.
+    let token = null;
+    try {
+      if (sbClient) {
+        const { data: { session } } = await sbClient.auth.getSession();
+        token = session?.access_token || null;
+      }
+    } catch { /* server will 401 */ }
+    const res = await fetch(`/api/versions/restore?id=${id}`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
     const data = await res.json();
     if (!data.restored) throw new Error('Restore failed');
 
@@ -1754,7 +1898,7 @@ async function restoreVersion(id, label, type) {
 
     await loadAnalysisMeta();
     document.getElementById('history-modal').classList.remove('show');
-    openHistoryModal();   // refresh the list
+    showToast(`Restored: ${label}`, 5000);
   } catch (e) {
     alert(`Restore failed: ${e.message}`);
   }
@@ -1781,7 +1925,8 @@ async function runDailyRefresh() {
     } else {
       alert(`No new field data found since last analysis.\n\n${data.reason}`);
     }
-    openHistoryModal();   // refresh the version list
+    // Refresh the version list only if the modal is currently open.
+    if (document.getElementById('history-modal').classList.contains('show')) openHistoryModal();
   } catch (e) {
     alert(`Refresh failed: ${e.message}`);
   } finally {
@@ -2392,6 +2537,17 @@ async function uploadFile(zone, endpoint, file) {
   const origHtml = zone.innerHTML;
   const isIAQ = endpoint === '/api/upload/iaq';
 
+  // Client-side validation before any network request
+  const MAX_MB = 15;
+  if (file.size > MAX_MB * 1024 * 1024) {
+    showToast(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_MB} MB.`, 7000);
+    return;
+  }
+  if (isIAQ && file.name.split('.').pop().toLowerCase() !== 'csv') {
+    showToast('IAQ upload requires a CSV file. Re-export from Qualtrics as CSV.', 7000);
+    return;
+  }
+
   // Show appropriate UI
   if (isIAQ) {
     showAnalysisOverlay();
@@ -2404,6 +2560,15 @@ async function uploadFile(zone, endpoint, file) {
 
   // Use XHR for upload progress events
   const xhrRef = { done: false };
+
+  // Fetch the Supabase JWT once up front — upload endpoints now require auth.
+  let accessToken = null;
+  try {
+    if (sbClient) {
+      const { data: { session } } = await sbClient.auth.getSession();
+      accessToken = session?.access_token || null;
+    }
+  } catch { /* no session — server will 401 */ }
 
   try {
     const data = await new Promise((resolve, reject) => {
@@ -2443,6 +2608,7 @@ async function uploadFile(zone, endpoint, file) {
 
       xhr.onerror = () => { xhrRef.done = true; reject(new Error('Network error')); };
       xhr.open('POST', endpoint);
+      if (accessToken) xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
       xhr.send(fd);
     });
 
@@ -2454,32 +2620,24 @@ async function uploadFile(zone, endpoint, file) {
       await new Promise(r => setTimeout(r, 700));
       hideAnalysisOverlay();
 
-      // Fetch processed data
-      const [iaqPtsRes, iaqAnaRes] = await Promise.all([
-        fetch('/api/iaq-points'), fetch('/api/iaq-analysis'),
-      ]);
-      iaqData = await iaqPtsRes.json();
-      const iaqAnaRaw = await iaqAnaRes.json();
-      if (iaqAnaRaw.loaded) iaqAnalysis = iaqAnaRaw;
+      // Single in-place refresh — fetches every layer + rebuilds analysis sidebar.
+      await refreshAllData();
 
-      updateIAQOnMap();
       // Auto-show IAQ points immediately after a fresh upload
       if (map.getLayer('iaq-points')) map.setLayoutProperty('iaq-points', 'visibility', 'visible');
       const iaqToggle = document.getElementById('layer-iaq');
       if (iaqToggle) iaqToggle.checked = true;
-      buildSurveyResultsTab(iaqAnalysis);
       document.getElementById('chat-btn')?.classList.add('has-data');
 
-      // If contacts were upgraded to Completed by Qualtric matching, reload the
-      // community contact layer so the map shows updated green dots immediately.
       if (data.n_upgraded > 0) {
-        const pts = await (await fetch('/api/survey-points')).json();
-        surveyData = pts;
-        map.getSource('survey')?.setData(pts);
-        map.getSource('survey-clustered')?.setData(pts);
-        analysisData = await (await fetch('/api/analysis')).json();
-        buildAnalysis();
         showToast(`${data.n_upgraded} community contact${data.n_upgraded > 1 ? 's' : ''} automatically marked Completed (Qualtric survey matched)`);
+      }
+      if (data.n_field_upgraded > 0) {
+        showToast(`${data.n_field_upgraded} field survey point${data.n_field_upgraded > 1 ? 's' : ''} upgraded to Completed`);
+      }
+      if (data.validation && data.validation.missing_columns) {
+        showToast(`Warning: missing Qualtrics columns — affected scores default to 0. See console.`, 9000);
+        console.warn('IAQ upload missing columns:', data.validation.missing_columns);
       }
 
       zone.classList.add('success');
@@ -2493,20 +2651,11 @@ async function uploadFile(zone, endpoint, file) {
     } else {
       zone.classList.add('success');
       zone.innerHTML = `<h4>Uploaded!</h4><p>${file.name}</p><p style="font-size:11px;color:var(--muted)">Loading data…</p>`;
-      const [ptsRes, parRes, anaRes] = await Promise.all([
-        fetch('/api/survey-points'), fetch('/api/parcels'), fetch('/api/analysis'),
-      ]);
-      surveyData = await ptsRes.json();
-      parcelsData = await parRes.json();
-      analysisData = await anaRes.json();
-      map.getSource('survey')?.setData(surveyData);
-      map.getSource('survey-clustered')?.setData(surveyData);
-      map.getSource('parcels')?.setData(parcelsData);
-      buildLegend();
-      buildAnalysis();
+
+      await refreshAllData();
 
       // Auto-enable survey points layer so the user can see the data immediately
-      if (surveyData.features?.length) {
+      if (surveyData?.features?.length) {
         map.setLayoutProperty('survey-points', 'visibility', 'visible');
         const toggle = document.getElementById('layer-points');
         if (toggle) toggle.checked = true;
@@ -2558,7 +2707,7 @@ function addIAQLayers() {
   map.addLayer({
     id: 'iaq-highlighted', type: 'circle', source: 'iaq-source',
     filter: ['==', ['get', 'street_name'], '__none__'],
-    layout: { visibility: 'visible' },
+    layout: { visibility: 'none' },
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 11, 16, 16, 19, 20],
       'circle-color': '#facc15',
@@ -2625,19 +2774,19 @@ function onIAQPointClick(e) {
 
   const html = `<div class="popup-card" style="min-width:260px">
     <div class="popup-header">
-      <h3>${p.street_name || 'Survey Response'}</h3>
+      <h3>${escapeHtml(p.street_name || 'Survey Response')}</h3>
       <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
-        <span class="popup-badge" style="background:${rc}22;color:${rc};border:1px solid ${rc}44">${p.risk_tier || '—'} Risk</span>
-        <span class="popup-badge" style="background:rgba(255,255,255,.05);color:var(--text2);border:1px solid var(--border)">Overall: ${p.overall_risk}/100</span>
+        <span class="popup-badge" style="background:${escapeHtml(rc)}22;color:${escapeHtml(rc)};border:1px solid ${escapeHtml(rc)}44">${escapeHtml(p.risk_tier || '—')} Risk</span>
+        <span class="popup-badge" style="background:rgba(255,255,255,.05);color:var(--text2);border:1px solid var(--border)">Overall: ${Number(p.overall_risk) || 0}/100</span>
       </div>
     </div>
     <div class="popup-body">
-      <div class="popup-row"><span class="popup-label">Health Score</span><span class="popup-value">${p.health_score}/100</span></div>
-      <div class="popup-row"><span class="popup-label">IAQ Score</span><span class="popup-value">${p.iaq_score}/100</span></div>
-      <div class="popup-row"><span class="popup-label">Structural Score</span><span class="popup-value">${p.struct_score}/100</span></div>
-      <div class="popup-row"><span class="popup-label">Ownership</span><span class="popup-value">${p.ownership || '—'}</span></div>
-      <div class="popup-row"><span class="popup-label">Housing Type</span><span class="popup-value">${p.housing_type || '—'}</span></div>
-      <div class="popup-row"><span class="popup-label">Year Built</span><span class="popup-value">${p.year_built || '—'}</span></div>
+      <div class="popup-row"><span class="popup-label">Health Score</span><span class="popup-value">${Number(p.health_score) || 0}/100</span></div>
+      <div class="popup-row"><span class="popup-label">IAQ Score</span><span class="popup-value">${Number(p.iaq_score) || 0}/100</span></div>
+      <div class="popup-row"><span class="popup-label">Structural Score</span><span class="popup-value">${Number(p.struct_score) || 0}/100</span></div>
+      <div class="popup-row"><span class="popup-label">Ownership</span><span class="popup-value">${escapeHtml(p.ownership || '—')}</span></div>
+      <div class="popup-row"><span class="popup-label">Housing Type</span><span class="popup-value">${escapeHtml(p.housing_type || '—')}</span></div>
+      <div class="popup-row"><span class="popup-label">Year Built</span><span class="popup-value">${escapeHtml(p.year_built || '—')}</span></div>
       <div class="popup-row"><span class="popup-label">Mold Present</span><span class="popup-value">${p.has_mold ? '<span style="color:var(--orange)">Yes</span>' : 'No'}</span></div>
       <div class="popup-row"><span class="popup-label">Hospital Visit</span><span class="popup-value">${p.hospital_visit === 'yes' ? '<span style="color:var(--red)">Yes</span>' : 'No'}</span></div>
     </div>
@@ -2670,6 +2819,23 @@ function buildSurveyResultsTab(data) {
   const housing    = a.housing     || {};
   const ownership  = a.ownership   || {};
   const streetStats = data.street_stats || {};
+  // New survey-question blocks (R/C/W/D). Empty defaults so older analysis
+  // blobs persisted before the upgrade still render without errors.
+  const residency      = a.residency        || {};
+  const housingSafety  = a.housing_safety   || {};
+  const affordability  = a.affordability    || {};
+  const interventions  = a.interventions    || { pct_want: {}, highlights: [], order: [] };
+  const experiences    = a.experiences      || { pct_yes:  {}, highlights: [], order: [] };
+  const mobility       = a.mobility         || {};
+  const demoExt        = a.demographics_ext || {};
+  const surveyQs       = a.survey_questions || {};
+  const chartSources   = a.chart_sources    || {};
+  // Helper: build "<h4>Title</h4><div class='chart-source'>...</div>"
+  // Renders silently (no caption) when the source key is absent.
+  const head = (title, srcKey) => {
+    const src = chartSources[srcKey];
+    return `<h4>${title}</h4>` + (src ? `<div class="chart-source">Source: ${escapeHtml(src)}</div>` : '');
+  };
 
   const rankedStreets = Object.entries(streetStats)
     .filter(([, d]) => !d.insufficient_data)
@@ -2681,14 +2847,27 @@ function buildSurveyResultsTab(data) {
   const geocodedCount = matchDetails.filter(d => d.coord_source === 'geocoded').length;
   const totalMapped = a.n_responses || 0;
 
-  const _ctx = { scores, riskTiers, health, housing, ownership, rankedStreets, v, gpsCount, addrCount, geocodedCount, totalMapped };
+  const _ctx = {
+    scores, riskTiers, health, housing, ownership, rankedStreets, v,
+    gpsCount, addrCount, geocodedCount, totalMapped,
+    residency, housingSafety, affordability, interventions, experiences,
+    mobility, demoExt, surveyQs, chartSources,
+  };
 
-  const TABS = ['Overview','Health','IAQ','Structural','Streets','Validation'];
+  const TABS = [
+    'Overview','Health','IAQ','Structural','Streets','Validation',
+    'Residency','Community','Well-being','Demographics+',
+  ];
+  // data-rtab key per tab (some labels contain hyphens etc.)
+  const TAB_KEYS = [
+    'overview','health','iaq','structural','streets','validation',
+    'residency','community','wellbeing','demographics',
+  ];
 
   container.innerHTML = `
     <div style="display:flex;border-bottom:1px solid var(--border);margin-bottom:10px;overflow-x:auto;flex-shrink:0">
       ${TABS.map((t, i) =>
-        `<div class="res-tab" data-rtab="${t.toLowerCase()}"
+        `<div class="res-tab" data-rtab="${TAB_KEYS[i]}"
           style="padding:5px 13px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;
                  border-bottom:2px solid ${i===0?'var(--accent)':'transparent'};
                  color:${i===0?'var(--accent)':'var(--muted)'};transition:.15s">${t}</div>`
@@ -2705,17 +2884,17 @@ function buildSurveyResultsTab(data) {
         <div class="stat-card"><div class="label">Low</div><div class="value" style="font-size:18px;color:var(--green)">${riskTiers.low||0}</div><div class="sub">0–33</div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <div class="chart-box" style="flex:2;min-width:160px"><h4>Mean Scores by Domain</h4><canvas id="rc-scores" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1;min-width:110px"><h4>Ownership</h4><canvas id="rc-ownership" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1;min-width:110px"><h4>Risk Tiers</h4><canvas id="rc-risk" height="110"></canvas></div>
+        <div class="chart-box" style="flex:2;min-width:160px">${head('Mean Scores by Domain', 'mean_risk')}<canvas id="rc-scores" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px">${head('Ownership', 'ownership')}<canvas id="rc-ownership" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px">${head('Risk Tiers', 'risk_tiers')}<canvas id="rc-risk" height="110"></canvas></div>
       </div>
     </div>
 
     <!-- Health -->
     <div id="res-pane-health" class="res-pane" style="display:none">
       <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <div class="chart-box" style="flex:1.4;min-width:160px"><h4>Symptom Prevalence — All Households (%)</h4><canvas id="rc-symptoms" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1.6;min-width:180px"><h4>Respiratory &amp; Mold by Street (top 8 by risk)</h4><canvas id="rc-resp-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1.4;min-width:160px">${head('Symptom Prevalence — All Households (%)', 'symptoms')}<canvas id="rc-symptoms" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1.6;min-width:180px">${head('Respiratory &amp; Mold by Street (top 8 by risk)', 'mold_by_street')}<canvas id="rc-resp-street" height="110"></canvas></div>
       </div>
       <table class="data-table" style="font-size:11px">
         <thead><tr><th>Indicator</th><th>Overall</th><th>Severity</th><th>Scoring notes</th></tr></thead>
@@ -2741,8 +2920,8 @@ function buildSurveyResultsTab(data) {
     <!-- IAQ -->
     <div id="res-pane-iaq" class="res-pane" style="display:none">
       <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <div class="chart-box" style="flex:1.5;min-width:160px"><h4>Mold Prevalence by Street — top 8 (%)</h4><canvas id="rc-mold-street" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1;min-width:110px"><h4>Housing Age</h4><canvas id="rc-yearbuilt" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1.5;min-width:160px">${head('Mold Prevalence by Street — top 8 (%)', 'mold_by_street')}<canvas id="rc-mold-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px">${head('Housing Age', 'year_built')}<canvas id="rc-yearbuilt" height="110"></canvas></div>
       </div>
       <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="stat-card"><div class="label">Mean IAQ Score</div>
@@ -2758,9 +2937,9 @@ function buildSurveyResultsTab(data) {
     <!-- Structural -->
     <div id="res-pane-structural" class="res-pane" style="display:none">
       <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <div class="chart-box" style="flex:1;min-width:120px"><h4>Housing Types</h4><canvas id="rc-htypes" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1;min-width:120px"><h4>Home Condition</h4><canvas id="rc-cond" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1.6;min-width:160px"><h4>Structural Score by Street (top 8)</h4><canvas id="rc-struct-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:120px">${head('Housing Types', 'housing_types')}<canvas id="rc-htypes" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:120px">${head('Home Condition', 'conditions')}<canvas id="rc-cond" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1.6;min-width:160px">${head('Structural Score by Street (top 8)', 'struct_by_street')}<canvas id="rc-struct-street" height="110"></canvas></div>
       </div>
       <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr))">
         ${Object.entries(housing.types||{}).map(([k,v3])=>`<div class="stat-card"><div class="label">${k}</div><div class="value" style="font-size:16px">${v3}</div></div>`).join('')}
@@ -2770,8 +2949,8 @@ function buildSurveyResultsTab(data) {
     <!-- Streets -->
     <div id="res-pane-streets" class="res-pane" style="display:none">
       <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <div class="chart-box" style="flex:1"><h4>Overall Risk Score by Street</h4><canvas id="rc-risk-street" height="110"></canvas></div>
-        <div class="chart-box" style="flex:1"><h4>Health vs IAQ vs Structural (top 6)</h4><canvas id="rc-compare-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1">${head('Overall Risk Score by Street', 'risk_by_street')}<canvas id="rc-risk-street" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1">${head('Health vs IAQ vs Structural (top 6)', 'compare_street')}<canvas id="rc-compare-street" height="110"></canvas></div>
       </div>
       <div style="max-height:200px;overflow-y:auto">
         <table class="data-table" style="font-size:11px">
@@ -2808,16 +2987,72 @@ function buildSurveyResultsTab(data) {
           <div class="sub">${v.unmatched_iaq||0} not confirmed</div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <div class="chart-box" style="flex:1;min-width:110px"><h4>Coord Source</h4><canvas id="rc-coord-src" height="110"></canvas></div>
+        <div class="chart-box" style="flex:1;min-width:110px">${head('Coord Source', 'coord_source')}<canvas id="rc-coord-src" height="110"></canvas></div>
         ${v.unmatched_by_street && Object.keys(v.unmatched_by_street).length ? `
-        <div class="chart-box" style="flex:2;min-width:160px"><h4>Unmatched Responses by Street</h4>
+        <div class="chart-box" style="flex:2;min-width:160px">${head('Unmatched Responses by Street', 'unmatched')}
           <div style="display:flex;flex-wrap:wrap;gap:5px;padding-top:4px">
             ${Object.entries(v.unmatched_by_street).sort(([,a2],[,b2])=>b2-a2).slice(0,15).map(([street,cnt])=>
-              `<span style="padding:2px 8px;border-radius:6px;font-size:11px;font-family:var(--mono);background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)">${street} <b>${cnt}</b></span>`
+              `<span style="padding:2px 8px;border-radius:6px;font-size:11px;font-family:var(--mono);background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)">${escapeHtml(street)} <b>${Number(cnt) || 0}</b></span>`
             ).join('')}
           </div>
           <p style="font-size:10px;color:var(--muted);margin-top:8px">Not confirmed = nearest completed contact &gt;150 m away or not in canvassing list</p>
         </div>` : ''}
+      </div>
+    </div>
+
+    <!-- Residency & Housing -->
+    <div id="res-pane-residency" class="res-pane" style="display:none">
+      <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:8px">
+        <div class="stat-card"><div class="label">Years in HRE — mean</div><div class="value" style="font-size:18px">${(residency.years_in_hre||{}).mean ?? '—'}</div><div class="sub">n=${(residency.years_in_hre||{}).n_valid||0} parsed</div></div>
+        <div class="stat-card"><div class="label">Years in HRE — median</div><div class="value" style="font-size:18px">${(residency.years_in_hre||{}).median ?? '—'}</div><div class="sub">free-text → numeric</div></div>
+        <div class="stat-card"><div class="label">Mobile-home skirting</div><div class="value" style="font-size:18px">${Object.values(residency.mh_skirting||{}).reduce((s,n)=>s+(n||0),0)}</div><div class="sub">responses (skip-logic)</div></div>
+        <div class="stat-card"><div class="label">Affordability strategy</div><div class="value" style="font-size:18px">${Object.keys(affordability.strategy||{}).length}</div><div class="sub">distinct answers</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Years lived in HRE — distribution', 'years_in_hre')}<canvas id="rc-residency-years" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.years_in_hre || 'How long have you lived in High Ridge Estates?')}</div></div>
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Anticipated stay in current house', 'anticipated_stay')}<canvas id="rc-residency-stay" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.anticipated_stay || 'How long do you anticipate continuing to live in your current house?')}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Housing safety — environmental threats', 'safety_env')}<canvas id="rc-residency-env" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.safety_env || '')}</div></div>
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Housing safety — social threats', 'safety_social')}<canvas id="rc-residency-social" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.safety_social || '')}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Affordable-housing urgency', 'afford_urgency')}<canvas id="rc-residency-urgency" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.afford_urgency || '')}</div></div>
+        <div class="chart-box" style="flex:1.2;min-width:240px">${head('Most effective affordability strategy', 'afford_strategy')}<canvas id="rc-residency-strategy" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.afford_strategy || '')}</div></div>
+      </div>
+      <div class="chart-box">${head('Importance of relocation factors (count of "important / very important")', 'reloc_factors')}<div id="rc-reloc-bars" class="matrix-bars"></div><div class="chart-source">Source: ${escapeHtml((surveyQs.reloc_factor_qol || '').replace(/^Relocation factor — /, '') ? 'If you lived in another place before, how important were the following factors in relocating to HRE?' : '')}</div></div>
+      <div style="margin-top:8px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:var(--r)">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Mobile-home skirting intact?</div>
+        <div class="chart-source" style="font-style:italic;color:var(--muted);font-size:10px;margin-bottom:6px">Source: ${escapeHtml(surveyQs.mh_skirting || '')}</div>
+        <div id="rc-mh-skirting" style="font-size:11px;color:var(--text)"></div>
+      </div>
+    </div>
+
+    <!-- Community Living (interventions + experiences) -->
+    <div id="res-pane-community" class="res-pane" style="display:none">
+      <div class="chart-box" style="margin-bottom:8px">${head('Home-resilience interventions — % of respondents wanting each', 'interventions_pct')}<div class="chart-source">Source: ${escapeHtml('Please indicate whether you would like or would not like to have the following interventions to improve your home’s resilience and quality in HRE.')}</div><div id="rc-intv-bars" class="matrix-bars"></div><div style="font-size:10px;color:var(--muted);margin-top:6px;font-style:italic">Highlighted in cyan: items flagged for priority research focus.</div></div>
+      <div class="chart-box">${head("Experiences in HRE — % of respondents reporting 'yes'", 'experiences_pct')}<div class="chart-source">Source: ${escapeHtml('Since you’ve lived in High Ridge Estates, have you experienced…')}</div><div id="rc-exp-bars" class="matrix-bars"></div><div style="font-size:10px;color:var(--muted);margin-top:6px;font-style:italic">Highlighted in cyan: law enforcement · insurance loss · well drying up · pests · water leaks · loose animals.</div></div>
+    </div>
+
+    <!-- Well-being & Mobility -->
+    <div id="res-pane-wellbeing" class="res-pane" style="display:none">
+      <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:8px">
+        <div class="stat-card"><div class="label">Car access — Yes</div><div class="value" style="font-size:18px;color:var(--green)">${(mobility.car_access||{}).yes||0}</div><div class="sub">households</div></div>
+        <div class="stat-card"><div class="label">Car access — No</div><div class="value" style="font-size:18px;color:var(--orange)">${(mobility.car_access||{}).no||0}</div><div class="sub">households</div></div>
+        <div class="stat-card"><div class="label">Hurricane transport problems — Yes</div><div class="value" style="font-size:18px;color:var(--red)">${(mobility.hurricane_transport||{}).yes||0}</div><div class="sub">households</div></div>
+        <div class="stat-card"><div class="label">Hurricane — Not sure</div><div class="value" style="font-size:18px;color:var(--muted)">${(mobility.hurricane_transport||{}).not_sure||0}</div><div class="sub">households</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Regular access to a car', 'car_access')}<canvas id="rc-car-access" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.car_access || '')}</div></div>
+        <div class="chart-box" style="flex:1;min-width:200px">${head('Transportation problems during hurricanes', 'hurricane_transport')}<canvas id="rc-hurricane" height="120"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.hurricane_transport || '')}</div></div>
+      </div>
+    </div>
+
+    <!-- Demographics+ -->
+    <div id="res-pane-demographics" class="res-pane" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="chart-box" style="flex:1;min-width:240px">${head('Highest level of education', 'education')}<canvas id="rc-education" height="140"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.education || '')}</div></div>
+        <div class="chart-box" style="flex:1;min-width:240px">${head('Employment status', 'employment')}<canvas id="rc-employment" height="140"></canvas><div class="chart-source">Source: ${escapeHtml(surveyQs.employment || '')}</div></div>
       </div>
     </div>
   `;
@@ -2843,7 +3078,11 @@ function buildSurveyResultsTab(data) {
   setTimeout(() => _initResultsCharts('overview', _ctx), 60);
 }
 
-function _initResultsCharts(tab, { scores, riskTiers, health, housing, rankedStreets, v, gpsCount, addrCount, geocodedCount, ownership }) {
+function _initResultsCharts(tab, ctx) {
+  const { scores, riskTiers, health, housing, rankedStreets, v,
+          gpsCount, addrCount, geocodedCount, ownership,
+          residency, housingSafety, affordability, interventions,
+          experiences, mobility, demoExt, surveyQs } = ctx;
   const OPTS = {
     animation: false,
     plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } } },
@@ -2987,6 +3226,141 @@ function _initResultsCharts(tab, { scores, riskTiers, health, housing, rankedStr
       options: { ...OPTS, cutout: '55%' },
     });
   }
+
+  // ── Helper: render a horizontal bar chart from a {label: count} dict ─────
+  function _binBar(canvasId, dict, color) {
+    const items = Object.entries(dict || {}).filter(([k]) => k);
+    if (!items.length) {
+      const el = document.getElementById(canvasId);
+      if (el && el.parentElement) {
+        el.style.display = 'none';
+        const empty = document.createElement('div');
+        empty.style.cssText = 'font-size:11px;color:var(--muted);font-style:italic;padding:8px 0';
+        empty.textContent = 'No responses recorded for this question.';
+        el.parentElement.insertBefore(empty, el.nextSibling);
+      }
+      return;
+    }
+    items.sort(([,a2],[,b2]) => b2 - a2);
+    mk(canvasId, {
+      type: 'bar',
+      data: {
+        labels: items.map(([k]) => k.length > 50 ? k.slice(0, 47) + '…' : k),
+        datasets: [{
+          label: 'count',
+          data: items.map(([,n]) => n),
+          backgroundColor: color || 'rgba(59,130,246,.7)',
+          borderRadius: 3,
+          barThickness: 16,
+        }],
+      },
+      options: { ...OPTS, indexAxis: 'y', plugins: { legend: { display: false } },
+                 scales: { x: AXIS, y: { ...AXIS, ticks: { ...AXIS.ticks, autoSkip: false, font: { size: 9 } } } } },
+    });
+  }
+
+  // ── Helper: render a {label: pct} matrix as horizontal bars in HTML ──────
+  function _matrixBars(containerId, fieldsOrdered, pctMap, highlights, labelMap) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const hl = new Set(highlights || []);
+    // Sort by pct desc but preserve full list (stable for canonical compare).
+    const ranked = [...fieldsOrdered].sort((a, b) => (pctMap[b] || 0) - (pctMap[a] || 0));
+    el.innerHTML = ranked.map(f => {
+      const pct  = Math.max(0, Math.min(100, Number(pctMap[f] || 0)));
+      const isHl = hl.has(f);
+      // Strip the "Intervention — " / "Experience — " prefix from the label.
+      const raw  = labelMap[f] || f;
+      const lbl  = raw.replace(/^(Intervention|Experience|Relocation factor) — /, '');
+      return `<div class="full">
+        <div class="row"><div class="label${isHl ? ' hl' : ''}" title="${escapeHtml(raw)}">${escapeHtml(lbl)}</div><div style="font-family:var(--mono);font-size:10px;color:var(--text2);text-align:right">${pct}%</div></div>
+        <div class="bar${isHl ? ' hl' : ''}"><span style="width:${pct}%"></span></div>
+      </div>`;
+    }).join('');
+  }
+
+  if (tab === 'residency') {
+    const yrs = (residency.years_in_hre || {}).distribution || {};
+    const yrsOrder = ['<1 yr','1–4','5–9','10–19','20–29','30+'];
+    mk('rc-residency-years', {
+      type: 'bar',
+      data: { labels: yrsOrder,
+        datasets: [{ label: 'respondents', barThickness: 22,
+          data: yrsOrder.map(k => yrs[k] || 0),
+          backgroundColor: 'rgba(6,182,212,.75)', borderRadius: 4 }] },
+      options: { ...OPTS, plugins: { legend: { display: false } }, scales: { x: AXIS, y: AXIS } },
+    });
+    _binBar('rc-residency-stay', residency.anticipated_stay, 'rgba(139,92,246,.7)');
+    _binBar('rc-residency-env',   (housingSafety.env || {}),    'rgba(16,185,129,.7)');
+    _binBar('rc-residency-social',(housingSafety.social || {}), 'rgba(245,158,11,.7)');
+    _binBar('rc-residency-urgency',  affordability.urgency,  'rgba(239,68,68,.7)');
+    _binBar('rc-residency-strategy', affordability.strategy, 'rgba(59,130,246,.7)');
+
+    // Relocation factors: count "important / very important" per factor.
+    const reloc = (residency.reloc_factors || {});
+    const relocFields = [
+      'reloc_factor_emp','reloc_factor_aff','reloc_factor_qol','reloc_factor_fam',
+      'reloc_factor_ret','reloc_factor_env','reloc_factor_inh','reloc_factor_oth',
+    ];
+    const relocPct = {};
+    relocFields.forEach(f => {
+      const counts = reloc[f] || {};
+      let imp = 0, n = 0;
+      Object.entries(counts).forEach(([k, c]) => {
+        n += c;
+        const kl = String(k).toLowerCase();
+        if (kl.includes('important') || kl.includes('very') || kl.includes('high')) imp += c;
+      });
+      relocPct[f] = n > 0 ? Math.round(imp / n * 100) : 0;
+    });
+    _matrixBars('rc-reloc-bars', relocFields, relocPct, [], surveyQs);
+
+    const sk = residency.mh_skirting || {};
+    const skEl = document.getElementById('rc-mh-skirting');
+    if (skEl) {
+      const skItems = Object.entries(sk).filter(([k]) => k);
+      skEl.innerHTML = skItems.length
+        ? skItems.map(([k, c]) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)"><span>${escapeHtml(k)}</span><b style="font-family:var(--mono)">${c}</b></div>`).join('')
+        : '<span style="color:var(--muted);font-style:italic">No mobile-home respondents reported.</span>';
+    }
+  }
+
+  if (tab === 'community') {
+    _matrixBars('rc-intv-bars',
+      interventions.order || [],
+      interventions.pct_want || {},
+      interventions.highlights || [],
+      surveyQs);
+    _matrixBars('rc-exp-bars',
+      experiences.order || [],
+      experiences.pct_yes || {},
+      experiences.highlights || [],
+      surveyQs);
+  }
+
+  if (tab === 'wellbeing') {
+    const ca = mobility.car_access || {};
+    const ht = mobility.hurricane_transport || {};
+    mk('rc-car-access', {
+      type: 'doughnut',
+      data: { labels: ['Yes','No','Not sure','Other','No answer'],
+        datasets: [{ data: [ca.yes||0, ca.no||0, ca.not_sure||0, ca.other||0, ca.na||0],
+          backgroundColor: ['#10b981','#ef4444','#94a3b8','#8b5cf6','#475569'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '55%' },
+    });
+    mk('rc-hurricane', {
+      type: 'doughnut',
+      data: { labels: ['Yes','No','Not sure','Other','No answer'],
+        datasets: [{ data: [ht.yes||0, ht.no||0, ht.not_sure||0, ht.other||0, ht.na||0],
+          backgroundColor: ['#ef4444','#10b981','#94a3b8','#8b5cf6','#475569'], borderWidth: 0 }] },
+      options: { ...OPTS, cutout: '55%' },
+    });
+  }
+
+  if (tab === 'demographics') {
+    _binBar('rc-education',  demoExt.education,  'rgba(59,130,246,.75)');
+    _binBar('rc-employment', demoExt.employment, 'rgba(139,92,246,.75)');
+  }
 }
 
 // ── Contact layer visibility helpers ────────────────────────────────────────
@@ -3022,11 +3396,25 @@ function clearMapForChatbot() {
   currentIAQFilter = null;
   currentContactFilter = null;
   activeStreetHighlight = null;
+  // Clear the legend status filter so chatbot actions are not silently scoped
+  // to whatever the user had checked in the status legend.
+  if (activeFilters.size) {
+    activeFilters.clear();
+    if (typeof updateStatusRowHighlights === 'function') updateStatusRowHighlights();
+    if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
+    if (map.getLayer('survey-labels')) map.setFilter('survey-labels', null);
+  }
 }
 
 async function executeMapActions(actions) {
   if (!actions || !actions.length) return;
+  // Preserve the user's IAQ risk overlay state — clearMapForChatbot() would
+  // silently wipe it. Restore immediately after the clear so chatbot actions
+  // can still override it if they need to.
+  const iaqRiskWasOn = map.getLayer('iaq-points') &&
+    map.getLayoutProperty('iaq-points', 'visibility') !== 'none';
   clearMapForChatbot();
+  if (iaqRiskWasOn) setLayerVisibility('iaq_risk', true);
   for (const action of actions) {
     const { type, params = {} } = action;
     switch (type) {
@@ -3210,6 +3598,8 @@ async function fetchOSMRoadGeometry(streetName) {
         properties: { street_name: label },
       }));
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   try {
     for (const name of candidates) {
       const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -3219,11 +3609,12 @@ async function fetchOSMRoadGeometry(streetName) {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(exactQuery),
+        signal: controller.signal,
       });
       if (r1.ok) {
         const d1 = await r1.json();
         const feats = _toFeatures(d1.elements, streetName);
-        if (feats.length) { console.log(`[OSM] matched "${name}" (exact)`); return feats; }
+        if (feats.length) { console.log(`[OSM] matched "${name}" (exact)`); clearTimeout(timeoutId); return feats; }
       }
     }
 
@@ -3234,6 +3625,7 @@ async function fetchOSMRoadGeometry(streetName) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'data=' + encodeURIComponent(partialQuery),
+      signal: controller.signal,
     });
     if (r2.ok) {
       const d2 = await r2.json();
@@ -3244,14 +3636,21 @@ async function fetchOSMRoadGeometry(streetName) {
       );
       if (filtered.length) {
         console.log(`[OSM] matched "${streetName}" via first-word "${firstWord}"`);
+        clearTimeout(timeoutId);
         return _toFeatures(filtered, streetName);
       }
     }
 
     console.warn(`[OSM] No road geometry found for "${streetName}"`);
+    clearTimeout(timeoutId);
     return [];
   } catch (e) {
-    console.warn('[OSM] Road fetch failed for', streetName, ':', e.message);
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') {
+      console.warn('[OSM] Road fetch timed out for', streetName);
+    } else {
+      console.warn('[OSM] Road fetch failed for', streetName, ':', e.message);
+    }
     return [];
   }
 }
@@ -3347,6 +3746,7 @@ async function highlightStreets(streets, color) {
       map.setPaintProperty('iaq-highlighted', 'circle-stroke-color', '#ffffff');
       map.setLayoutProperty('iaq-highlighted', 'visibility', 'visible');
       console.warn(`[highlightStreets] OSM returned no geometry for ${names.join(', ')}; highlighting IAQ points on that street instead`);
+      showToast(`Street line not available from map data — showing survey points on ${names.join(', ')} instead`, 5000);
     }
   }
 
@@ -3416,6 +3816,9 @@ function filterIAQPoints(field, values) {
 
 function showStreetChoropleth(field) {
   if (!map.getLayer('iaq-points')) return;
+  // Always snapshot and hide contact layer before showing choropleth so that
+  // _restoreContactLayers() has a fresh, accurate _contactWasVisible flag.
+  _hideContactLayers();
   const rampExpr = (f) => ['interpolate', ['linear'], ['get', f],
     0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444'];
   const valid = ['overall_risk', 'health_score', 'iaq_score', 'struct_score'];
@@ -3552,7 +3955,10 @@ async function sendChatMessage() {
       }
     }
 
-    if (map_actions && map_actions.length) executeMapActions(map_actions);
+    // await so chatInFlight stays true through all OSM fetches inside
+    // executeMapActions — prevents a second message from slipping through
+    // while async map actions are still in flight.
+    if (map_actions && map_actions.length) await executeMapActions(map_actions);
     appendChatBubble('assistant', text, map_actions);
     chatHistory.push({ role: 'assistant', content: text });
     if (chatHistory.length > 20) chatHistory = chatHistory.slice(-16);
@@ -3620,8 +4026,13 @@ function removeTyping(id) {
 
 function renderMarkdown(text) {
   if (!text) return '';
-  let html = text
-    // Tables (header | divider | rows)
+  // HTML-escape FIRST so any <script> or attribute injection from the LLM
+  // (or chat history that was stored unescaped) becomes inert. Then re-introduce
+  // only the markdown markup we actually want.
+  const safe = String(text).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let html = safe
+    // Tables (header | divider | rows) — operates on already-escaped text.
     .replace(/^\|(.+)\|\s*\n\|[-| :]+\|\s*\n((?:\|.+\|\s*\n?)*)/gm, (_m, header, rows) => {
       const ths = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
       const trs = rows.trim().split('\n').map(row => {

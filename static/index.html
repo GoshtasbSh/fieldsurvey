@@ -177,8 +177,19 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* Charts */
 .charts-row{display:flex;gap:16px;flex-wrap:wrap}
 .chart-box{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px;flex:1;min-width:250px}
-.chart-box h4{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
+.chart-box h4{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px}
+.chart-box .chart-source{font-size:10px;color:var(--muted);font-style:italic;margin:0 0 8px;line-height:1.35;white-space:normal;overflow-wrap:anywhere}
 .chart-box canvas{max-height:200px}
+/* Matrix bar list (interventions / experiences) */
+.matrix-bars{display:flex;flex-direction:column;gap:4px;font-size:11px}
+.matrix-bars .row{display:grid;grid-template-columns:1fr 50px;gap:8px;align-items:center}
+.matrix-bars .label{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.matrix-bars .label.hl{color:var(--accent);font-weight:600}
+.matrix-bars .bar{position:relative;height:12px;background:rgba(255,255,255,.04);border-radius:3px;grid-column:1 / span 2}
+.matrix-bars .bar > span{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:rgba(59,130,246,.55)}
+.matrix-bars .bar.hl > span{background:rgba(6,182,212,.85)}
+.matrix-bars .bar > b{position:absolute;right:6px;top:-1px;font-family:var(--mono);font-size:10px;color:var(--text)}
+.matrix-bars .full{display:grid;grid-template-columns:1fr;gap:2px;padding:4px 0}
 
 /* Table */
 .data-table{width:100%;border-collapse:collapse;font-size:12px}
@@ -407,6 +418,10 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       <!-- Layers -->
       <div class="sidebar-section">
         <div class="sidebar-title">Layers</div>
+        <div class="layer-row">
+          <label for="layer-field-points">Field Points</label>
+          <label class="toggle"><input type="checkbox" id="layer-field-points" checked><span></span></label>
+        </div>
         <div class="layer-row">
           <label for="layer-points">Survey Points</label>
           <label class="toggle"><input type="checkbox" id="layer-points"><span></span></label>
@@ -1003,8 +1018,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
      field PWA entry so the login flow lands them on the right app. -->
 <script>
 (async () => {
-  const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-    || window.innerWidth < 768;
+  const isMobile = window.innerWidth < 768;
   if (isMobile) { window.location.replace('/keystone_field_web/index.html'); return; }
   try {
     const r = await fetch('/api/config', { cache: 'no-store' });

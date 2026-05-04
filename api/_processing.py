@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import io
 import json
+import logging
 import difflib
 import urllib.request
 import urllib.parse
@@ -48,6 +49,151 @@ PII_COLS = {
 KH_LAT_MIN, KH_LAT_MAX = 29.60, 29.95
 KH_LON_MIN, KH_LON_MAX = -82.20, -81.75
 
+# Columns the IAQ scorers read. If any are missing in a Qualtrics export the
+# affected score silently drops to 0 — surface a warning instead.
+EXPECTED_IAQ_COLUMNS = {
+    'critical': ['Finished', 'Q212', 'LocationLatitude', 'LocationLongitude'],
+    'health':   ['Headache', 'RespIll', 'asthma', 'wheeze', 'Tired',
+                 'Hospital Respiratory'],
+    'iaq':      ['Mold',
+                 'Leakage 2_1', 'Leakage 2_2', 'Leakage 2_3', 'Leakage 2_4',
+                 'Cooling System _1', 'Cooling System _2',
+                 'Cooling System _3', 'Cooling System _4',
+                 'Cooking '],
+    'struct':   ['QID192', 'QID128', 'QID141'],
+}
+
+# Survey-question metadata: field_name → (orig_csv_col_idx, question_text).
+# Many of these columns have blank or duplicate Qualtrics headers (matrix
+# sub-items export as ' _1', ' _2', …; standalone questions sometimes export
+# with a literal single-space header). We pin them by ORIGINAL CSV column
+# index so renames or PII drops cannot shift the mapping. Question text is
+# pulled from the CSV's descriptor row (row 1) for use in chart subtitles.
+SURVEY_QUESTIONS = {
+    # ── Residency & Housing (R1–R8) ───────────────────────────────────────────
+    'years_in_hre':       (27, 'How long have you lived in High Ridge Estates? (years)'),
+    'reloc_factor_emp':   (29, 'Relocation factor — Employment opportunities nearby'),
+    'reloc_factor_aff':   (30, 'Relocation factor — Affordable housing'),
+    'reloc_factor_qol':   (31, 'Relocation factor — Quality of Life'),
+    'reloc_factor_fam':   (32, 'Relocation factor — Proximity to family and friends'),
+    'reloc_factor_ret':   (33, 'Relocation factor — Retirement'),
+    'reloc_factor_env':   (34, 'Relocation factor — Environmental quality and access to nature'),
+    'reloc_factor_inh':   (35, 'Relocation factor — Inherited property'),
+    'reloc_factor_oth':   (36, 'Relocation factor — Other'),
+    'mh_skirting':        (42, 'If you live in a mobile home, does your home have its skirting intact?'),
+    'anticipated_stay':   (44, 'How long do you anticipate continuing to live in your current house?'),
+    'safety_env':         (56, 'Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?'),
+    'safety_social':      (57, 'Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?'),
+    'afford_urgency':     (58, 'How would you rate the urgency of having affordable housing in High Ridge Estates?'),
+    'afford_strategy':    (59, 'In your opinion, what is the most effective strategy to improve housing affordability in HRE?'),
+
+    # ── Community Living: home-resilience interventions matrix (C1, 11 items) ─
+    'intv_roof_walls':    (67, 'Intervention — Strengthen the roof and walls against severe weather'),
+    'intv_windows_doors': (68, 'Intervention — Upgrade windows and doors to be more energy-efficient'),
+    'intv_rain_gardens':  (69, 'Intervention — Install rain gardens to manage stormwater on my property'),
+    'intv_hvac':          (70, 'Intervention — Improve heating/cooling system(s)'),
+    'intv_plumbing_elec': (71, 'Intervention — Improve plumbing or electrical systems for reliability'),
+    'intv_well_septic':   (72, 'Intervention — Replace well/septic'),
+    'intv_ccua_water':    (73, 'Intervention — Connect to city water through CCUA'),
+    'intv_fence':         (74, 'Intervention — Add a fence for safety'),
+    'intv_trees_shade':   (75, 'Intervention — Plant more trees around my home for shade and cooling'),
+    'intv_trim_trees':    (76, 'Intervention — Trim trees'),
+    'intv_drainage':      (77, 'Intervention — Improved drainage'),
+
+    # ── Community Living: experiences in HRE matrix (C2, 10 items) ────────────
+    'exp_flooding':        (84, 'Experience — Flooding of house due to any disaster (e.g., hurricane)'),
+    'exp_flood_help':      (85, 'Experience — In case of flooding, received help for cleaning'),
+    'exp_extreme_heat':    (86, 'Experience — Extreme heat in recent years'),
+    'exp_school_change':   (87, "Experience — Changing your kids' school due to moving"),
+    'exp_law_enf':         (88, 'Experience — Calling law enforcement because of problem with neighbors'),
+    'exp_insurance_loss':  (89, 'Experience — Losing home owners insurance due to age of home'),
+    'exp_well_dry':        (90, 'Experience — Well drying up'),
+    'exp_pests':           (91, 'Experience — A problem with pests in your home'),
+    'exp_water_leaks':     (92, 'Experience — A problem with water leaks'),
+    'exp_loose_animals':   (93, 'Experience — A problem with loose animals'),
+
+    # ── Well-being & Mobility (W1, W2) ────────────────────────────────────────
+    'car_access':          (133, 'Do you (or your household) own or have regular access to a car?'),
+    'hurricane_transport': (134, 'During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?'),
+
+    # ── Demographics+ (D1, D2) ────────────────────────────────────────────────
+    'education':           (142, 'What is the highest level of education you have completed?'),
+    'employment':          (143, 'Which best describes your employment status?'),
+}
+
+# Highlights rendered in accent color in the dashboard's matrix charts.
+INTERVENTION_HIGHLIGHTS = ('intv_roof_walls', 'intv_ccua_water')
+EXPERIENCE_HIGHLIGHTS = ('exp_law_enf', 'exp_insurance_loss', 'exp_well_dry',
+                         'exp_pests', 'exp_water_leaks', 'exp_loose_animals')
+
+# Matrix display order (UI renders bars in this order before sorting by %)
+INTERVENTION_FIELDS = (
+    'intv_roof_walls', 'intv_windows_doors', 'intv_rain_gardens',
+    'intv_hvac', 'intv_plumbing_elec', 'intv_well_septic',
+    'intv_ccua_water', 'intv_fence', 'intv_trees_shade',
+    'intv_trim_trees', 'intv_drainage',
+)
+EXPERIENCE_FIELDS = (
+    'exp_flooding', 'exp_flood_help', 'exp_extreme_heat', 'exp_school_change',
+    'exp_law_enf', 'exp_insurance_loss', 'exp_well_dry',
+    'exp_pests', 'exp_water_leaks', 'exp_loose_animals',
+)
+RELOC_FIELDS = (
+    'reloc_factor_emp', 'reloc_factor_aff', 'reloc_factor_qol',
+    'reloc_factor_fam', 'reloc_factor_ret', 'reloc_factor_env',
+    'reloc_factor_inh', 'reloc_factor_oth',
+)
+
+# Source-question captions for the existing 6 sub-tabs (chart_id → caption).
+# Rendered under each chart title in the frontend so every visualization is
+# traceable to its Qualtrics column(s) without expanding anything.
+CHART_SOURCES = {
+    # Overview
+    'mean_risk':        'composite of Health, IAQ, and Structural sub-scores',
+    'mean_health':      'composite of RespIll, asthma, wheeze, Headache, Tired, Hospital Respiratory',
+    'mean_iaq':         'composite of Mold, Leakage 2_1–4, Cooling System _1–4, Cooking',
+    'mean_struct':      'composite of QID192 (year built), QID128 (housing type), QID141 (condition)',
+    'risk_tiers':       'derived: 0.35·Health + 0.35·IAQ + 0.30·Structural — tiered Low/Medium/High',
+    'ownership':        'Ownership — "What is your current housing ownership status?"',
+    # Health
+    'symptoms':         'RespIll, asthma, wheeze, Mold, Hospital Respiratory — symptom prevalence',
+    'respiratory_pct':  'RespIll — "How often does anyone in your home have respiratory illness symptoms?"',
+    'asthma_pct':       'asthma — "How often does anyone in your home have asthma symptoms?"',
+    'wheeze_pct':       'wheeze — "How often does anyone in your home wheeze?"',
+    'mold_pct':         'Mold — "Evidence of mold in any area of the home?"',
+    'hospital_pct':     'Hospital Respiratory — "Has anyone in your home visited a hospital for respiratory issues?"',
+    # IAQ
+    'mold_by_street':   'Mold — aggregated per street (≥3 responses)',
+    'year_built':       'QID192 — "When was your house built?"',
+    # Structural
+    'housing_types':    'QID128 — "What type of house do you live in?"',
+    'conditions':       'QID141 — "How would you describe the condition of your current house in terms of maintenance and repair?"',
+    'struct_by_street': 'composite QID192 + QID128 + QID141 — aggregated per street (≥3 responses)',
+    # Streets
+    'risk_by_street':   'composite Overall risk — aggregated per street (≥3 responses)',
+    'compare_street':   'mean Health, IAQ, Structural — aggregated per street (≥3 responses)',
+    # Validation (no source survey question — these are data-quality metrics)
+    'coord_source':     '— (data-quality metric, no survey question)',
+    'unmatched':        '— (data-quality metric, no survey question)',
+    'match_rate':       '— (data-quality metric, no survey question)',
+}
+
+
+def _validate_iaq_columns(df_columns) -> dict:
+    """Compare a Qualtrics CSV's columns against the expected manifest.
+
+    Qualtrics sometimes exports column names with no-break space (\\xa0) — we
+    normalize both sides before comparison so legitimate exports don't
+    register as missing.
+    """
+    have = {str(c).replace('\xa0', ' ').strip() for c in df_columns}
+    missing_by_group: dict = {}
+    for group, cols in EXPECTED_IAQ_COLUMNS.items():
+        gone = [c for c in cols if c.replace('\xa0', ' ').strip() not in have]
+        if gone:
+            missing_by_group[group] = gone
+    return missing_by_group
+
 PARCEL_GEOJSON = Path(__file__).parent.parent / 'output' / 'parcels_keystone.geojson'
 
 
@@ -62,6 +208,7 @@ def parse_multipart_file(content_type: str, body: bytes) -> tuple[str | None, by
         if tok.lower().startswith('boundary='):
             boundary = tok[9:].strip('"').strip("'")
     if not boundary:
+        print(f"[multipart] no boundary found in content-type: {content_type[:200]!r}")
         return None, None
 
     sep = b'--' + boundary.encode('ascii', errors='replace')
@@ -79,6 +226,10 @@ def parse_multipart_file(content_type: str, body: bytes) -> tuple[str | None, by
                 tok = tok.strip()
                 if tok.lower().startswith('filename='):
                     filename = tok[9:].strip('"').strip("'")
+        if filename:
+            # Cap filename length and strip newlines (defense against
+            # log injection and oversized labels in Supabase).
+            filename = filename.replace('\r', ' ').replace('\n', ' ')[:255]
         return filename, content
     return None, None
 
@@ -218,13 +369,17 @@ def _census_geocode(addr: str) -> tuple:
 
 
 # ── Haversine distance ─────────────────────────────────────────────────────────
-
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6_371_000
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
-    return 2 * R * atan2(sqrt(a), sqrt(1 - a))
+# Import from _lib when available (same formula); fall back to local definition
+# if _lib is not on sys.path (e.g. standalone testing outside api/).
+try:
+    from _lib import haversine_m as _haversine_m
+except ImportError:
+    def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6_371_000
+        dlat = radians(lat2 - lat1)
+        dlon = radians(lon2 - lon1)
+        a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+        return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
 
 # ── IAQ score helpers (identical to app.py; pd.isna replaced) ─────────────────
@@ -264,23 +419,67 @@ def _compute_health_score(row) -> int:
 
 def _compute_iaq_score(row) -> int:
     score = 0.0
-    mold = row.get('Mold')
+    # Normalize column names: Qualtrics sometimes exports \xa0 (no-break space)
+    # instead of regular space. Build a lookup once so both variants resolve.
+    _nr = {str(k).replace('\xa0', ' '): v for k, v in row.items()}
+    mold = _nr.get('Mold')
     if mold and not _isna(mold) and str(mold).strip() not in ('', 'nan'):
         score += 30
     for col in ['Leakage 2_1', 'Leakage 2_2', 'Leakage 2_3', 'Leakage 2_4']:
-        val = str(row.get(col, '') or '').lower().strip()
+        val = str(_nr.get(col, '') or '').lower().strip()
         if val and val not in ('none', 'nan', ''):
             score += 7.5
-    for col in ['Cooling System\xa0_1', 'Cooling System\xa0_2',
-                'Cooling System\xa0_3', 'Cooling System\xa0_4']:
-        val = str(row.get(col, '') or '').lower()
+    for col in ['Cooling System _1', 'Cooling System _2',
+                'Cooling System _3', 'Cooling System _4']:
+        val = str(_nr.get(col, '') or '').lower()
         if 'more than 15' in val:
             score += 4
         elif "don't know" in val or 'not applicable' in val:
             score += 2
-    if any(kw in str(row.get('Cooking ', '') or '').lower() for kw in ('gas', 'propane')):
+    if any(kw in str(_nr.get('Cooking ', '') or '').lower() for kw in ('gas', 'propane')):
         score += 10
     return round(min(score, 100))
+
+
+def _val_at_orig_idx(full_row, orig_idx):
+    """Pull a raw cell value from the pre-PII-drop DataFrame row by ORIGINAL
+    CSV column index. Used for blank-header / duplicate-header columns where
+    name-based lookup is unreliable. Returns clean string ('' on miss/NaN).
+    """
+    try:
+        v = full_row.iloc[orig_idx]
+    except (IndexError, KeyError, AttributeError):
+        return ''
+    if v is None or _isna(v):
+        return ''
+    s = str(v).strip()
+    return '' if s.lower() in ('nan', 'none') else s
+
+
+def _parse_years_numeric(v):
+    """Parse a free-text years answer (e.g. '10', '10 years', '10 yrs', '5.5')
+    into a float. Returns None on parse failure."""
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if not s or s in ('nan', 'none'):
+        return None
+    s = (s.replace('years', '').replace('year', '')
+          .replace('yrs', '').replace('yr', '')
+          .strip().rstrip('+').strip())
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_survey_extras(full_row) -> dict:
+    """Extract every SURVEY_QUESTIONS field from the pre-PII row by index.
+    Also derives years_in_hre_num for histogram aggregation."""
+    out = {field: _val_at_orig_idx(full_row, idx)
+           for field, (idx, _) in SURVEY_QUESTIONS.items()}
+    out['years_in_hre_num'] = _parse_years_numeric(out.get('years_in_hre'))
+    return out
 
 
 def _compute_struct_score(row) -> int:
@@ -498,6 +697,36 @@ def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
     return upgraded
 
 
+def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
+                                  threshold_m: float = 50) -> int:
+    """
+    Upgrade field survey point status to Completed when an IAQ survey exists
+    within threshold_m metres (spatial-only — field points have no address field).
+    Verbatim port of app.py's _apply_iaq_to_field_features().
+    Returns count of field points upgraded.
+    """
+    upgraded = 0
+    for ff in field_features:
+        if ff['properties'].get('status') == 'Completed':
+            continue
+        f_lon, f_lat = ff['geometry']['coordinates']
+        for iaq_f in iaq_features:
+            i_lon, i_lat = iaq_f['geometry']['coordinates']
+            if _haversine_m(f_lat, f_lon, i_lat, i_lon) <= threshold_m:
+                ip = iaq_f['properties']
+                ff['properties']['status']           = 'Completed'
+                ff['properties']['color']            = STATUS['Completed']
+                ff['properties']['has_iaq_survey']   = True
+                ff['properties']['iaq_overall_risk'] = ip.get('overall_risk', 0)
+                ff['properties']['iaq_risk_tier']    = ip.get('risk_tier', '')
+                ff['properties']['iaq_health_score'] = ip.get('health_score', 0)
+                ff['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
+                ff['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+                upgraded += 1
+                break
+    return upgraded
+
+
 # ── Analysis stats (identical to app.py) ──────────────────────────────────────
 
 def _compute_iaq_analysis(features: list) -> dict:
@@ -540,6 +769,75 @@ def _compute_iaq_analysis(features: list) -> dict:
         else:                    yr_dist['Unknown'] += 1
     owners  = sum(1 for p in props if p.get('ownership') == 'Owner')
     renters = sum(1 for p in props if p.get('ownership') == 'Renter')
+
+    # ── New survey-question aggregations (R/C/W/D blocks) ─────────────────────
+    def _bin_counts(field):
+        """Count distinct non-empty stripped values; returns {value: count}."""
+        c: dict = defaultdict(int)
+        for p in props:
+            v = str(p.get(field, '') or '').strip()
+            if v:
+                c[v] += 1
+        return dict(c)
+
+    def _yes_no_counts(field):
+        """Normalize Yes/No/Not Sure (case-insensitive) into a fixed-shape dict.
+        Anything else non-empty → 'other'; empty → 'na'."""
+        out = {'yes': 0, 'no': 0, 'not_sure': 0, 'other': 0, 'na': 0}
+        for p in props:
+            v = str(p.get(field, '') or '').strip().lower()
+            if not v:
+                out['na'] += 1
+            elif v == 'yes':
+                out['yes'] += 1
+            elif v == 'no':
+                out['no'] += 1
+            elif 'not sure' in v:
+                out['not_sure'] += 1
+            else:
+                out['other'] += 1
+        return out
+
+    def _pct_yes(field):
+        """Percentage of respondents whose value contains 'yes' (any case)."""
+        if not n:
+            return 0.0
+        hits = sum(1 for p in props
+                   if 'yes' in str(p.get(field, '') or '').lower())
+        return round(hits / n * 100, 1)
+
+    def _pct_want(field):
+        """Percentage of respondents whose intervention answer contains 'want'
+        but NOT 'not'/'don't' — i.e. they want the intervention."""
+        if not n:
+            return 0.0
+        hits = 0
+        for p in props:
+            v = str(p.get(field, '') or '').lower()
+            if not v:
+                continue
+            if 'not' in v or "don't" in v or 'do not' in v:
+                continue
+            if 'want' in v or 'like' in v or 'yes' in v:
+                hits += 1
+        return round(hits / n * 100, 1)
+
+    yrs_vals = [p['years_in_hre_num'] for p in props
+                if isinstance(p.get('years_in_hre_num'), (int, float))]
+    yrs_n = len(yrs_vals)
+    yrs_sorted = sorted(yrs_vals)
+    yrs_mean = round(sum(yrs_vals) / yrs_n, 1) if yrs_n else 0
+    yrs_median = (yrs_sorted[yrs_n // 2] if yrs_n % 2
+                  else (yrs_sorted[yrs_n // 2 - 1] + yrs_sorted[yrs_n // 2]) / 2) if yrs_n else 0
+    yrs_bins = defaultdict(int)
+    for v in yrs_vals:
+        if v < 1:    yrs_bins['<1 yr'] += 1
+        elif v < 5:  yrs_bins['1–4'] += 1
+        elif v < 10: yrs_bins['5–9'] += 1
+        elif v < 20: yrs_bins['10–19'] += 1
+        elif v < 30: yrs_bins['20–29'] += 1
+        else:        yrs_bins['30+'] += 1
+
     return {
         'n_responses': n, 'geocoded': n,
         'scores': {
@@ -567,6 +865,55 @@ def _compute_iaq_analysis(features: list) -> dict:
             'year_built': dict(yr_dist),
         },
         'ownership': {'owner': owners, 'renter': renters, 'other': n - owners - renters},
+
+        # ── Residency & Housing (R1–R8) ───────────────────────────────────────
+        'residency': {
+            'years_in_hre': {
+                'n_valid':     yrs_n,
+                'mean':        yrs_mean,
+                'median':      round(float(yrs_median), 1),
+                'distribution': dict(yrs_bins),
+            },
+            'anticipated_stay': _bin_counts('anticipated_stay'),
+            'mh_skirting':      _bin_counts('mh_skirting'),
+            'reloc_factors':    {f: _bin_counts(f) for f in RELOC_FIELDS},
+        },
+        'housing_safety': {
+            'env':    _bin_counts('safety_env'),
+            'social': _bin_counts('safety_social'),
+        },
+        'affordability': {
+            'urgency':  _bin_counts('afford_urgency'),
+            'strategy': _bin_counts('afford_strategy'),
+        },
+
+        # ── Community Living (C1, C2) ─────────────────────────────────────────
+        'interventions': {
+            'pct_want':    {f: _pct_want(f) for f in INTERVENTION_FIELDS},
+            'highlights':  list(INTERVENTION_HIGHLIGHTS),
+            'order':       list(INTERVENTION_FIELDS),
+        },
+        'experiences': {
+            'pct_yes':     {f: _pct_yes(f) for f in EXPERIENCE_FIELDS},
+            'highlights':  list(EXPERIENCE_HIGHLIGHTS),
+            'order':       list(EXPERIENCE_FIELDS),
+        },
+
+        # ── Well-being & Mobility (W1, W2) ────────────────────────────────────
+        'mobility': {
+            'car_access':          _yes_no_counts('car_access'),
+            'hurricane_transport': _yes_no_counts('hurricane_transport'),
+        },
+
+        # ── Demographics+ (D1, D2) ────────────────────────────────────────────
+        'demographics_ext': {
+            'education':  _bin_counts('education'),
+            'employment': _bin_counts('employment'),
+        },
+
+        # ── Question-text + chart-source provenance for the dashboard ────────
+        'survey_questions': {f: q for f, (_, q) in SURVEY_QUESTIONS.items()},
+        'chart_sources':    dict(CHART_SOURCES),
     }
 
 
@@ -662,6 +1009,66 @@ def categorize(text) -> str:
 
 # ── Main processing functions ──────────────────────────────────────────────────
 
+def _read_qualtric_csv(file_bytes: bytes) -> pd.DataFrame:
+    """
+    Read a Qualtric CSV with encoding auto-detection and tolerant header handling.
+
+    Qualtric standard exports include two extra rows under the header
+    (question-text row + JSON metadata row containing 'ImportId').
+    Some "legacy CSV" exports omit them. Detect rather than assume.
+    """
+    if not file_bytes:
+        raise ValueError("Empty CSV body — no bytes received.")
+
+    # Strip leading UTF-8 BOM if present (idempotent across encodings).
+    if file_bytes[:3] == b'\xef\xbb\xbf':
+        file_bytes = file_bytes[3:]
+
+    encodings = ('utf-8-sig', 'utf-8', 'utf-16', 'cp1252', 'latin-1')
+    last_err: Exception | None = None
+    head: pd.DataFrame | None = None
+    used_enc = None
+    for enc in encodings:
+        try:
+            head = pd.read_csv(io.BytesIO(file_bytes), encoding=enc,
+                               nrows=4, header=None, dtype=str,
+                               keep_default_na=False, low_memory=False)
+            used_enc = enc
+            break
+        except (UnicodeDecodeError, UnicodeError) as e:
+            last_err = e
+        except Exception as e:
+            last_err = e
+    if head is None or used_enc is None:
+        raise ValueError(
+            f"Cannot decode CSV (tried {', '.join(encodings)}). "
+            f"Last error: {last_err}. Re-export from Qualtrics as CSV (UTF-8)."
+        )
+
+    skip: list[int] = []
+    row2_has_importid = (
+        len(head) > 2
+        and 'ImportId' in ' '.join(str(v) for v in head.iloc[2].tolist())
+    )
+    if len(head) > 1:
+        row1 = ' '.join(str(v) for v in head.iloc[1].tolist())
+        # Qualtric convention: when row 2 carries ImportId metadata, row 1 is
+        # always the question-text row regardless of length.
+        if row2_has_importid or 'ImportId' in row1 or any(
+            len(str(v)) > 40 for v in head.iloc[1].tolist()
+        ):
+            skip.append(1)
+    if row2_has_importid:
+        skip.append(2)
+
+    raw = pd.read_csv(io.BytesIO(file_bytes), encoding=used_enc,
+                      skiprows=skip, low_memory=False) if skip else \
+          pd.read_csv(io.BytesIO(file_bytes), encoding=used_enc, low_memory=False)
+    logging.info("[iaq] csv decoded enc=%s skip=%s rows=%d cols=%d",
+                 used_enc, skip, len(raw), len(raw.columns))
+    return raw
+
+
 def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
                       parcel_idx: ParcelIndex) -> tuple:
     """
@@ -672,8 +1079,34 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     contact_features is mutated in-place (statuses upgraded to Completed).
     raw_address is NOT included in the returned geojson (stripped before return).
     """
-    raw = pd.read_csv(io.BytesIO(csv_bytes), skiprows=[1, 2], low_memory=False)
-    df = raw[raw['Finished'].astype(str).str.lower() == 'true'].copy().reset_index(drop=True)
+    raw = _read_qualtric_csv(csv_bytes)
+
+    if 'Finished' not in raw.columns:
+        raise ValueError(
+            "CSV is missing the 'Finished' column. "
+            "Re-export: Qualtrics → Data → Export & Import → Export Data → CSV."
+        )
+
+    missing_columns = _validate_iaq_columns(raw.columns)
+    if missing_columns:
+        print(f"[iaq] WARN missing columns: {missing_columns}")
+
+    _fin = raw['Finished'].astype(str).str.strip().str.lower()
+    _mask = _fin.isin(['true', '1'])
+    # df_full keeps every column (incl. PII + blank/duplicate-named matrix
+    # columns) so we can index by ORIGINAL CSV position for SURVEY_QUESTIONS.
+    # df strips PII columns and is what existing name-based code reads.
+    df_full = raw[_mask].copy().reset_index(drop=True)
+    df = df_full.copy()
+    if df.empty:
+        # Log diagnostic Finished-column values to Vercel runtime; do NOT
+        # echo CSV cell values back to the HTTP client (avoid PII reflection).
+        print(f"[iaq] empty-after-Finished filter — sample values: "
+              f"{list(raw['Finished'].astype(str).unique()[:8])}")
+        raise ValueError(
+            "No completed responses found in the CSV. "
+            "Only rows where Finished='True' or Finished=1 are processed."
+        )
 
     df.drop(columns=[c for c in PII_COLS if c in df.columns], inplace=True)
 
@@ -681,7 +1114,11 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     known_streets  = _build_known_streets(contact_lookup)
 
     features: list = []
-    for _, row in df.iterrows():
+    failed_geocodes: list = []
+    for i, (_, row) in enumerate(df.iterrows()):
+        # Extract survey-question fields by ORIGINAL CSV column index from
+        # the pre-PII-drop row; matches indices in SURVEY_QUESTIONS.
+        survey_extras = _extract_survey_extras(df_full.iloc[i])
         health = _compute_health_score(row)
         iaq    = _compute_iaq_score(row)
         struct = _compute_struct_score(row)
@@ -723,6 +1160,9 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
                             street_name = _extract_street_name(matched or '') or 'Unknown'
 
         if coords is None:
+            addr_str = ' '.join(str(q212).split()) if q212 else ''
+            print(f"[geocode] FAILED iaq: '{addr_str[:80]}'")
+            failed_geocodes.append(addr_str[:200])
             continue
 
         mold_val = row.get('Mold')
@@ -758,6 +1198,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
                 'coord_source':    coord_source,
                 'raw_address':     raw_addr,
                 'iaq_matched':     False,
+                **survey_extras,
             },
         })
 
@@ -771,10 +1212,25 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     for f in features:
         f['properties'].pop('raw_address', None)
 
-    geojson  = {'type': 'FeatureCollection', 'features': features}
+    # Compute analysis BEFORE stripping survey-question per-respondent fields
+    # (the analysis aggregator reads them); strip after so the persisted
+    # geojson stays small and per-respondent answers stay private.
     analysis = _compute_iaq_analysis(features)
+    _survey_extra_keys = tuple(SURVEY_QUESTIONS.keys()) + ('years_in_hre_num',)
+    for f in features:
+        for k in _survey_extra_keys:
+            f['properties'].pop(k, None)
+    geojson = {'type': 'FeatureCollection', 'features': features}
+    if missing_columns:
+        analysis['validation_warnings'] = {
+            'missing_columns': missing_columns,
+            'message': (
+                'Some expected Qualtrics columns are missing — affected scores '
+                'default to 0. Verify the export format.'
+            ),
+        }
     streets  = _compute_street_stats(features)
-    return geojson, analysis, streets, n_upgraded
+    return geojson, analysis, streets, n_upgraded, failed_geocodes
 
 
 def compute_contact_analysis(contact_features: list) -> dict:
@@ -823,11 +1279,12 @@ def process_survey_bytes(file_bytes: bytes, filename: str,
          pd.read_excel(io.BytesIO(file_bytes))
 
     features: list = []
+    failed_geocodes: list = []
     for i, row in df.iterrows():
         addr   = str(row.get('Address', '') or '').strip()
         if not addr or addr.lower() == 'nan':
             continue
-        detail = str(row['First attempt']) if pd.notna(row.get('First attempt')) else ''
+        detail = str(row.get('First attempt', '') or '')
         status = categorize(detail)
         second = str(row.get('Second attempt', '')) if pd.notna(row.get('Second attempt')) else ''
         notes  = str(row.get('Other notes: ', '')) if pd.notna(row.get('Other notes: ')) else ''
@@ -852,5 +1309,8 @@ def process_survey_bytes(file_bytes: bytes, filename: str,
                     'color': STATUS.get(status, '#9ca3af'),
                 },
             })
+        else:
+            print(f"[geocode] FAILED survey: '{addr[:80]}'")
+            failed_geocodes.append(addr[:200])
 
-    return {'type': 'FeatureCollection', 'features': features}
+    return {'type': 'FeatureCollection', 'features': features}, failed_geocodes
