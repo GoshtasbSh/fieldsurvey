@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ks-field-v1';
+const CACHE_NAME = 'ks-field-v2';
 const SHELL = [
   './index.html',
   './login.html',
@@ -42,7 +42,13 @@ self.addEventListener('fetch', e => {
       caches.match(e.request).then(cached => {
         if (cached) return cached;
         return fetch(e.request).then(res => {
-          if (res.ok) {
+          // Tile servers don't send CORS headers, so the offline-map
+          // pre-cacher fetches them with mode:'no-cors' which yields
+          // opaque responses (res.ok === false, status === 0). Cache
+          // those too — `caches.put` accepts opaque responses, the
+          // browser just won't let JS read the body. That's fine: the
+          // map renders them as <img> elements.
+          if (res.ok || res.type === 'opaque') {
             const clone = res.clone();
             caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
           }

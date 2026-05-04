@@ -1001,6 +1001,21 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
       <div class="ma-meta" id="mob-admin-code-meta"></div>
     </div>
 
+    <!-- Offline maps pre-cache: warms the SW cache for the survey
+         bounding box (Keystone Heights / High Ridge Estates) so
+         surveyors can drop pins on satellite imagery in airplane mode. -->
+    <div class="ma-section">
+      <div class="ma-label">Offline maps</div>
+      <div class="ma-row">
+        <button class="ma-btn" id="mob-admin-btn-precache"
+                onclick="precacheOfflineMaps()">Download maps for offline use</button>
+      </div>
+      <div class="ma-meta" id="mob-admin-precache-meta">
+        Downloads ~10–25 MB. Once finished, surveyors can drop pins
+        in airplane mode and see the satellite imagery + streets layers.
+      </div>
+    </div>
+
     <!-- Make admin by email -->
     <div class="ma-section">
       <div class="ma-label">Make admin by email</div>
@@ -1887,7 +1902,18 @@ async function confirmDeletePoint(id) {
     return;
   }
 
-  if (!navigator.onLine) { showToast('Delete requires internet', '#f59e0b'); return; }
+  if (!navigator.onLine) {
+    // Offline delete on a real point: queue + remove locally. syncQueue()
+    // replays the delete on reconnect. Idempotent on the server side
+    // (delete-point returns ok+missing for already-deleted ids).
+    queuePush({ op: 'delete', id, collector_id: currentUser?.id || null,
+                _guest: !!IS_GUEST });
+    _allFieldPoints = _allFieldPoints.filter(x => x.id !== id);
+    removePointFromMap(id);
+    recalcCounts(_allFieldPoints);
+    showToast('Delete queued — will sync when online', '#f59e0b', true);
+    return;
+  }
   try {
     if (IS_GUEST) {
       // Guest delete goes through /api/guest action=delete-point so the
@@ -2006,8 +2032,22 @@ async function savePoint(coords) {
       return;
     }
     if (!navigator.onLine) {
-      showToast('Edit requires internet', '#f59e0b');
-      if (btn) { btn.classList.remove('saving'); btn.disabled = false; btn.textContent = '✓  Update Point'; }
+      // Offline edit on a real (already-synced) point: queue the patch
+      // and apply it locally. syncQueue() replays the same payload over
+      // the network when connectivity returns.
+      const i = _allFieldPoints.findIndex(x => x.id === _editPointId);
+      if (i >= 0) {
+        _allFieldPoints[i].status = status;
+        _allFieldPoints[i].notes  = notes;
+        replacePointOnMap({ ..._allFieldPoints[i], status, notes, color });
+      }
+      queuePush({ op: 'edit', id: _editPointId, status, notes,
+                  collector_id: currentUser?.id || null,
+                  _guest: !!IS_GUEST });
+      recalcCounts(_allFieldPoints);
+      if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Updated (queued)!'; btn.disabled = false; }
+      showToast('Edit queued — will sync when online', '#f59e0b', true);
+      setTimeout(() => closeBottomSheet(), 750);
       return;
     }
     try {
@@ -2694,17 +2734,22 @@ async function syncQueueGuest() {
   let okCount = 0;
   for (const p of offlineQueue) {
     let attempt = 0, success = false;
+    // Each queue entry has an op tag — 'add' (default for legacy rows
+    // without an op field), 'edit', or 'delete'. Build the right
+    // /api/guest body for each so a queue containing a mix of all three
+    // replays in order without losing intent.
+    const op = p.op || 'add';
+    const guestBody = (() => {
+      if (op === 'edit')   return { action: 'edit-point',   session_id: GUEST.session_id, point_id: p.id, status: p.status, notes: p.notes };
+      if (op === 'delete') return { action: 'delete-point', session_id: GUEST.session_id, point_id: p.id };
+      return { action: 'add-point', session_id: GUEST.session_id, lat: p.lat, lon: p.lon, status: p.status, notes: p.notes, is_offline: true };
+    })();
     while (attempt < 3 && !success) {
       try {
         const r = await fetch('/api/guest', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            action: 'add-point',
-            session_id: GUEST.session_id,
-            lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
-            is_offline: true,
-          }),
+          body:    JSON.stringify(guestBody),
         });
         if (r.status === 401) {
           // Session expired mid-replay — bail and prompt re-claim. Keep
@@ -2717,7 +2762,10 @@ async function syncQueueGuest() {
         if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
         okCount++;
         success = true;
-        if (data.id) {
+        // For add ops only, swap the temp 'q…' id for the real UUID
+        // returned by the server so the ghost dot disappears without a
+        // page reload. Edit/delete carry the real id already.
+        if (op === 'add' && data.id) {
           const qi = _allFieldPoints.findIndex(x => x.id === p.id);
           if (qi >= 0) _allFieldPoints[qi] = { ..._allFieldPoints[qi], id: data.id };
           const src = map && map.getSource('survey');
@@ -2759,32 +2807,49 @@ async function syncQueue() {
       continue;
     }
     const insertCollector = queuedCollector || currentUser?.id || null;
+    const op = p.op || 'add';
     let attempt = 0, success = false;
     while (attempt < 3 && !success) {
       try {
-        const { data, error } = await sb.from('field_survey_points').insert({
-          lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
-          collector_id: insertCollector, collector_name: p.collector_name,
-        }).select('id').single();
-        if (error) throw error;
-        if (data) {
-          locallyAdded.add(data.id);
-          setTimeout(() => locallyAdded.delete(data.id), 10_000);
-          okCount++;
-          success = true;
-          // Swap the temp 'q…' ID for the real UUID so the ghost dot disappears
-          // without a page reload. The realtime INSERT is blocked by locallyAdded.
-          const qi = _allFieldPoints.findIndex(x => x.id === p.id);
-          if (qi >= 0) _allFieldPoints[qi] = { ..._allFieldPoints[qi], id: data.id };
-          const src = map && map.getSource('survey');
-          if (src) src.setData(pointsToGeoJSON(_allFieldPoints));
+        if (op === 'edit') {
+          // RLS handles the auth boundary — members touch their own
+          // pin only, admins touch any pin (migration 16). No
+          // collector_id filter here so admin edits aren't blocked.
+          const { error } = await sb.from('field_survey_points')
+            .update({ status: p.status, notes: p.notes })
+            .eq('id', p.id);
+          if (error) throw error;
+        } else if (op === 'delete') {
+          const { error } = await sb.from('field_survey_points')
+            .delete().eq('id', p.id);
+          if (error) throw error;
+        } else {
+          // add (default for legacy queue rows without an op field)
+          const { data, error } = await sb.from('field_survey_points').insert({
+            lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
+            collector_id: insertCollector, collector_name: p.collector_name,
+          }).select('id').single();
+          if (error) throw error;
+          if (data) {
+            locallyAdded.add(data.id);
+            setTimeout(() => locallyAdded.delete(data.id), 10_000);
+            // Swap the temp 'q…' ID for the real UUID so the ghost
+            // dot disappears without a reload. The realtime INSERT
+            // is blocked by locallyAdded.
+            const qi = _allFieldPoints.findIndex(x => x.id === p.id);
+            if (qi >= 0) _allFieldPoints[qi] = { ..._allFieldPoints[qi], id: data.id };
+            const src = map && map.getSource('survey');
+            if (src) src.setData(pointsToGeoJSON(_allFieldPoints));
+          }
         }
+        okCount++;
+        success = true;
       } catch (e) {
         attempt++;
         if (attempt < 3) {
           await new Promise(r => setTimeout(r, 400 * Math.pow(2, attempt)));
         } else {
-          console.warn('Sync failed after retries, keeping in queue:', e);
+          console.warn(`Sync ${op} failed after retries, keeping in queue:`, e);
           remaining.push(p);
         }
       }
@@ -2799,18 +2864,130 @@ async function syncQueue() {
   if (okCount) showToast(`Synced ${okCount}${remaining.length ? ` (${remaining.length} still queued)` : ''}`, '#34d399');
   else if (remaining.length) showToast(`${remaining.length} point(s) could not sync — will retry`, '#f59e0b', true);
 }
+// Survey area bounding box (Keystone Heights + High Ridge Estates).
+// Pre-cache fetches every map tile inside this box at zooms 14–17 across
+// all three basemaps so surveyors can survey in airplane mode and still
+// see imagery. The service worker's cache-first rule for tile servers
+// means a successful fetch here = available offline forever.
+const SURVEY_BBOX = { minLat: 29.78, maxLat: 29.84, minLon: -82.04, maxLon: -81.94 };
+const PRECACHE_ZOOMS = [14, 15, 16, 17];
+const TILE_TEMPLATES = {
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  osm:       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  light:     'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+};
+
+function _lon2tile(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
+function _lat2tile(lat, z) {
+  const r = lat * Math.PI / 180;
+  return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z));
+}
+
+function _enumerateSurveyTiles() {
+  const urls = [];
+  for (const z of PRECACHE_ZOOMS) {
+    const xMin = _lon2tile(SURVEY_BBOX.minLon, z);
+    const xMax = _lon2tile(SURVEY_BBOX.maxLon, z);
+    const yMin = _lat2tile(SURVEY_BBOX.maxLat, z);
+    const yMax = _lat2tile(SURVEY_BBOX.minLat, z);
+    for (let x = Math.min(xMin, xMax); x <= Math.max(xMin, xMax); x++) {
+      for (let y = Math.min(yMin, yMax); y <= Math.max(yMin, yMax); y++) {
+        for (const [, tpl] of Object.entries(TILE_TEMPLATES)) {
+          urls.push(tpl.replace('{z}', z).replace('{x}', x).replace('{y}', y));
+        }
+      }
+    }
+  }
+  return urls;
+}
+
+async function precacheOfflineMaps() {
+  const btn  = document.getElementById('mob-admin-btn-precache');
+  const meta = document.getElementById('mob-admin-precache-meta');
+  if (!btn || !meta) return;
+  if (!navigator.onLine) {
+    showToast('Connect to internet first to download maps', '#ef4444');
+    return;
+  }
+  const urls = _enumerateSurveyTiles();
+  const total = urls.length;
+  btn.disabled = true;
+  let done = 0, failed = 0;
+  meta.textContent = `Starting… 0 / ${total} tiles`;
+  // Fetch with a small concurrency window so the SW caches each tile
+  // without overwhelming the network. Each fetch follows the SW's
+  // cache-first rule, so already-cached tiles are essentially free.
+  const CONCURRENCY = 6;
+  let cursor = 0;
+  const startedAt = Date.now();
+  const worker = async () => {
+    while (cursor < urls.length) {
+      const i = cursor++;
+      try {
+        const r = await fetch(urls[i], { mode: 'no-cors', cache: 'reload' });
+        // mode:'no-cors' yields opaque responses; the SW still caches
+        // them, which is what we want. r.ok is meaningless for opaque.
+        done++;
+      } catch (e) {
+        failed++;
+      }
+      if ((done + failed) % 25 === 0 || (done + failed) === total) {
+        meta.textContent = `${done + failed} / ${total} tiles · ${failed} failed`;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  const secs = Math.round((Date.now() - startedAt) / 1000);
+  meta.textContent = `✓ Done in ${secs}s — ${done} cached, ${failed} failed.`;
+  showToast(`Maps downloaded: ${done}/${total} tiles`, '#34d399');
+  btn.disabled = false;
+}
+window.precacheOfflineMaps = precacheOfflineMaps;
+
+// Auto-fallback basemap when offline. The Esri Satellite tile server is
+// network-only — once you go offline in an area you haven't already
+// panned over, every Satellite tile shows up as a blank gray square. The
+// Streets (OSM) basemap typically caches more aggressively, and the Light
+// (Carto) basemap is even smaller per tile, so they degrade more
+// gracefully. When the browser fires the offline event we save the
+// user's preferred basemap and swap to Streets if they were on Satellite;
+// when online returns we restore their choice.
+let _userPreferredBasemap = null;
+let _autoSwappedOffline   = false;
+
+function _autoFallbackBasemapOffline() {
+  const cur = document.getElementById('bm-sel')?.value || 'satellite';
+  if (cur === 'satellite') {
+    _userPreferredBasemap = cur;
+    _autoSwappedOffline   = true;
+    setBasemapBtn('osm');
+    showToast('Offline — switched to Streets basemap', '#f59e0b');
+  }
+}
+
+function _autoRestoreBasemapOnline() {
+  if (_autoSwappedOffline && _userPreferredBasemap) {
+    setBasemapBtn(_userPreferredBasemap);
+    _autoSwappedOffline   = false;
+    _userPreferredBasemap = null;
+  }
+}
+
 function initOffline() {
   const bar = document.getElementById('offline-bar');
   function update() {
     if (!navigator.onLine) {
       bar.classList.add('visible'); bar.classList.remove('syncing');
       document.getElementById('offline-msg').textContent = '⚡ Offline — points saved locally';
+      _autoFallbackBasemapOffline();
     } else if (offlineQueue.length) {
       bar.classList.add('visible','syncing');
       document.getElementById('offline-msg').textContent = '↑ Syncing queued points…';
+      _autoRestoreBasemapOnline();
       syncQueue().then(() => bar.classList.remove('visible','syncing'));
     } else {
       bar.classList.remove('visible','syncing');
+      _autoRestoreBasemapOnline();
     }
   }
   window.addEventListener('online', update);
