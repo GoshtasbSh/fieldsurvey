@@ -2349,16 +2349,31 @@ async function runDailyRefresh() {
     }
     const data = await res.json();
     if (data.refreshed) {
-      // Reload contact points with merged field data
+      // Reload contact points with merged field data + refresh the live
+      // field layer so the unified count (which dedupes CSV-appended
+      // field-as-features against fieldPointsData) reflects everything
+      // the cron just merged.
       const pts = await (await fetch('/api/survey-points')).json();
       surveyData = pts;
       map.getSource('survey')?.setData(pts);
       map.getSource('survey-clustered')?.setData(pts);
+      await loadFieldPointsFromServer();
       const ana = await (await fetch('/api/analysis')).json();
       analysisData = ana;
+      // stamp + filters keep CSV/field layers from rendering the same
+      // pin twice now that field rows live in both sources.
+      if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
+      if (typeof applyFilters === 'function') applyFilters();
       buildAnalysis();
       await loadAnalysisMeta();
-      alert(`Refresh complete: ${data.new_field_points} new field visits merged (${data.total_points} total).\n\n"${data.label}"`);
+      // Quote the unified count the panel actually shows so the alert
+      // and the panel match (the cached blob's length and the live
+      // dedup-count can differ by ±1 when field points were newly
+      // merged but their /api/field-points entries still exist).
+      const live = (typeof computeUnifiedStatusCounts === 'function')
+        ? Object.values(computeUnifiedStatusCounts()).reduce((s,n)=>s+n,0)
+        : data.total_points;
+      alert(`Refresh complete: ${data.new_field_points} new field visit${data.new_field_points === 1 ? '' : 's'} merged.\nTotal community contacts: ${live}.\n\n"${data.label}"`);
     } else {
       alert(`No new field data found since last analysis.\n\n${data.reason}`);
     }

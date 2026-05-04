@@ -186,10 +186,26 @@ def _run_refresh() -> dict:
 
     # Recompute and persist analysis stats so the dashboard's Analysis tab
     # reflects today's field-point additions rather than the last upload.
+    # NB: scripts/ingest.py is the only thing that computes parcel_stats
+    # (needs geopandas/shapely — too heavy for a Vercel function). We must
+    # PRESERVE the previous analysis blob's parcel_stats and any other
+    # server-only fields so the Parcels tab stays populated. Without this
+    # merge, every daily-refresh tick wipes the parcel analysis.
     try:
+        existing_ana = load_cached("analysis") or {}
+        recomputed = _compute_analysis(features)
+        # Carry forward anything ingest.py added that we don't recompute.
+        for key, val in (existing_ana or {}).items():
+            if key not in recomputed or not recomputed.get(key):
+                recomputed[key] = val
+        # Always preserve parcel_stats verbatim — _compute_analysis produces
+        # {} for it, which would clobber the real value above when both keys
+        # exist.
+        if existing_ana.get("parcel_stats"):
+            recomputed["parcel_stats"] = existing_ana["parcel_stats"]
         sb.table("keystone_dashboard_data").upsert({
             "data_type": "analysis",
-            "payload": _compute_analysis(features),
+            "payload": recomputed,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="data_type").execute()
     except Exception as e:
