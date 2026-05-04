@@ -129,7 +129,7 @@ async function fetchIaqPoints() {
       ? (await sbClient.auth.getSession()).data?.session
       : null;
     if (session?.access_token) {
-      const r = await fetch('/api/iaq-points-full', {
+      const r = await fetch('/api/iaq-points?full=1', {
         headers: { 'Authorization': `Bearer ${session.access_token}` },
       });
       if (r.ok) return r;
@@ -146,7 +146,7 @@ async function loadData() {
       fetch('/api/parcels'),
       fetch('/api/analysis'),
       fetchIaqPoints(),
-      fetch('/api/iaq-analysis'),
+      fetch('/api/analysis?type=iaq'),
     ]);
     const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
     const _safeJson = async (res, fallback) => {
@@ -214,7 +214,7 @@ async function refreshAllData() {
       fetch('/api/parcels'),
       fetch('/api/analysis'),
       fetchIaqPoints(),
-      fetch('/api/iaq-analysis'),
+      fetch('/api/analysis?type=iaq'),
     ]);
     const safe = async (res, fb) => {
       if (!res || !res.ok) return fb;
@@ -2068,7 +2068,7 @@ function setupUI() {
 
 async function loadAnalysisMeta() {
   try {
-    const res = await fetch('/api/analysis-meta');
+    const res = await fetch('/api/analysis?meta=1');
     if (!res.ok) return;
     const meta = await res.json();
     const badge = document.getElementById('analyzed-badge');
@@ -2172,7 +2172,7 @@ async function restoreVersion(id, label, type) {
         token = session?.access_token || null;
       }
     } catch { /* server will 401 */ }
-    const res = await fetch(`/api/versions/restore?id=${id}`, {
+    const res = await fetch(`/api/versions?id=${id}`, {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     });
@@ -2196,7 +2196,7 @@ async function restoreVersion(id, label, type) {
     } else {
       const iaqPts = await (await fetchIaqPoints()).json();
       iaqData = iaqPts;
-      const iaqAna = await (await fetch('/api/iaq-analysis')).json();
+      const iaqAna = await (await fetch('/api/analysis?type=iaq')).json();
       if (iaqAna.loaded) iaqAnalysis = iaqAna;
       updateIAQOnMap();
       buildSurveyResultsTab(iaqAnalysis);
@@ -2853,7 +2853,7 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
 
 async function uploadFile(zone, endpoint, file) {
   const origHtml = zone.innerHTML;
-  const isIAQ = endpoint === '/api/upload/iaq';
+  const isIAQ = endpoint.includes('type=iaq');
 
   // Client-side validation before any network request
   const MAX_MB = 15;

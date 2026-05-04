@@ -382,10 +382,10 @@ async function doGuest(e) {
   if (!code) { showMsg('guest-msg', 'Enter today’s invite code.', 'error'); return; }
   btn.disabled = true; btn.textContent = 'Starting…';
   try {
-    const r = await fetch('/api/guest/claim', {
+    const r = await fetch('/api/guest', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name, code }),
+      body:    JSON.stringify({ action: 'claim', name, code }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.ok) {

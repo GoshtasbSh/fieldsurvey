@@ -1205,10 +1205,10 @@ function showGuestBanner() {
 }
 async function loadGuestPoints() {
   try {
-    const r = await fetch('/api/guest/my-points', {
+    const r = await fetch('/api/guest', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ session_id: GUEST.session_id }),
+      body:    JSON.stringify({ action: 'my-points', session_id: GUEST.session_id }),
     });
     if (r.status === 401) { handleGuestExpired(); return; }
     const data = await r.json().catch(() => ({}));
@@ -1234,10 +1234,10 @@ function startGuestHeartbeat() {
   setInterval(async () => {
     if (!IS_GUEST || document.hidden || !navigator.onLine) return;
     try {
-      const r = await fetch('/api/guest/heartbeat', {
+      const r = await fetch('/api/guest', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ session_id: GUEST.session_id }),
+        body:    JSON.stringify({ action: 'heartbeat', session_id: GUEST.session_id }),
       });
       if (r.status === 401) { handleGuestExpired(); return; }
       const d = await r.json().catch(() => ({}));
@@ -1894,10 +1894,11 @@ async function savePoint(coords) {
       showToast(status + ' — queued', color, true);
     } else {
       try {
-        const r = await fetch('/api/guest/add-point', {
+        const r = await fetch('/api/guest', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({
+            action: 'add-point',
             session_id: GUEST.session_id,
             lat: newPt.lat, lon: newPt.lon,
             status, notes,
@@ -2330,10 +2331,11 @@ async function syncQueueGuest() {
     let attempt = 0, success = false;
     while (attempt < 3 && !success) {
       try {
-        const r = await fetch('/api/guest/add-point', {
+        const r = await fetch('/api/guest', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({
+            action: 'add-point',
             session_id: GUEST.session_id,
             lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
             is_offline: true,
