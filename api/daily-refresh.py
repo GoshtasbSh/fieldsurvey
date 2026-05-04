@@ -8,16 +8,66 @@ local admin via scripts/ingest.py when new parcel or contact data arrives.
 Protected by CRON_SECRET header when called from Vercel's scheduler.
 """
 from http.server import BaseHTTPRequestHandler
-from datetime import date, datetime
+from datetime import datetime, timezone
 import os
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
 from _lib import supabase_admin, load_cached, json_response, empty_geojson, haversine_m
 
+# Status colours — mirrors _processing.STATUS so the analysis blob is consistent
+# with what IAQ and survey uploads produce. Kept inline to avoid pulling pandas.
+_STATUS_COLORS = {
+    "Completed":      "#10b981",
+    "No Answer":      "#f97316",
+    "Inaccessible":   "#ef4444",
+    "Not Interested": "#8b5cf6",
+    "Left Info":      "#3b82f6",
+    "Vacant":         "#6b7280",
+    "Follow Up":      "#06b6d4",
+    "Other":          "#ec4899",
+    "Unknown":        "#9ca3af",
+}
 
-def _field_row_to_feature(row: dict) -> dict:
-    lon = row.get("lon"); lat = row.get("lat")
+
+def _compute_analysis(features: list) -> dict:
+    """Minimal contact-level analysis — same output shape as compute_contact_analysis()
+    in _processing.py, but uses only stdlib so daily-refresh stays lightweight."""
+    sc: dict = {}
+    st_count: dict = {}
+    st_status: dict = {}
+    for f in features:
+        s  = f["properties"].get("status", "Unknown")
+        sn = f["properties"].get("street_name", "Unknown")
+        sc[s] = sc.get(s, 0) + 1
+        st_count[sn] = st_count.get(sn, 0) + 1
+        if sn not in st_status:
+            st_status[sn] = {}
+        st_status[sn][s] = st_status[sn].get(s, 0) + 1
+    total = len(features)
+    comp  = sc.get("Completed", 0)
+    return {
+        "total_points":    total,
+        "completion_rate": round(comp / total * 100, 1) if total else 0,
+        "status_counts":   sc,
+        "status_colors":   _STATUS_COLORS,
+        "streets": [
+            {"name": n, "count": c, "statuses": st_status.get(n, {})}
+            for n, c in sorted(st_count.items(), key=lambda x: -x[1])
+        ],
+        "parcel_stats": {},
+    }
+
+
+def _field_row_to_feature(row: dict) -> dict | None:
+    # NB: field_survey_points carries no address column — surveyors mark the
+    # GPS point and add notes only. We deliberately do not surface any
+    # address-like field here so a future SELECT extension can't leak PII
+    # into the public dashboard blob.
+    lon = row.get("lon")
+    lat = row.get("lat")
+    if lon is None or lat is None:
+        return None  # skip rows with no valid coordinates
     return {
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [lon, lat]},
@@ -25,11 +75,11 @@ def _field_row_to_feature(row: dict) -> dict:
             "source": "field",
             "field_point_id": row.get("id"),
             "status": row.get("status") or "Unknown",
+            "street_name": "Field Survey",  # mirrors app.py _field_pts_to_geojson_features
             "notes": row.get("notes") or "",
             "collector": row.get("collector_name"),
             "collector_id": row.get("collector_id"),
             "collected_at": row.get("collected_at"),
-            "address": row.get("address") or "",
         },
     }
 
@@ -53,15 +103,31 @@ def _run_refresh() -> dict:
     except Exception as e:
         return {"refreshed": False, "reason": f"Could not read versions: {e}"}
 
-    # New field points since then
+    # New field points since then — paginate to avoid silent 1000-row PostgREST cap.
+    cap_reached = False
     try:
-        res = (
-            sb.table("field_survey_points")
-            .select("id, lat, lon, status, notes, collector_id, collector_name, collected_at")
-            .gt("collected_at", last_at)
-            .execute()
-        )
-        new_rows = res.data or []
+        new_rows: list = []
+        PAGE = 1000
+        HARD_CAP = 100_000
+        offset = 0
+        while offset < HARD_CAP:
+            page = (
+                sb.table("field_survey_points")
+                .select("id, lat, lon, status, notes, collector_id, collector_name, collected_at")
+                .gt("collected_at", last_at)
+                .range(offset, offset + PAGE - 1)
+                .execute()
+            ).data or []
+            if not page:
+                break
+            new_rows.extend(page)
+            if len(page) < PAGE:
+                break
+            offset += PAGE
+        cap_reached = offset >= HARD_CAP and len(new_rows) >= HARD_CAP
+        if cap_reached:
+            print(f"[daily-refresh] WARNING: field_survey_points capped at {HARD_CAP} rows — "
+                  "points beyond this limit were NOT merged. Investigate if table is large.")
     except Exception as e:
         return {"refreshed": False, "reason": f"Could not read field points: {e}"}
 
@@ -69,10 +135,12 @@ def _run_refresh() -> dict:
         return {"refreshed": False, "reason": "No new field data since last snapshot",
                 "last_analysis": last_at}
 
-    # Load existing cached survey-points blob and append
-    existing = load_cached("survey_points") or empty_geojson()
+    # Load existing cached community-contact blob and append.
+    # NB: must use 'community_contact' — the data_type every read endpoint queries.
+    # (Earlier versions used 'survey_points', which was a dead key.)
+    existing = load_cached("community_contact") or empty_geojson()
     features = list(existing.get("features") or [])
-    new_features = [_field_row_to_feature(r) for r in new_rows]
+    new_features = [f for f in (_field_row_to_feature(r) for r in new_rows) if f is not None]
 
     # Upgrade new field points that have a Qualtric IAQ survey within 50 m.
     iaq_stored = load_cached("iaq_survey") or {}
@@ -94,14 +162,14 @@ def _run_refresh() -> dict:
     features.extend(new_features)
     merged = {"type": "FeatureCollection", "features": features}
 
-    label = f"Daily Update {date.today().isoformat()} — {len(new_rows)} new field visits ({len(features)} total)"
+    label = f"Daily Update {datetime.now(timezone.utc).date().isoformat()} — {len(new_rows)} new field visits ({len(features)} total)"
 
     # Persist merged blob + version snapshot
     try:
         sb.table("keystone_dashboard_data").upsert({
-            "data_type": "survey_points",
+            "data_type": "community_contact",
             "payload": merged,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="data_type").execute()
         sb.table("keystone_analysis_versions").insert({
             "data_type": "community_contact",
@@ -112,15 +180,37 @@ def _run_refresh() -> dict:
     except Exception as e:
         return {"refreshed": False, "reason": f"Write failed: {e}"}
 
+    # Recompute and persist analysis stats so the dashboard's Analysis tab
+    # reflects today's field-point additions rather than the last upload.
+    try:
+        sb.table("keystone_dashboard_data").upsert({
+            "data_type": "analysis",
+            "payload": _compute_analysis(features),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="data_type").execute()
+    except Exception as e:
+        pass  # non-fatal — blob already saved
+
     return {"refreshed": True, "new_field_points": len(new_rows),
-            "total_points": len(features), "label": label}
+            "total_points": len(features), "label": label,
+            "cap_reached": cap_reached}
 
 
 def _authorized(headers) -> bool:
-    """Allow when CRON_SECRET is unset (local dev) or the caller matches."""
+    """Bearer-token check against CRON_SECRET. Fails closed in production:
+    if the env var is missing on Vercel the cron is rejected, preventing
+    drive-by anonymous writes against the service-role key.
+
+    Local-dev override: set CRON_SECRET="dev" (or anything) to allow curl.
+    """
     secret = os.environ.get("CRON_SECRET", "")
     if not secret:
-        return True
+        # Production deployments MUST configure CRON_SECRET. Refuse otherwise.
+        if os.environ.get("VERCEL_ENV") == "production":
+            return False
+        # Outside Vercel production, allow local dev only when
+        # explicitly opted in via KEYSTONE_ALLOW_UNAUTH_CRON=1.
+        return os.environ.get("KEYSTONE_ALLOW_UNAUTH_CRON") == "1"
     got = headers.get("authorization", "")
     return got == f"Bearer {secret}"
 

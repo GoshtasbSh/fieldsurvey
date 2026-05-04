@@ -1,7 +1,8 @@
-# Vercel Python Functions — minimal runtime deps.
-# Vercel reads this file (not api/requirements.txt) when building api/*.py.
-# Do NOT add geopandas/fiona/shapely — they are too large for Vercel's 250MB
-# function bundle limit and are only needed for local ingest. Local deps live
-# in requirements-local.txt.
+# Root requirements.txt — Vercel reads api/requirements.txt for functions in
+# api/ (closest requirements.txt wins). This root file is effectively unused
+# for the api/ functions; it exists as a project-level marker.
+# Do NOT add geopandas/fiona here — they exceed Vercel's 250MB bundle limit.
+# - api/requirements.txt  → packages for Vercel functions (pandas, shapely, etc.)
+# - requirements-local.txt → full local dev stack (fastapi, uvicorn, geopandas)
 
 supabase>=2.5.0

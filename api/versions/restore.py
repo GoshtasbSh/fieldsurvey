@@ -8,11 +8,16 @@ from urllib.parse import urlparse, parse_qs
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
-from _lib import supabase_admin, json_response
+from _lib import supabase_admin, json_response, require_auth
+from _processing import compute_contact_analysis
 
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # Restoring a historical snapshot rewrites production data via the
+        # service-role key — must require an authenticated caller.
+        if require_auth(self) is None:
+            return  # 401 already written
         qs  = parse_qs(urlparse(self.path).query)
         raw = qs.get('id', [''])[0]
         if not raw or not raw.isdigit():
@@ -38,6 +43,16 @@ class handler(BaseHTTPRequestHandler):
                 {'data_type': 'community_contact', 'payload': payload},
                 on_conflict='data_type',
             ).execute()
+            # Recompute analysis so the dashboard tab shows stats consistent
+            # with the restored snapshot, not the previous upload.
+            try:
+                contact_analysis = compute_contact_analysis(payload.get('features', []))
+                sb.table('keystone_dashboard_data').upsert(
+                    {'data_type': 'analysis', 'payload': contact_analysis},
+                    on_conflict='data_type',
+                ).execute()
+            except Exception:
+                pass  # non-fatal — the contact blob is already restored
             return json_response(self, 200, {
                 'restored': True,
                 'type':     'community_contact',

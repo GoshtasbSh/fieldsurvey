@@ -17,14 +17,15 @@ import sys
 import pathlib
 
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import json_response
+from _lib import json_response, require_auth
 
 
 def _probe():
     report = {
         "env": {
             "SUPABASE_URL_set": bool(os.environ.get("SUPABASE_URL")),
-            "SUPABASE_URL_value": os.environ.get("SUPABASE_URL", "")[:40],
+            # Don't echo any portion of the URL — even the project-id prefix
+            # is reconnaissance-useful. Set-only is enough.
             "SUPABASE_ANON_KEY_set": bool(os.environ.get("SUPABASE_ANON_KEY")),
             "SUPABASE_ANON_KEY_length": len(os.environ.get("SUPABASE_ANON_KEY", "")),
             "SUPABASE_SERVICE_ROLE_KEY_set": bool(os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
@@ -97,6 +98,10 @@ def _probe():
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        # Diagnostic info reveals env-var presence and Supabase reachability.
+        # Even with values masked, that's reconnaissance-useful. Require auth.
+        if require_auth(self) is None:
+            return  # 401 already written
         try:
             json_response(self, 200, _probe())
         except Exception as e:

@@ -1270,9 +1270,14 @@ function addSurveyLayers(pts) {
     const ownerTag = isMine
       ? '<span class="pp-badge pp-badge-mine">You</span>'
       : '<span class="pp-badge pp-badge-team">Team</span>';
-    // Store ID in module variable so onclick handlers can read it without
-    // embedding the ID string inside an onclick attribute (XSS-safe).
+    // Enforce single-popup invariant: close any existing popup before opening
+    // a new one. This prevents _activePopupPointId from being stale when the
+    // user taps two dots in quick succession.
+    document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
     _activePopupPointId = p.id;
+    // Pass the point ID as a literal into each onclick so the handler is
+    // unambiguous even if _activePopupPointId is somehow overwritten.
+    const eid = CSS.escape(String(p.id));
     new maplibregl.Popup({ offset:14, maxWidth:'240px' })
       .setLngLat(coords)
       .setHTML(`
@@ -1285,8 +1290,8 @@ function addSurveyLayers(pts) {
         <div class="pp-meta">🕐 ${p.time}</div>
         ${p.notes ? `<div class="pp-notes">"${p.notes}"</div>` : ''}
         ${isMine ? `<div class="pp-actions">
-          <button class="pp-btn pp-btn-edit"   onclick="_handlePopupEdit()">✎ Edit</button>
-          <button class="pp-btn pp-btn-delete" onclick="_handlePopupDelete()">✕ Delete</button>
+          <button class="pp-btn pp-btn-edit"   onclick="_handlePopupEdit('${p.id}')">✎ Edit</button>
+          <button class="pp-btn pp-btn-delete" onclick="_handlePopupDelete('${p.id}')">✕ Delete</button>
         </div>` : ''}
       `)
       .addTo(map);
@@ -1391,10 +1396,23 @@ function addIAQLayer(iaqPts) {
 /* ── LOAD SUPABASE DATA ── */
 async function loadSupabaseData() {
   try {
-    const { data: pts } = await sb.from('field_survey_points')
-      .select('id,lat,lon,status,notes,collector_id,collector_name,collected_at')
-      .order('collected_at', { ascending: false }).limit(2000);
-    _allFieldPoints = pts || [];
+    // Paginate so the map never silently drops points past a fixed limit.
+    const PAGE = 1000;
+    const HARD_CAP = 100000;
+    const all = [];
+    let from = 0;
+    while (from < HARD_CAP) {
+      const { data, error } = await sb.from('field_survey_points')
+        .select('id,lat,lon,status,notes,collector_id,collector_name,collected_at')
+        .order('collected_at', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error || !Array.isArray(data) || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    if (all.length >= HARD_CAP) console.warn(`field_survey_points: pagination capped at ${HARD_CAP}`);
+    _allFieldPoints = all;
     if (_allFieldPoints.length) map.getSource('survey').setData(pointsToGeoJSON(_allFieldPoints));
     recalcCounts(_allFieldPoints);
   } catch (e) { console.warn('Load field points failed:', e); }
@@ -1431,14 +1449,23 @@ function initRealtime() {
       // Counts don't change for teammates' points (they're only my progress)
     })
     .on('postgres_changes', { event:'UPDATE', schema:'public', table:'field_survey_points' }, ({ new: p }) => {
+      // Skip if user is mid-edit on this point — savePoint() owns the update.
+      if (p.id === _editPointId) return;
       const i = _allFieldPoints.findIndex(x => x.id === p.id);
       if (i >= 0) _allFieldPoints[i] = p;
       replacePointOnMap({ ...p, collector_name: p.collector_name || 'Surveyor' });
+      recalcCounts(_allFieldPoints);
     })
     .on('postgres_changes', { event:'DELETE', schema:'public', table:'field_survey_points' }, ({ old: p }) => {
       if (p && p.id) {
+        // If user is editing this point, close the sheet with a warning.
+        if (p.id === _editPointId) {
+          closeBottomSheet();
+          showToast('Point was deleted by a teammate', '#f59e0b');
+        }
         _allFieldPoints = _allFieldPoints.filter(x => x.id !== p.id);
         removePointFromMap(p.id);
+        recalcCounts(_allFieldPoints);
       }
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'user_presence' }, () => {
@@ -1509,6 +1536,7 @@ function openBottomSheet(lngLat) {
   addrEl.textContent = 'Finding address…';
   addrEl.classList.add('loading');
   reverseGeocode(lngLat.lat, lngLat.lng).then(addr => {
+    if (addr === null) return;  // request was superseded by a newer geocode
     addrEl.classList.remove('loading');
     addrEl.textContent = addr ? 'Near: ' + addr : '';
   });
@@ -1602,10 +1630,32 @@ function openEditSheet(id) {
 }
 
 async function confirmDeletePoint(id) {
-  if (!navigator.onLine) { showToast('Delete requires internet', '#f59e0b'); return; }
   const pt = _allFieldPoints.find(x => x.id === id);
   if (!pt) { showToast('Point not found', '#ef4444'); return; }
   if (!window.confirm(`Delete this "${pt.status}" point?\nThis cannot be undone.`)) return;
+
+  // Queued (local-only) points have id="q" + timestamp. They have NOT been
+  // written to Supabase yet, so a DB delete is a silent no-op. Remove from
+  // the offline queue and the local cache instead.
+  const isQueued = typeof id === 'string' && id.startsWith('q');
+  if (isQueued) {
+    const before = (offlineQueue || []).length;
+    offlineQueue = (offlineQueue || []).filter(p => {
+      // Match by lat/lon/collected_at — queued items don't store the synthetic id.
+      return !(p.lat === pt.lat && p.lon === pt.lon && p.collected_at === pt.collected_at);
+    });
+    if (offlineQueue.length < before) {
+      localStorage.setItem(_qKey(), JSON.stringify(offlineQueue));
+      updateQueueBadge();
+    }
+    _allFieldPoints = _allFieldPoints.filter(x => x.id !== id);
+    removePointFromMap(id);
+    recalcCounts(_allFieldPoints);
+    showToast('Queued point removed', '#ef4444');
+    return;
+  }
+
+  if (!navigator.onLine) { showToast('Delete requires internet', '#f59e0b'); return; }
   try {
     const { error } = await sb.from('field_survey_points')
       .delete()
@@ -1622,15 +1672,17 @@ async function confirmDeletePoint(id) {
   }
 }
 
-function _handlePopupEdit() {
-  const id = _activePopupPointId;
+function _handlePopupEdit(id) {
+  const resolvedId = id || _activePopupPointId;
+  if (!resolvedId) return;
   document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
-  openEditSheet(id);
+  openEditSheet(resolvedId);
 }
-function _handlePopupDelete() {
-  const id = _activePopupPointId;
+function _handlePopupDelete(id) {
+  const resolvedId = id || _activePopupPointId;
+  if (!resolvedId) return;
   document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
-  confirmDeletePoint(id);
+  confirmDeletePoint(resolvedId);
 }
 
 function appendNote(text) {
@@ -1657,6 +1709,29 @@ async function savePoint(coords) {
 
   // ── EDIT MODE ────────────────────────────────────────────────────────
   if (_editPointId) {
+    // Queued (local-only) points: update the offline queue entry instead of
+    // hitting Supabase, which would `.eq('id', 'q…')` and silently affect 0 rows.
+    const isQueued = typeof _editPointId === 'string' && _editPointId.startsWith('q');
+    if (isQueued) {
+      const i = _allFieldPoints.findIndex(x => x.id === _editPointId);
+      const target = i >= 0 ? _allFieldPoints[i] : null;
+      if (target) {
+        offlineQueue = (offlineQueue || []).map(p => {
+          if (p.lat === target.lat && p.lon === target.lon && p.collected_at === target.collected_at) {
+            return { ...p, status, notes, color };
+          }
+          return p;
+        });
+        localStorage.setItem(_qKey(), JSON.stringify(offlineQueue));
+        target.status = status; target.notes = notes; target.color = color;
+        replacePointOnMap({ ...target });
+        recalcCounts(_allFieldPoints);
+        if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Updated!'; btn.disabled = false; }
+        showToast('Queued point updated', color);
+        setTimeout(() => closeBottomSheet(), 750);
+      }
+      return;
+    }
     if (!navigator.onLine || !sb) {
       showToast('Edit requires internet', '#f59e0b');
       if (btn) { btn.classList.remove('saving'); btn.disabled = false; btn.textContent = '✓  Update Point'; }
@@ -1670,7 +1745,7 @@ async function savePoint(coords) {
       if (error) throw error;
       const i = _allFieldPoints.findIndex(x => x.id === _editPointId);
       if (i >= 0) { _allFieldPoints[i].status = status; _allFieldPoints[i].notes = notes; }
-      replacePointOnMap({ ..._allFieldPoints[i >= 0 ? i : 0], status, notes, color });
+      if (i >= 0) replacePointOnMap({ ..._allFieldPoints[i], status, notes, color });
       recalcCounts(_allFieldPoints);
       if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Updated!'; btn.disabled = false; }
       showToast('Point updated', color);
@@ -1693,7 +1768,11 @@ async function savePoint(coords) {
 
   const collectorId = currentUser?.id || null;
   if (!navigator.onLine || !sb) {
-    queuePush({ ...newPt, coords });
+    // Stamp the queued point with the user who is signed in NOW so a later
+    // sync flushes it under their identity even if they sign out before
+    // network returns. Without this, the queued point would be attributed
+    // to whoever happens to be signed in at sync time.
+    queuePush({ ...newPt, coords, collector_id: collectorId });
     const localId = 'q' + Date.now();
     _allFieldPoints.unshift({ ...newPt, id: localId, collector_id: collectorId });
     appendPointToMap({ ...newPt, id: localId, collector_id: collectorId });
@@ -1705,10 +1784,18 @@ async function savePoint(coords) {
         lat: newPt.lat, lon: newPt.lon, status, notes,
         collector_id: collectorId, collector_name: currentUser?.name,
       }).select('id').single();
-      if (data) { locallyAdded.add(data.id); insertedId = data.id; }
+      if (data) {
+        locallyAdded.add(data.id);
+        insertedId = data.id;
+        setTimeout(() => locallyAdded.delete(data.id), 10_000);
+      }
     } catch (err) {
       console.warn('Insert failed, queuing:', err);
-      queuePush({ ...newPt, coords });
+      // Stamp the queued point with the user who is signed in NOW so a later
+    // sync flushes it under their identity even if they sign out before
+    // network returns. Without this, the queued point would be attributed
+    // to whoever happens to be signed in at sync time.
+    queuePush({ ...newPt, coords, collector_id: collectorId });
     }
     const finalId = insertedId || ('l' + Date.now());
     _allFieldPoints.unshift({ ...newPt, id: finalId, collector_id: collectorId });
@@ -1716,6 +1803,9 @@ async function savePoint(coords) {
     showToast(status, color, false);
   }
 
+  // Null bsCoords immediately so a rapid second tap cannot re-enter savePoint()
+  // before the 750 ms closeBottomSheet() timer fires and create a duplicate row.
+  bsCoords = null;
   if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Saved!'; btn.disabled = false; }
   setTimeout(() => closeBottomSheet(), 750);
   pulsePoint(coords, color);
@@ -1723,57 +1813,33 @@ async function savePoint(coords) {
 }
 
 /* ── MAP DATA HELPERS ── */
+// All three helpers derive the GeoJSON directly from _allFieldPoints (the
+// authoritative in-memory list) instead of accessing src._data, which is an
+// undocumented MapLibre internal that breaks on style resets and version bumps.
 function appendPointToMap(p) {
-  const src = map.getSource('survey');
+  const src = map && map.getSource('survey');
   if (!src) return;
-  const data = src._data || { type:'FeatureCollection', features:[] };
-  const myId = currentUser?.id || null;
-  const collectorId = p.collector_id || null;
-  data.features.unshift({
-    type:'Feature',
-    geometry:{ type:'Point', coordinates:[p.lon, p.lat] },
-    properties:{
-      id:p.id, status:p.status, notes:p.notes||'',
-      collector:p.collector_name||'Surveyor',
-      collector_id: collectorId,
-      is_mine: !!(myId && collectorId && collectorId === myId),
-      collected_at: p.collected_at || new Date().toISOString(),
-      time: new Date(p.collected_at||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
-      color: STATUS_COLORS[p.status] || '#9ca3af',
-    },
-  });
-  src.setData(data);
+  // Only add if not already present (guard against double-call on realtime race)
+  if (!_allFieldPoints.find(x => x.id === p.id)) {
+    _allFieldPoints.unshift(p);
+  }
+  src.setData(pointsToGeoJSON(_allFieldPoints));
 }
 
 function replacePointOnMap(p) {
-  const src = map.getSource('survey');
+  const src = map && map.getSource('survey');
   if (!src) return;
-  const data = src._data || { type:'FeatureCollection', features:[] };
-  const idx = data.features.findIndex(f => f.properties && f.properties.id === p.id);
+  const idx = _allFieldPoints.findIndex(x => x.id === p.id);
   if (idx < 0) { appendPointToMap(p); return; }
-  const myId = currentUser?.id || null;
-  data.features[idx] = {
-    type:'Feature',
-    geometry:{ type:'Point', coordinates:[p.lon, p.lat] },
-    properties:{
-      ...data.features[idx].properties,
-      status:p.status, notes:p.notes||'',
-      collector:p.collector_name||data.features[idx].properties.collector||'Surveyor',
-      collector_id: p.collector_id || data.features[idx].properties.collector_id || null,
-      is_mine: !!(myId && p.collector_id && p.collector_id === myId),
-      collected_at: p.collected_at || data.features[idx].properties.collected_at,
-      color: STATUS_COLORS[p.status] || '#9ca3af',
-    },
-  };
-  src.setData(data);
+  _allFieldPoints[idx] = { ..._allFieldPoints[idx], ...p };
+  src.setData(pointsToGeoJSON(_allFieldPoints));
 }
 
 function removePointFromMap(id) {
-  const src = map.getSource('survey');
+  const src = map && map.getSource('survey');
   if (!src) return;
-  const data = src._data || { type:'FeatureCollection', features:[] };
-  data.features = data.features.filter(f => !(f.properties && f.properties.id === id));
-  src.setData(data);
+  _allFieldPoints = _allFieldPoints.filter(x => x.id !== id);
+  src.setData(pointsToGeoJSON(_allFieldPoints));
 }
 
 function pulsePoint(coords, color) {
@@ -2023,11 +2089,16 @@ function toggleSidebar() {
 }
 
 /* ── REVERSE GEOCODE ── */
+let _geocodeAbort = null;   // AbortController for in-flight reverse geocode requests
 async function reverseGeocode(lat, lng) {
+  // Cancel any previous in-flight request so a stale result from an earlier
+  // sheet open can't overwrite the address displayed for the current location.
+  _geocodeAbort?.abort();
+  _geocodeAbort = new AbortController();
   try {
     const r = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`,
-      { headers:{ 'Accept-Language':'en', 'User-Agent':'KeyStoneField/1.0' } }
+      { signal: _geocodeAbort.signal, headers:{ 'Accept-Language':'en', 'User-Agent':'KeyStoneField/1.0' } }
     );
     const d = await r.json();
     const a = d.address || {};
@@ -2035,7 +2106,10 @@ async function reverseGeocode(lat, lng) {
     const num  = a.house_number || '';
     if (road) return (num ? num + ' ' : '') + road;
     return (d.display_name || '').split(',').slice(0,2).join(', ');
-  } catch { return ''; }
+  } catch (e) {
+    if (e.name === 'AbortError') return null;  // silently drop superseded request
+    return '';
+  }
 }
 
 /* ── TOAST ── */
@@ -2049,18 +2123,22 @@ function showToast(msg, color, queued = false) {
 }
 
 /* ── OFFLINE QUEUE ── */
+// Key is scoped by user ID so one browser shared by multiple surveyors never
+// shows a previous user's pending-count badge on a fresh login.
+function _qKey() { return 'ks-queue-' + (currentUser?.id || 'anon'); }
+
 function loadQueueFromStorage() {
-  try { offlineQueue = JSON.parse(localStorage.getItem('ks-queue') || '[]'); } catch { offlineQueue = []; }
+  try { offlineQueue = JSON.parse(localStorage.getItem(_qKey()) || '[]'); } catch { offlineQueue = []; }
   updateQueueBadge();
 }
 function queuePush(pt) {
   offlineQueue.push(pt);
-  localStorage.setItem('ks-queue', JSON.stringify(offlineQueue));
+  localStorage.setItem(_qKey(), JSON.stringify(offlineQueue));
   updateQueueBadge();
 }
 function queueClear() {
   offlineQueue = [];
-  localStorage.removeItem('ks-queue');
+  localStorage.removeItem(_qKey());
   updateQueueBadge();
 }
 function updateQueueBadge() {
@@ -2078,15 +2156,34 @@ async function syncQueue() {
   const remaining = [];
   let okCount = 0;
   for (const p of offlineQueue) {
+    // Skip queued points belonging to a different signed-in user — RLS will
+    // reject them anyway, but failing fast keeps the badge accurate.
+    const queuedCollector = p.collector_id || null;
+    if (queuedCollector && currentUser?.id && queuedCollector !== currentUser.id) {
+      remaining.push(p);
+      continue;
+    }
+    const insertCollector = queuedCollector || currentUser?.id || null;
     let attempt = 0, success = false;
     while (attempt < 3 && !success) {
       try {
         const { data, error } = await sb.from('field_survey_points').insert({
           lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
-          collector_id: currentUser?.id, collector_name: p.collector_name,
+          collector_id: insertCollector, collector_name: p.collector_name,
         }).select('id').single();
         if (error) throw error;
-        if (data) { locallyAdded.add(data.id); okCount++; success = true; }
+        if (data) {
+          locallyAdded.add(data.id);
+          setTimeout(() => locallyAdded.delete(data.id), 10_000);
+          okCount++;
+          success = true;
+          // Swap the temp 'q…' ID for the real UUID so the ghost dot disappears
+          // without a page reload. The realtime INSERT is blocked by locallyAdded.
+          const qi = _allFieldPoints.findIndex(x => x.id === p.id);
+          if (qi >= 0) _allFieldPoints[qi] = { ..._allFieldPoints[qi], id: data.id };
+          const src = map && map.getSource('survey');
+          if (src) src.setData(pointsToGeoJSON(_allFieldPoints));
+        }
       } catch (e) {
         attempt++;
         if (attempt < 3) {
@@ -2099,11 +2196,13 @@ async function syncQueue() {
     }
   }
   offlineQueue = remaining;
-  localStorage.setItem('ks-queue', JSON.stringify(offlineQueue));
+  localStorage.setItem(_qKey(), JSON.stringify(offlineQueue));
   updateQueueBadge();
+  // Sidebar counters must reflect the final state regardless of sync outcome.
+  recalcCounts(_allFieldPoints);
   _syncing = false;
   if (okCount) showToast(`Synced ${okCount}${remaining.length ? ` (${remaining.length} still queued)` : ''}`, '#34d399');
-  else if (remaining.length) showToast(`${remaining.length} still queued — will retry`, '#f59e0b', true);
+  else if (remaining.length) showToast(`${remaining.length} point(s) could not sync — will retry`, '#f59e0b', true);
 }
 function initOffline() {
   const bar = document.getElementById('offline-bar');
@@ -2292,6 +2391,13 @@ function _esc(s) {
   return String(s || '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// Drop any non-http(s) URL — blocks javascript:/data: payloads in href/src.
+function _safeUrl(u) {
+  try {
+    const url = new URL(String(u || ''), window.location.origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+  } catch { return ''; }
+}
 
 function switchMobileTeamSubtab(tab) {
   _activeTeamSubtab = tab;
@@ -2330,10 +2436,12 @@ function renderChatMessages() {
   el.innerHTML = _mobileChats.map(m => {
     const mine = m.user_id === myId;
     const time = new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const attachHtml = m.attachment_url
+    const attUrl = _safeUrl(m.attachment_url);
+    const attHrefEsc = _esc(attUrl);
+    const attachHtml = attUrl
       ? (m.attachment_type === 'image'
-          ? `<img src="${m.attachment_url}" class="tchat-img" onclick="window.open(this.src,'_blank')" alt="attachment">`
-          : `<a href="${m.attachment_url}" target="_blank" rel="noopener" class="tchat-file">📄 View attachment</a>`)
+          ? `<img src="${attHrefEsc}" class="tchat-img" onclick="window.open(this.src,'_blank')" alt="attachment">`
+          : `<a href="${attHrefEsc}" target="_blank" rel="noopener" class="tchat-file">📄 View attachment</a>`)
       : '';
     return `<div class="tchat-msg ${mine ? 'mine' : 'theirs'}">
       ${!mine ? `<div class="tchat-meta">${_esc(m.display_name)}</div>` : ''}
@@ -2531,6 +2639,15 @@ async function downloadCSV(table) {
 
 /* ── SIGN OUT ── */
 async function signOut() {
+  // Warn before discarding any queued offline writes — they belong to the
+  // outgoing user and will be filtered out at sync if a different user signs in.
+  if (offlineQueue && offlineQueue.length > 0) {
+    const ok = confirm(
+      `You have ${offlineQueue.length} unsynced point(s) queued. ` +
+      `Sign out anyway? They'll only sync when you sign back in as the same user.`
+    );
+    if (!ok) return;
+  }
   if (sb) await sb.auth.signOut();
   window.location.replace('login.html');
 }
@@ -2584,7 +2701,7 @@ function geolocate() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('hamburger').addEventListener('click', toggleSidebar);
   document.getElementById('backdrop').addEventListener('click', () => { if (sidebarOpen) toggleSidebar(); });
-  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : enterPlaceMode(); });
+  document.getElementById('fab').addEventListener('click', () => { placingMode ? exitPlaceMode() : tryGPSFirst(); });
   document.getElementById('theme-btn').addEventListener('click', switchTheme);
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('btn-locate').addEventListener('click', geolocate);
