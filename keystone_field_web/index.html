@@ -1311,22 +1311,34 @@ function initMap(initialPoints) {
 
 /* ── SURVEY LAYERS ── */
 function pointsToGeoJSON(pts) {
-  const myId = currentUser?.id || null;
+  const myId   = currentUser?.id || null;
+  const myGsid = (IS_GUEST && GUEST?.session_id) || null;
   return {
     type: 'FeatureCollection',
-    features: pts.map(p => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-      properties: {
-        id: p.id, status: p.status, notes: p.notes || '',
-        collector: p.collector_name || 'Surveyor',
-        collector_id: p.collector_id || null,
-        is_mine: !!(myId && p.collector_id && p.collector_id === myId),
-        collected_at: p.collected_at,
-        time: new Date(p.collected_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
-        color: STATUS_COLORS[p.status] || '#9ca3af',
-      },
-    })),
+    features: pts.map(p => {
+      // A pin is "mine" if (a) I'm a member and the row's collector_id
+      // matches my user id, OR (b) I'm a guest and the row's
+      // guest_session_id matches my session id. Without (b) the guest's
+      // own pins render desaturated (treated as "team / not me").
+      const mine = !!(
+        (myId   && p.collector_id     && p.collector_id     === myId) ||
+        (myGsid && p.guest_session_id && p.guest_session_id === myGsid)
+      );
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        properties: {
+          id: p.id, status: p.status, notes: p.notes || '',
+          collector: p.collector_name || 'Surveyor',
+          collector_id: p.collector_id || null,
+          guest_session_id: p.guest_session_id || null,
+          is_mine: mine,
+          collected_at: p.collected_at,
+          time: new Date(p.collected_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+          color: STATUS_COLORS[p.status] || '#9ca3af',
+        },
+      };
+    }),
   };
 }
 
@@ -1913,13 +1925,28 @@ async function savePoint(coords) {
       }
     }
     const finalId = insertedId || ((queued ? 'q' : 'l') + Date.now());
-    _allFieldPoints.unshift({ ...newPt, id: finalId, collector_id: null });
-    appendPointToMap({ ...newPt, id: finalId, collector_id: null });
+    // Tag the local copy with our guest_session_id so pointsToGeoJSON
+    // and recalcCounts both treat it as "mine" (solid pin + counted in
+    // legend). Without this, the new pin would render desaturated and
+    // the Survey Legend would still show 0.
+    const localPt = {
+      ...newPt,
+      id: finalId,
+      collector_id: null,
+      guest_session_id: GUEST?.session_id || null,
+    };
+    _allFieldPoints.unshift(localPt);
+    appendPointToMap(localPt);
     bsCoords = null;
     if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Saved!'; btn.disabled = false; }
     setTimeout(() => closeBottomSheet(), 750);
     pulsePoint(coords, color);
     updateCountUI(status);
+    // Recompute the full legend / progress counters from the
+    // authoritative array — updateCountUI only bumps the just-added
+    // status, so a stale state (e.g. queued failures, sync replays)
+    // gets corrected here.
+    recalcCounts(_allFieldPoints);
     return;
   }
   // ── END GUEST PATH ───────────────────────────────────────────────────
@@ -2013,13 +2040,20 @@ function pulsePoint(coords, color) {
 function recalcCounts(pts) {
   counts = {};
   Object.keys(STATUS_COLORS).forEach(s => counts[s] = 0);
-  const myId = currentUser?.id || null;
-  const today = new Date().toDateString();
-  const mine = pts.filter(p => myId ? p.collector_id === myId : false);
+  const myId   = currentUser?.id || null;
+  const myGsid = (IS_GUEST && GUEST?.session_id) || null;
+  const today  = new Date().toDateString();
+  // "Mine" includes pins this signed-in user OR this guest session
+  // collected. Without the guest_session_id check, a guest's pins all
+  // had collector_id=NULL → none counted as mine → legend stayed at 0.
+  const mine = pts.filter(p =>
+       (myId   && p.collector_id     === myId)
+    || (myGsid && p.guest_session_id === myGsid)
+  );
   const mineToday = mine.filter(p => new Date(p.collected_at).toDateString() === today);
   mineToday.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
-  totalPts = mine.length;      // all-time mine
-  todayPts = mineToday.length; // today mine
+  totalPts = mine.length;
+  todayPts = mineToday.length;
   renderCounts();
 }
 

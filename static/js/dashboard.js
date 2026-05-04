@@ -4585,24 +4585,41 @@ async function loadTeamRoster() {
   const list = document.getElementById('team-list');
   if (!sbClient) return;
   try {
-    const { data, error } = await sbClient.rpc('list_team');
-    if (error) throw error;
-    const members = data || [];
+    // Admins see ALL signed-up users (whether or not they've claimed
+    // today's invite code) via list_all_signups, so they can promote
+    // anyone with one click. Members fall back to the team-only roster.
+    let members = [];
+    if (_myRole === 'admin') {
+      const { data, error } = await sbClient.rpc('list_all_signups');
+      if (error) throw error;
+      members = data || [];
+    } else {
+      const { data, error } = await sbClient.rpc('list_team');
+      if (error) throw error;
+      members = data || [];
+    }
     if (!members.length) {
-      list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No team members yet.</div>';
+      list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No users yet.</div>';
       return;
     }
     const myUid = currentUserId;
-    const nonAdminCount = members.filter(m => m.role !== 'admin').length;
 
     const rowsHtml = members.map(m => {
       const isMe    = m.id === myUid;
       const isAdmin = m.role === 'admin';
-      const tag = isAdmin
-        ? '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(56,189,248,.15);color:var(--accent);border:1px solid rgba(56,189,248,.28)">ADMIN</span>'
-        : '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border)">MEMBER</span>';
+      const isMember = m.role === 'member';
+      let tag;
+      if (isAdmin) {
+        tag = '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(56,189,248,.15);color:var(--accent);border:1px solid rgba(56,189,248,.28)">ADMIN</span>';
+      } else if (isMember) {
+        tag = '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border)">MEMBER</span>';
+      } else {
+        tag = '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.28)" title="Signed up but has not yet claimed today\'s invite code">NOT JOINED</span>';
+      }
+      // Admin actions: promote anyone who isn't already admin (members
+      // and not-joined users alike). Demote only existing admins.
       const promote = (_myRole === 'admin' && !isAdmin)
-        ? `<button class="btn btn-sm" onclick="dashboardPromote('${_esc(m.id)}')" style="font-size:11px;padding:4px 10px">Promote → admin</button>` : '';
+        ? `<button class="btn btn-sm" onclick="dashboardPromoteByEmail('${_esc(m.email)}')" style="font-size:11px;padding:4px 10px">Make admin</button>` : '';
       const demote  = (_myRole === 'admin' && isAdmin && !isMe)
         ? `<button class="btn btn-sm" onclick="dashboardDemote('${_esc(m.id)}')" style="font-size:11px;padding:4px 10px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)">Demote</button>` : '';
       return `
@@ -4613,21 +4630,32 @@ async function loadTeamRoster() {
         </div>`;
     }).join('');
 
-    // If admin and only admins are in the team, show the "no members yet to
-    // promote" hint so the missing Promote buttons aren't confusing.
-    const hint = (_myRole === 'admin' && nonAdminCount === 0)
-      ? `<div style="margin-top:10px;padding:11px 13px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.5">
-          <b style="color:var(--text)">No members to promote yet.</b> The Promote → admin button only appears next to non-admin members. New people become members by signing up at <code>/login</code>, then entering today's invite code on the claim screen. Once they appear here, click Refresh and you'll see Promote next to their row.
-          <button class="btn btn-sm" onclick="loadTeamRoster()" style="margin-top:8px;font-size:11px;padding:4px 10px">Refresh team</button>
-         </div>`
-      : '';
-
-    list.innerHTML = rowsHtml + hint;
+    list.innerHTML = rowsHtml;
   } catch (e) {
     list.innerHTML = `<div style="font-size:12px;color:#ef4444">Failed to load: ${_esc(e.message || e)}</div>`;
   }
 }
 window.loadTeamRoster = loadTeamRoster;
+
+// Single-click promote-by-email path used by the team roster row buttons.
+// Routes through promote_by_email so we don't need to know the target's
+// team_members status (admin / member / not joined yet) — the RPC handles
+// all three cases uniformly.
+async function dashboardPromoteByEmail(email) {
+  if (!confirm(`Make ${email} an admin?`)) return;
+  try {
+    const { data, error } = await sbClient.rpc('promote_by_email', { p_email: email });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Promote failed');
+    if (data.already)      _teamMsg(`${email} is already an admin.`, 'ok');
+    else if (data.created) _teamMsg(`${email} added as admin (skipped invite-code claim).`, 'ok');
+    else                   _teamMsg(`${email} promoted to admin.`, 'ok');
+    await loadTeamRoster();
+  } catch (e) {
+    _teamMsg(e.message || 'Promote failed.', 'err');
+  }
+}
+window.dashboardPromoteByEmail = dashboardPromoteByEmail;
 
 async function getTodayInviteCode() {
   const btn  = document.getElementById('team-btn-code');

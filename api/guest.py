@@ -307,7 +307,7 @@ class handler(BaseHTTPRequestHandler):
             offset = 0
             while offset < HARD_CAP:
                 page = (sb.table("field_survey_points")
-                          .select("id,lat,lon,status,notes,collector_id,collector_name,collected_at")
+                          .select("id,lat,lon,status,notes,collector_id,collector_name,guest_session_id,collected_at")
                           .order("collected_at", desc=True)
                           .range(offset, offset + PAGE - 1)
                           .execute().data) or []
