@@ -615,6 +615,39 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 .team-toggle-btn.active{background:var(--accent);color:#fff}
 .team-toggle-btn .tbadge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:rgba(255,255,255,.3);font-size:10px;font-weight:700;line-height:16px;text-align:center;display:none}
 .team-toggle-btn.active .tbadge{display:inline-block}
+/* Mobile admin panel — same actions as the desktop Team modal. Compact
+   layout that drops sensibly into the existing side-panel scroll area. */
+#mob-team-admin-view{padding-bottom:24px}
+.ma-msg{padding:8px 12px;border-radius:8px;font-size:12.5px;font-weight:500;margin-bottom:14px;border:1px solid transparent}
+.ma-msg.ok {background:rgba(52,211,153,.10);color:#34d399;border-color:rgba(52,211,153,.25)}
+.ma-msg.err{background:rgba(239,68,68,.10);color:#ef4444;border-color:rgba(239,68,68,.25)}
+.ma-section{margin-bottom:18px}
+.ma-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ma-row{display:flex;gap:6px;align-items:center}
+.ma-input{flex:1;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font:13px inherit;outline:none;-webkit-appearance:none}
+.ma-input:focus{border-color:var(--accent)}
+.ma-btn{padding:9px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer;font:600 12.5px inherit;-webkit-appearance:none;flex-shrink:0}
+.ma-btn:hover{border-color:var(--accent);color:var(--accent)}
+.ma-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ma-btn-primary:hover{filter:brightness(1.1)}
+.ma-btn-sm{padding:2px 8px;font-size:11px;background:none;border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-family:inherit}
+.ma-btn-sm:hover{color:var(--accent);border-color:var(--accent)}
+.ma-btn-danger{background:rgba(239,68,68,.10);color:#ef4444;border-color:rgba(239,68,68,.28)}
+.ma-btn-danger:hover{background:rgba(239,68,68,.18)}
+.ma-code{flex:1;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:700;color:var(--accent);letter-spacing:.10em}
+.ma-meta{font-size:11px;color:var(--muted);margin-top:6px;text-align:right;font-family:'IBM Plex Mono',monospace}
+.ma-list{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto}
+.ma-list-row{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:12.5px}
+.ma-list-row .ma-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ma-tag{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;font-family:'IBM Plex Mono',monospace;letter-spacing:.05em;flex-shrink:0}
+.ma-tag-admin{background:rgba(56,189,248,.15);color:#38bdf8;border:1px solid rgba(56,189,248,.28)}
+.ma-tag-member{background:rgba(139,148,158,.15);color:#9ca3af;border:1px solid var(--border)}
+.ma-tag-noclaim{background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.28)}
+.ma-tag-active{background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.28)}
+.ma-tag-expired{background:rgba(156,163,175,.15);color:#9ca3af;border:1px solid rgba(156,163,175,.28)}
+.ma-tag-revoked{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.28)}
+.ma-empty{font-size:12px;color:var(--muted);padding:8px 4px}
+.ma-pin-ct{font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace;flex-shrink:0}
 /* Chat view fills panel below the toggle, input always at bottom */
 #mob-team-chats-view{
   position:absolute;top:100px;bottom:0;left:0;right:0;
@@ -898,7 +931,8 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 <div class="side-panel" id="panel-team">
   <div class="panel-title">Team</div>
 
-  <!-- Sub-tab toggle -->
+  <!-- Sub-tab toggle. Admin button is hidden by default; revealed when
+       refreshMyRoleMobile() resolves to role='admin'. -->
   <div class="team-toggle">
     <button class="team-toggle-btn active" id="mob-ttog-activity"
             onclick="switchMobileTeamSubtab('activity')">Activity</button>
@@ -906,6 +940,9 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
             onclick="switchMobileTeamSubtab('chats')">
       Chats<span class="tbadge" id="mob-chat-badge"></span>
     </button>
+    <button class="team-toggle-btn" id="mob-ttog-admin"
+            style="display:none"
+            onclick="switchMobileTeamSubtab('admin')">Admin</button>
   </div>
 
   <!-- Activity view (default) -->
@@ -946,6 +983,54 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
         style="padding:8px 14px;background:var(--accent);border:none;border-radius:8px;
                color:#fff;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;
                flex-shrink:0;-webkit-appearance:none">Send</button>
+    </div>
+  </div>
+
+  <!-- Admin view (admin only — same actions as the desktop Team modal) -->
+  <div id="mob-team-admin-view" style="display:none">
+    <div id="mob-admin-msg" class="ma-msg" style="display:none"></div>
+
+    <!-- Today's invite code -->
+    <div class="ma-section">
+      <div class="ma-label">Today's invite code</div>
+      <div class="ma-row">
+        <button class="ma-btn ma-btn-primary" id="mob-admin-btn-code"
+                onclick="mobileAdminGetCode()">Get today's code</button>
+        <span class="ma-code" id="mob-admin-code">—</span>
+      </div>
+      <div class="ma-meta" id="mob-admin-code-meta"></div>
+    </div>
+
+    <!-- Make admin by email -->
+    <div class="ma-section">
+      <div class="ma-label">Make admin by email</div>
+      <div class="ma-row">
+        <input id="mob-admin-promote-email" type="email"
+               placeholder="email@domain.com"
+               class="ma-input"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();mobileAdminPromoteByEmailFromInput();}">
+        <button class="ma-btn" onclick="mobileAdminPromoteByEmailFromInput()">Make admin</button>
+      </div>
+    </div>
+
+    <!-- Team roster (every signed-up user) -->
+    <div class="ma-section">
+      <div class="ma-label">All signups
+        <button class="ma-btn-sm" onclick="mobileAdminLoadRoster()">↻</button>
+      </div>
+      <div id="mob-admin-team-list" class="ma-list">
+        <div class="ma-empty">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Guest sessions today -->
+    <div class="ma-section">
+      <div class="ma-label">Guest sessions (today)
+        <button class="ma-btn-sm" onclick="mobileAdminLoadGuests()">↻</button>
+      </div>
+      <div id="mob-admin-guest-list" class="ma-list">
+        <div class="ma-empty">Loading…</div>
+      </div>
     </div>
   </div>
 
@@ -1195,6 +1280,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateUserUI();
   initMap([]);
   startPresenceHeartbeat();
+  // Reveal the Team → Admin sub-tab if this user is an admin. RPC is
+  // SECURITY DEFINER so it runs even before any admin row exists.
+  refreshMyRoleMobile();
 });
 
 /* ── GUEST: heartbeat + load own points ── */
@@ -2878,11 +2966,217 @@ function switchMobileTeamSubtab(tab) {
   _activeTeamSubtab = tab;
   document.getElementById('mob-team-activity-view').style.display = tab === 'activity' ? '' : 'none';
   document.getElementById('mob-team-chats-view').style.display    = tab === 'chats'    ? 'flex' : 'none';
+  const adminView = document.getElementById('mob-team-admin-view');
+  if (adminView) adminView.style.display = tab === 'admin' ? '' : 'none';
   document.getElementById('mob-ttog-activity').classList.toggle('active', tab === 'activity');
   document.getElementById('mob-ttog-chats').classList.toggle('active', tab === 'chats');
-  if (tab === 'chats')   clearMobileChatBadge();
+  const adminBtn = document.getElementById('mob-ttog-admin');
+  if (adminBtn) adminBtn.classList.toggle('active', tab === 'admin');
+  if (tab === 'chats')    clearMobileChatBadge();
   if (tab === 'activity') { renderTeam(); }
+  if (tab === 'admin')    { mobileAdminLoadAll(); }
 }
+
+/* ── ADMIN MOBILE ─────────────────────────────────────────────────────
+   Mirrors the desktop dashboard's Team modal so an admin who's only got
+   their phone can still: generate today's invite code, promote any
+   signed-up user (by email or by clicking a row), demote, and revoke
+   live guest sessions. All actions go through the same SECURITY DEFINER
+   RPCs the desktop uses (server-side is_admin() check is the security
+   boundary; hiding the tab in JS is just UX).
+*/
+let _myRoleMobile = null;
+
+async function refreshMyRoleMobile() {
+  // Guests have no Supabase session — they never see this tab. Members
+  // see it but never the Admin button (gated below). Only confirmed
+  // admins reveal the Admin sub-tab.
+  if (IS_GUEST || !sb || !currentUser?.id) return;
+  try {
+    const { data, error } = await sb.rpc('my_team_role');
+    if (error) return;
+    _myRoleMobile = (data && data.role) || null;
+    const btn = document.getElementById('mob-ttog-admin');
+    if (btn) btn.style.display = _myRoleMobile === 'admin' ? '' : 'none';
+  } catch {}
+}
+
+function _maMsg(text, kind) {
+  const el = document.getElementById('mob-admin-msg');
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; return; }
+  el.textContent = text;
+  el.className = 'ma-msg ' + (kind === 'err' ? 'err' : 'ok');
+  el.style.display = '';
+  // Auto-clear success messages after 4 s; errors stick around.
+  if (kind !== 'err') setTimeout(() => { if (el.textContent === text) el.style.display = 'none'; }, 4000);
+}
+
+async function mobileAdminLoadAll() {
+  if (_myRoleMobile !== 'admin') {
+    // Defensive: if a non-admin somehow lands on this tab, refuse.
+    document.getElementById('mob-team-admin-view').innerHTML =
+      '<div class="ma-empty">Admin role required.</div>';
+    return;
+  }
+  await Promise.all([mobileAdminLoadRoster(), mobileAdminLoadGuests()]);
+}
+
+async function mobileAdminGetCode() {
+  const btn  = document.getElementById('mob-admin-btn-code');
+  const out  = document.getElementById('mob-admin-code');
+  const meta = document.getElementById('mob-admin-code-meta');
+  if (!sb) return;
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const { data, error } = await sb.rpc('get_or_create_today_code');
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Failed to get code');
+    out.textContent = data.code;
+    meta.textContent = `for ${data.date} (UTC) · share verbally`;
+    try { await navigator.clipboard.writeText(data.code); } catch {}
+    _maMsg('Code copied to clipboard', 'ok');
+  } catch (e) {
+    _maMsg(e.message || 'Failed to get code', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = "Get today's code";
+  }
+}
+
+async function mobileAdminPromoteByEmailFromInput() {
+  const input = document.getElementById('mob-admin-promote-email');
+  const email = (input?.value || '').trim();
+  if (!email) { _maMsg('Enter an email', 'err'); return; }
+  if (!confirm(`Make ${email} an admin?`)) return;
+  try {
+    const { data, error } = await sb.rpc('promote_by_email', { p_email: email });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Promote failed');
+    if (data.already)      _maMsg(`${email} is already an admin.`, 'ok');
+    else if (data.created) _maMsg(`${email} added as admin (skipped invite-code claim).`, 'ok');
+    else                   _maMsg(`${email} promoted to admin.`, 'ok');
+    input.value = '';
+    await mobileAdminLoadRoster();
+  } catch (e) {
+    _maMsg(e.message || 'Promote failed.', 'err');
+  }
+}
+
+async function mobileAdminLoadRoster() {
+  const list = document.getElementById('mob-admin-team-list');
+  if (!list || !sb) return;
+  list.innerHTML = '<div class="ma-empty">Loading…</div>';
+  try {
+    // Admins see ALL signed-up users so they can promote anyone with
+    // one tap, even if the target hasn't claimed today's invite code yet.
+    const { data, error } = await sb.rpc('list_all_signups');
+    if (error) throw error;
+    const members = data || [];
+    if (!members.length) {
+      list.innerHTML = '<div class="ma-empty">No users yet.</div>';
+      return;
+    }
+    list.innerHTML = members.map(m => {
+      const isMe    = m.id === currentUser?.id;
+      const isAdmin = m.role === 'admin';
+      const isMember = m.role === 'member';
+      let tag;
+      if (isAdmin)        tag = '<span class="ma-tag ma-tag-admin">ADMIN</span>';
+      else if (isMember)  tag = '<span class="ma-tag ma-tag-member">MEMBER</span>';
+      else                tag = '<span class="ma-tag ma-tag-noclaim" title="Signed up but has not yet claimed today\'s invite code">NOT JOINED</span>';
+      const promote = (!isAdmin)
+        ? `<button class="ma-btn-sm" onclick="mobileAdminPromoteByEmail('${_esc(m.email)}')">Make admin</button>` : '';
+      const demote  = (isAdmin && !isMe)
+        ? `<button class="ma-btn-sm ma-btn-danger" onclick="mobileAdminDemote('${_esc(m.id)}')">Demote</button>` : '';
+      return `
+        <div class="ma-list-row">
+          <div class="ma-name">${_esc(m.email)}${isMe ? ' <span style="color:var(--muted);font-weight:400">(you)</span>' : ''}</div>
+          ${tag}
+          ${promote}${demote}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="ma-empty" style="color:#ef4444">Failed: ${_esc(e.message || e)}</div>`;
+  }
+}
+
+async function mobileAdminPromoteByEmail(email) {
+  if (!confirm(`Make ${email} an admin?`)) return;
+  try {
+    const { data, error } = await sb.rpc('promote_by_email', { p_email: email });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Promote failed');
+    if (data.already)      _maMsg(`${email} is already an admin.`, 'ok');
+    else if (data.created) _maMsg(`${email} added as admin.`, 'ok');
+    else                   _maMsg(`${email} promoted to admin.`, 'ok');
+    await mobileAdminLoadRoster();
+  } catch (e) { _maMsg(e.message || 'Promote failed', 'err'); }
+}
+
+async function mobileAdminDemote(uid) {
+  if (!confirm('Demote this admin to member?')) return;
+  try {
+    const { data, error } = await sb.rpc('demote_member', { p_target: uid });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Demote failed');
+    _maMsg('User demoted to member', 'ok');
+    await mobileAdminLoadRoster();
+  } catch (e) { _maMsg(e.message || 'Demote failed', 'err'); }
+}
+
+async function mobileAdminLoadGuests() {
+  const list = document.getElementById('mob-admin-guest-list');
+  if (!list || !sb) return;
+  list.innerHTML = '<div class="ma-empty">Loading…</div>';
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await sb.rpc('list_guest_sessions', { p_date: today });
+    if (error) throw error;
+    const sessions = data || [];
+    if (!sessions.length) {
+      list.innerHTML = '<div class="ma-empty">No guest sessions today.</div>';
+      return;
+    }
+    list.innerHTML = sessions.map(g => {
+      const revoked = !!g.revoked_at;
+      const expired = g.expires_at && new Date(g.expires_at) < new Date();
+      const status  = revoked ? 'revoked' : (expired ? 'expired' : 'active');
+      const isLive  = status === 'active';
+      const tagCls  = revoked ? 'ma-tag-revoked' : (expired ? 'ma-tag-expired' : 'ma-tag-active');
+      const revokeBtn = isLive
+        ? `<button class="ma-btn-sm ma-btn-danger" onclick="mobileAdminRevokeGuest('${_esc(g.id)}')">Revoke</button>` : '';
+      return `
+        <div class="ma-list-row">
+          <div class="ma-name">${_esc(g.name)}</div>
+          <span class="ma-tag ${tagCls}">${status}</span>
+          <span class="ma-pin-ct">${Number(g.point_count) || 0} pin${(g.point_count == 1) ? '' : 's'}</span>
+          ${revokeBtn}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="ma-empty" style="color:#ef4444">Failed: ${_esc(e.message || e)}</div>`;
+  }
+}
+
+async function mobileAdminRevokeGuest(sessionId) {
+  if (!confirm('Revoke this guest session? Their next save attempt will fail. Pins they already collected stay attributed to their name.')) return;
+  try {
+    const { data, error } = await sb.rpc('revoke_guest_session', { p_session: sessionId });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Revoke failed');
+    _maMsg('Guest session revoked', 'ok');
+    await mobileAdminLoadGuests();
+  } catch (e) { _maMsg(e.message || 'Revoke failed', 'err'); }
+}
+
+// Expose to inline onclick attrs (HTML uses these globally).
+window.mobileAdminGetCode             = mobileAdminGetCode;
+window.mobileAdminPromoteByEmail      = mobileAdminPromoteByEmail;
+window.mobileAdminPromoteByEmailFromInput = mobileAdminPromoteByEmailFromInput;
+window.mobileAdminDemote              = mobileAdminDemote;
+window.mobileAdminLoadRoster          = mobileAdminLoadRoster;
+window.mobileAdminLoadGuests          = mobileAdminLoadGuests;
+window.mobileAdminRevokeGuest         = mobileAdminRevokeGuest;
 
 async function loadTodayMessages() {
   // Guest path: read via the /api/guest proxy (service-role on the
