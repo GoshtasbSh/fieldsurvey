@@ -4511,6 +4511,9 @@ function initTeamModal() {
     document.getElementById('team-modal-sub').textContent = isAdmin
       ? "Generate today's invite code for new surveyors. Promote teammates to admin."
       : 'Roster of your team. Ask an admin if you need an invite code or role change.';
+    // Show the "make admin by email" form only for admins.
+    const promoteRow = document.getElementById('team-promote-row');
+    if (promoteRow) promoteRow.style.display = isAdmin ? 'flex' : 'none';
     overlay.classList.add('show');
     overlay.style.display = 'flex';
     _teamMsg('');
@@ -4531,6 +4534,39 @@ function initTeamModal() {
 
   document.getElementById('team-btn-code').addEventListener('click', getTodayInviteCode);
   document.getElementById('team-btn-refresh-guests').addEventListener('click', loadGuestSessionsForToday);
+  document.getElementById('team-btn-promote-email').addEventListener('click', promoteByEmailFromInput);
+  document.getElementById('team-promote-email').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); promoteByEmailFromInput(); }
+  });
+}
+
+async function promoteByEmailFromInput() {
+  const input = document.getElementById('team-promote-email');
+  const btn   = document.getElementById('team-btn-promote-email');
+  const email = (input.value || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    _teamMsg('Enter a valid email.', 'err');
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Promoting…';
+  try {
+    const { data, error } = await sbClient.rpc('promote_by_email', { p_email: email });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Promote failed');
+    if (data.already) {
+      _teamMsg(`${email} is already an admin.`, 'ok');
+    } else if (data.created) {
+      _teamMsg(`${email} added as admin (skipped invite-code claim).`, 'ok');
+    } else {
+      _teamMsg(`${email} promoted to admin.`, 'ok');
+    }
+    input.value = '';
+    await loadTeamRoster();
+  } catch (e) {
+    _teamMsg(e.message || 'Promote failed.', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Make admin';
+  }
 }
 
 async function loadTeamRoster() {
