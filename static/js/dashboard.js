@@ -638,6 +638,10 @@ async function initFieldPoints() {
   // Bootstrap the user-menu chip + Team modal handlers if signed in.
   if (currentSession?.user) initUserMenu(currentSession.user);
   initTeamModal();
+  // Anon path: initUserMenu is skipped, so refreshMyRole() never fires —
+  // hide admin/member-only UI explicitly so anon viewers don't see
+  // buttons that always 401. _myRole stays null = anon.
+  if (!currentSession?.user) applyRoleGatedUI();
 
   // Presence heartbeat (only when authenticated)
   if (currentSession?.user?.id) {
@@ -2285,7 +2289,10 @@ async function openHistoryModal() {
             cur.style.cssText = 'font-size:11px;color:var(--green);font-weight:600;padding:3px 8px;border-radius:6px;background:rgba(16,185,129,.1)';
             cur.textContent = 'Current';
             item.appendChild(cur);
-          } else {
+          } else if (_myRole === 'admin') {
+            // Restore is admin-only — server enforces this too. Hide the
+            // button for everyone else so non-admins don't click into a
+            // guaranteed-401 toast.
             const btn = document.createElement('button');
             btn.className = 'btn btn-sm';
             btn.textContent = 'Restore';
@@ -4430,9 +4437,25 @@ async function sendChatMessage() {
   chatHistory.push({ role: 'user', content: message });
 
   try {
+    // Phase 1 gated /api/chat behind require_team_member; this fetch must
+    // forward the Supabase JWT or the server replies 401 and the bubble
+    // renders "undefined". Anon viewers will get a friendly toast instead.
+    const session = (sbClient && sbClient.auth)
+      ? (await sbClient.auth.getSession()).data?.session
+      : null;
+    if (!session?.access_token) {
+      removeTyping(typingId);
+      appendChatBubble('assistant', 'Sign in as a team member to use the AI chat.');
+      chatInFlight = false;
+      sendBtn.disabled = false;
+      return;
+    }
     const res  = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
       body: JSON.stringify({ message, history: chatHistory.slice(-8), map_state: getCurrentMapState() }),
     });
     const data = await res.json();
@@ -4643,7 +4666,7 @@ function initUserMenu(user) {
 }
 
 async function refreshMyRole() {
-  if (!sbClient) return;
+  if (!sbClient) { applyRoleGatedUI(); return; }
   try {
     const { data, error } = await sbClient.rpc('my_team_role');
     if (error) return;
@@ -4653,11 +4676,33 @@ async function refreshMyRole() {
       roleEl.textContent = _myRole || 'no role yet';
       roleEl.style.color = _myRole === 'admin' ? 'var(--accent)' : 'var(--muted)';
     }
-    // Hide the Team button entirely for users who aren't members; show it
-    // for members (read-only roster) and admins (full controls).
-    const teamBtn = document.getElementById('btn-team');
-    if (teamBtn) teamBtn.style.display = _myRole ? '' : 'none';
+    applyRoleGatedUI();
   } catch {}
+}
+
+// Show / hide UI controls based on the current user's role. Anon viewers
+// (no Supabase session at all) see the dashboard read-only — no Team /
+// Update Data / Daily Refresh / AI Chat buttons. Members see Team
+// (read-only roster) but no upload/refresh/chat. Admins see everything.
+// Server-side enforcement still owns the security boundary; this is UX
+// only so non-privileged users don't click into a guaranteed-401 modal.
+function applyRoleGatedUI() {
+  const isAdmin  = _myRole === 'admin';
+  const isMember = _myRole === 'admin' || _myRole === 'member';
+  const setVis = (id, show) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = show ? '' : 'none';
+  };
+  setVis('btn-team',          isMember);
+  setVis('btn-import',        isAdmin);
+  setVis('btn-daily-refresh', isAdmin);
+  // AI chat panel + floating button: team-member only (matches /api/chat
+  // require_team_member). Anon viewers still see all the data; just no
+  // chat panel button to give them a 401 surprise.
+  setVis('chat-btn',          isMember);
+  // Restore-version buttons inside the History modal are rebuilt every
+  // time the modal opens — openHistoryModal() reads _myRole and only
+  // renders restore controls for admins. Nothing to toggle here.
 }
 
 function _esc(s) {

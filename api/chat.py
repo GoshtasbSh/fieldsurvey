@@ -304,7 +304,16 @@ class handler(BaseHTTPRequestHandler):
         # drain Groq budget or probe dataset shape.
         if require_team_member(self) is None:
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        # Cap the body so a malformed Content-Length or huge payload can't
+        # exhaust the function memory. 64 KB is plenty for chat + history.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            json_response(self, 400, {"error": "invalid Content-Length"})
+            return
+        if length < 0 or length > 64 * 1024:
+            json_response(self, 413, {"error": "Body too large (max 64 KB)."})
+            return
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
         except Exception:
