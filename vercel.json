@@ -6,9 +6,7 @@
     { "path": "/api/daily-refresh", "schedule": "0 6 * * *" }
   ],
   "functions": {
-    "api/upload/iaq.py":     { "maxDuration": 300 },
-    "api/upload/survey.py":  { "maxDuration": 120 },
-    "api/upload/results.py": { "maxDuration": 60 }
+    "api/upload.py": { "maxDuration": 300 }
   },
   "rewrites": [
     { "source": "/",                 "destination": "/keystone_field_web/index" },
