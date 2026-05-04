@@ -570,6 +570,12 @@ async function initFieldPoints() {
       features: all.map(p => fieldPointFeature(p, currentUserId)),
     };
     setFieldPointsData();
+    // First-load: surveyData is usually loaded by now; stamp coincident
+    // contacts so the survey-points layer hides duplicate CSV dots from
+    // the very first frame. onFieldPointsChanged() handles all later updates.
+    if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
+    if (typeof buildLegend === 'function') buildLegend();
+    if (typeof applyFilters === 'function') applyFilters();
   } catch (e) { console.warn('Initial field-points fetch failed:', e); }
 
   // Presence
@@ -609,6 +615,15 @@ async function initFieldPoints() {
 // Safe-no-op if per-user panel not yet rendered.
 function onFieldPointsChanged() {
   if (typeof renderPerUserPanel === 'function') renderPerUserPanel();
+  // Field-collected points share the community-contact status namespace, so
+  // every insert/update/delete must refresh the unified legend counts,
+  // re-stamp CSV contacts that have a coincident field point (so the survey-
+  // points layer hides the duplicate CSV dot), and re-apply any active
+  // status filter to the field-points layer too.
+  if (typeof stampCoincidentContacts === 'function') stampCoincidentContacts();
+  if (typeof buildLegend === 'function') buildLegend();
+  if (typeof updateStatusRowHighlights === 'function') updateStatusRowHighlights();
+  if (typeof applyFilters === 'function') applyFilters();
 }
 
 // ── Team panel (desktop) ──
@@ -999,6 +1014,106 @@ function buildSurveyTab(p) {
     </div>`;
 }
 
+// Find the IAQ-survey feature closest to (lon, lat) within `maxMeters`.
+// Used to attach a per-respondent "Survey Answers" tab to a contact popup
+// when the contact has has_iaq_survey: true. Returns null if no match.
+function findMatchedIaqFeature(lon, lat, maxMeters) {
+  const feats = iaqData?.features || [];
+  if (!feats.length) return null;
+  const r = (maxMeters || 60);
+  let best = null, bestD = Infinity;
+  for (const f of feats) {
+    const c = f.geometry?.coordinates;
+    if (!c) continue;
+    const dy = (c[1] - lat) * 111320;
+    const dx = (c[0] - lon) * 111320 * Math.cos(lat * Math.PI / 180);
+    const d  = Math.sqrt(dx*dx + dy*dy);
+    if (d < bestD && d <= r) { bestD = d; best = f; }
+  }
+  return best;
+}
+
+// Build the "Survey Answers" popup tab from an IAQ feature. Walks the
+// SURVEY_QUESTIONS metadata baked into the analysis blob (chart_sources +
+// survey_questions) so question text always tracks the canonical Qualtrics
+// labels. Items without a recorded answer are skipped to keep the popup
+// readable.
+function buildSurveyAnswersTab(iaqProps) {
+  // Pull canonical question text from the analysis blob (loaded once into
+  // analysisData / iaqAnalysis at boot). Falls back to a humanised key if
+  // the mapping is missing.
+  const qtext = (iaqAnalysis?.survey_questions || {});
+  const friendly = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  // Display order: scores first (score-style answers already shown elsewhere),
+  // then residency, safety, affordability, interventions, experiences,
+  // mobility, demographics. Anything else falls under "Other".
+  const order = [
+    ['Health & symptoms', [
+      'respiratory_ill','asthma_freq','wheeze_freq','headache_freq','hospital_visit',
+    ]],
+    ['Residency & housing', [
+      'years_in_hre','anticipated_stay','mh_skirting',
+      'safety_env','safety_social','afford_urgency','afford_strategy',
+    ]],
+    ['Relocation factors', [
+      'reloc_factor_emp','reloc_factor_aff','reloc_factor_qol','reloc_factor_fam',
+      'reloc_factor_ret','reloc_factor_env','reloc_factor_inh','reloc_factor_oth',
+    ]],
+    ['Resilience interventions', [
+      'intv_roof_walls','intv_windows_doors','intv_rain_gardens','intv_hvac',
+      'intv_plumbing_elec','intv_well_septic','intv_ccua_water','intv_fence',
+      'intv_trees_shade','intv_trim_trees','intv_drainage',
+    ]],
+    ['Experiences in HRE', [
+      'exp_flooding','exp_flood_help','exp_extreme_heat','exp_school_change',
+      'exp_law_enf','exp_insurance_loss','exp_well_dry','exp_pests',
+      'exp_water_leaks','exp_loose_animals',
+    ]],
+    ['Well-being & mobility', ['car_access','hurricane_transport']],
+    ['Demographics', ['education','employment','ownership']],
+  ];
+
+  const sections = order.map(([title, fields]) => {
+    const rows = fields
+      .map(k => {
+        const v = iaqProps?.[k];
+        if (v == null || v === '' || v === false) return '';
+        const q = qtext[k] || friendly(k);
+        return `<div class="popup-row" style="align-items:flex-start">
+          <span class="popup-label" style="max-width:55%;font-size:10px;line-height:1.3" title="${escapeHtml(q)}">${escapeHtml(q.length > 70 ? q.slice(0, 67) + '…' : q)}</span>
+          <span class="popup-value" style="max-width:45%;text-align:right;font-size:11px">${escapeHtml(String(v))}</span>
+        </div>`;
+      })
+      .filter(Boolean)
+      .join('');
+    return rows
+      ? `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
+          <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${title}</div>
+          ${rows}
+        </div>`
+      : '';
+  }).filter(Boolean).join('');
+
+  if (!sections) {
+    return `<div class="popup-body">
+      <p style="color:var(--muted);text-align:center;padding:14px;font-size:11px">
+        No per-question survey answers recorded for this respondent.
+      </p>
+    </div>`;
+  }
+  return `<div class="popup-body" style="max-height:280px;overflow-y:auto">
+    <div class="popup-row">
+      <span class="popup-label">Risk score</span>
+      <span class="popup-value" style="font-family:var(--mono)"><strong>${Number(iaqProps.overall_risk) || 0}</strong>/100 · ${escapeHtml(iaqProps.risk_tier || '—')}</span>
+    </div>
+    <div class="popup-row"><span class="popup-label">Health</span><span class="popup-value" style="font-family:var(--mono)">${Number(iaqProps.health_score) || 0}</span></div>
+    <div class="popup-row"><span class="popup-label">IAQ</span><span class="popup-value" style="font-family:var(--mono)">${Number(iaqProps.iaq_score) || 0}</span></div>
+    <div class="popup-row"><span class="popup-label">Structural</span><span class="popup-value" style="font-family:var(--mono)">${Number(iaqProps.struct_score) || 0}</span></div>
+    ${sections}
+  </div>`;
+}
+
 function buildParcelTab(p) {
   return `
     <div class="popup-body">
@@ -1071,11 +1186,18 @@ function onPointClick(e) {
   const tabs = [
     { label: 'Survey Contact', content: buildSurveyTab(sp) },
   ];
+  // Survey Answers — only shown when this contact has a matched IAQ response.
+  // We find the matched IAQ feature by spatial proximity (≤60 m) to handle
+  // the small geocoding offset between contact and IAQ-survey coordinates.
+  if (sp.has_iaq_survey) {
+    const iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 60);
+    if (iaqFeat && iaqFeat.properties) {
+      tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(iaqFeat.properties) });
+    }
+  }
   if (pp) {
     tabs.push({ label: 'Parcel Data (FL DOR)', content: buildParcelTab(pp) });
   }
-  // Future tab placeholder
-  // tabs.push({ label: 'Survey Results', content: '<div class="popup-body"><p style="color:var(--muted);text-align:center;padding:12px">No survey results yet</p></div>' });
 
   const html = buildTabbedPopup(sp.address, tabs, 0);
   const popup = new maplibregl.Popup({ offset: 15, maxWidth: '400px' })
@@ -1243,11 +1365,145 @@ function switchBasemap(style) {
   if (typeof applyHeatmapClusterFilter === 'function') applyHeatmapClusterFilter();
 }
 
+// ── Unified community-contact spatial helpers ───────────────────────────────
+// CSV-imported community contacts and field-collected points represent the
+// SAME real-world thing — one household visit. The pair within ~30 m must
+// (1) count once in the legend, (2) be filtered together, and (3) render as
+// a single dot on the map (the field-point dot, since it carries the more
+// recent ground-truth status). These helpers do all three.
+const _UNIFIED_DEDUP_RADIUS_M = 30;
+const _UNIFIED_CELL = 0.00040; // ~44 m grid cell at this latitude
+function _cellKey(lat, lon) {
+  return `${Math.round(lat / _UNIFIED_CELL)}|${Math.round(lon / _UNIFIED_CELL)}`;
+}
+function _fieldCellIndex() {
+  const idx = new Map();
+  for (const f of (fieldPointsData?.features || [])) {
+    const [lon, lat] = f.geometry.coordinates;
+    const k = _cellKey(lat, lon);
+    if (!idx.has(k)) idx.set(k, []);
+    idx.get(k).push(f);
+  }
+  return idx;
+}
+function _distMeters(lat1, lon1, lat2, lon2) {
+  const dy = (lat2 - lat1) * 111320;
+  const dx = (lon2 - lon1) * 111320 * Math.cos(lat1 * Math.PI / 180);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function _nearestFieldFeature(lat, lon, fieldByCell) {
+  const ky = Math.round(lat / _UNIFIED_CELL), kx = Math.round(lon / _UNIFIED_CELL);
+  let best = null, bestD = Infinity;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const list = fieldByCell.get(`${ky + dy}|${kx + dx}`);
+      if (!list) continue;
+      for (const f of list) {
+        const [flon, flat] = f.geometry.coordinates;
+        const d = _distMeters(lat, lon, flat, flon);
+        if (d <= _UNIFIED_DEDUP_RADIUS_M && d < bestD) { bestD = d; best = f; }
+      }
+    }
+  }
+  return best;
+}
+
+// Mark CSV contacts that are coincident with a field-collected point so the
+// map filter can hide the CSV dot (the field-point dot stays visible). Pushes
+// updated geojson back to the map source if anything changed. Returns true
+// when a re-render is needed.
+function stampCoincidentContacts() {
+  const csv = surveyData?.features || [];
+  if (!csv.length) return false;
+  const fieldByCell = _fieldCellIndex();
+  let changed = false;
+  for (const f of csv) {
+    const [lon, lat] = f.geometry.coordinates;
+    const matched = _nearestFieldFeature(lat, lon, fieldByCell);
+    const has = !!matched;
+    if (!!f.properties.has_field_point !== has) {
+      f.properties.has_field_point = has;
+      changed = true;
+    }
+  }
+  if (changed) {
+    const src = (typeof map !== 'undefined') && map.getSource && map.getSource('survey-points');
+    if (src) src.setData(surveyData);
+  }
+  return changed;
+}
+
+// Live unified per-status counts. CSV contacts coincident with a field point
+// inherit the field point's status (more recent ground truth) and the pair
+// counts once. Standalone field points count on their own.
+function computeUnifiedStatusCounts() {
+  const counts = {};
+  const csv   = (surveyData?.features || []);
+  const field = (fieldPointsData?.features || []);
+  if (!csv.length && !field.length) return counts;
+
+  // Spatial index for field points: ~40 m cell so the 30 m radius is covered
+  // by checking the cell + 8 neighbours.
+  const CELL = 0.00040;
+  const cellKey = (lat, lon) => `${Math.round(lat / CELL)}|${Math.round(lon / CELL)}`;
+  const fieldByCell = new Map();
+  field.forEach((f, i) => {
+    const [lon, lat] = f.geometry.coordinates;
+    const k = cellKey(lat, lon);
+    if (!fieldByCell.has(k)) fieldByCell.set(k, []);
+    fieldByCell.get(k).push(i);
+  });
+
+  const fieldUsed = new Set();
+  const distM = (lat1, lon1, lat2, lon2) => {
+    const dy = (lat2 - lat1) * 111320;
+    const dx = (lon2 - lon1) * 111320 * Math.cos(lat1 * Math.PI / 180);
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  csv.forEach(f => {
+    const [lon, lat] = f.geometry.coordinates;
+    const ky = Math.round(lat / CELL), kx = Math.round(lon / CELL);
+    const candidates = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const c = fieldByCell.get(`${ky + dy}|${kx + dx}`);
+        if (c) candidates.push(...c);
+      }
+    }
+    let matched = -1;
+    let bestDist = Infinity;
+    for (const idx of candidates) {
+      if (fieldUsed.has(idx)) continue;
+      const [flon, flat] = field[idx].geometry.coordinates;
+      const d = distM(lat, lon, flat, flon);
+      if (d <= 30 && d < bestDist) { bestDist = d; matched = idx; }
+    }
+    const status = matched >= 0
+      ? (field[matched].properties.status || f.properties.status || 'Unknown')
+      : (f.properties.status || 'Unknown');
+    if (matched >= 0) fieldUsed.add(matched);
+    counts[status] = (counts[status] || 0) + 1;
+  });
+
+  // Unmatched field points: count as standalone contacts.
+  field.forEach((fp, i) => {
+    if (fieldUsed.has(i)) return;
+    const s = fp.properties.status || 'Unknown';
+    counts[s] = (counts[s] || 0) + 1;
+  });
+  return counts;
+}
+
 // ── Legend (unified: color picker + filter) ─────────────────────────────────
 function buildUnifiedStatusControls() {
   const container = document.getElementById('unified-status-controls');
   if (!container) return;
-  const counts = analysisData?.status_counts || {};
+  // Live unified counts (CSV contacts + field points, deduped by proximity).
+  // Falls back to the cached analysis blob only if both live sources are
+  // empty — covers the brief window before the first GET /api/* completes.
+  const live = computeUnifiedStatusCounts();
+  const counts = Object.keys(live).length ? live : (analysisData?.status_counts || {});
   container.innerHTML = '';
 
   Object.entries(STATUS_COLORS).forEach(([status, color]) => {
@@ -1333,12 +1589,15 @@ function applyFilters() {
   // De-duplicate same-address points: when the IAQ risk overlay is visible,
   // the merged contact is already drawn by `survey-iaq-risk` (colored by
   // IAQ risk tier). Hide it from `survey-points` so the user sees ONE
-  // point per address, not two stacked circles.
+  // point per address, not two stacked circles. ALSO: hide CSV contacts
+  // that are coincident with a field-collected point (stamped by
+  // stampCoincidentContacts) so the field-point dot is the only one shown
+  // for that household.
   const iaqRiskVisible = map.getLayer('survey-iaq-risk') &&
     map.getLayoutProperty('survey-iaq-risk', 'visibility') === 'visible';
-  const pointsFilter = iaqRiskVisible
-    ? [...filter, ['!=', ['get', 'has_iaq_survey'], true]]
-    : filter;
+  const exclusions = [['!=', ['get', 'has_field_point'], true]];
+  if (iaqRiskVisible) exclusions.push(['!=', ['get', 'has_iaq_survey'], true]);
+  const pointsFilter = [...filter, ...exclusions];
 
   // Guard each setFilter with a getLayer check — early toggles before
   // loadData/addLayers finishes can otherwise throw on missing layers.
@@ -1350,6 +1609,16 @@ function applyFilters() {
     map.setFilter('survey-iaq-risk', filter.length > 1
       ? [...filter, ['==', ['get', 'has_iaq_survey'], true]]
       : ['==', ['get', 'has_iaq_survey'], true]);
+  // Field-collected points are the same conceptual thing as CSV contacts —
+  // apply the same status filter to both layers so 'Completed' / 'Follow Up'
+  // etc. show ALL contacts of that status, regardless of source.
+  if (map.getLayer('field-points-dots')) {
+    const fieldFilter = activeFilters.size > 0
+      ? ['all', ['in', 'status', ...activeFilters]]
+      : null;
+    map.setFilter('field-points-dots', fieldFilter);
+    map.setFilter('field-points-glow', fieldFilter);
+  }
 }
 
 // ── Central layer definition map ─────────────────────────────────────────────

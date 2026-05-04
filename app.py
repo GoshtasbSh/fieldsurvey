@@ -1148,16 +1148,15 @@ def process_iaq_survey(csv_bytes: bytes):
              f"Census geocoded: {geocode_fallbacks - geocode_fails}, "
              f"failed/skipped: {geocode_fails}")
 
-    # Compute analysis BEFORE stripping per-respondent survey-question fields
-    # (the analysis aggregator reads them); strip after so the persisted
-    # geojson stays small and per-respondent answers stay private. raw_address
-    # is preserved here because _cross_validate() needs it; it is stripped at
-    # the upload-endpoint level (see lines stripping raw_address before save).
+    # Per-respondent SURVEY_QUESTIONS answers are RETAINED on each IAQ feature
+    # so the dashboard's contact-point popup can render a "Survey Answers" tab
+    # by spatial-matching the clicked contact to its IAQ feature in iaqData.
+    # raw_address is preserved here because _cross_validate() needs it; it is
+    # stripped at the upload-endpoint level. The numeric helper years_in_hre_num
+    # is dropped (analysis-only).
     analysis_result = _compute_iaq_analysis(features)
-    _survey_extra_keys = tuple(SURVEY_QUESTIONS.keys()) + ('years_in_hre_num',)
     for f in features:
-        for k in _survey_extra_keys:
-            f['properties'].pop(k, None)
+        f['properties'].pop('years_in_hre_num', None)
     geojson = {'type': 'FeatureCollection', 'features': features}
     if missing_columns:
         analysis_result['validation_warnings'] = {

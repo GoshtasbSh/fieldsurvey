@@ -1212,14 +1212,13 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     for f in features:
         f['properties'].pop('raw_address', None)
 
-    # Compute analysis BEFORE stripping survey-question per-respondent fields
-    # (the analysis aggregator reads them); strip after so the persisted
-    # geojson stays small and per-respondent answers stay private.
+    # Per-respondent SURVEY_QUESTIONS answers are RETAINED on each IAQ feature
+    # so the dashboard's contact-point popup can render a "Survey Answers" tab
+    # by spatial-matching the clicked contact to its IAQ feature in iaqData.
+    # The numeric helper years_in_hre_num is dropped (analysis-only).
     analysis = _compute_iaq_analysis(features)
-    _survey_extra_keys = tuple(SURVEY_QUESTIONS.keys()) + ('years_in_hre_num',)
     for f in features:
-        for k in _survey_extra_keys:
-            f['properties'].pop(k, None)
+        f['properties'].pop('years_in_hre_num', None)
     geojson = {'type': 'FeatureCollection', 'features': features}
     if missing_columns:
         analysis['validation_warnings'] = {
