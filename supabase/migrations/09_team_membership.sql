@@ -109,17 +109,17 @@ DECLARE
   v_uid   UUID := auth.uid();
   v_today DATE := (now() AT TIME ZONE 'UTC')::date;
   v_code  TEXT;
-  v_raw   BYTEA;
 BEGIN
   IF NOT is_admin(v_uid) THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Admin role required');
   END IF;
   SELECT code INTO v_code FROM invite_codes WHERE date = v_today;
   IF v_code IS NULL THEN
-    -- 6-char alphanumeric (uppercase) code, derived from random bytes.
-    v_raw := gen_random_bytes(8);
-    v_code := upper(translate(encode(v_raw, 'base64'), '/+=', 'XYZ'));
-    v_code := substr(regexp_replace(v_code, '[^A-Z0-9]', 'X', 'g'), 1, 6);
+    -- 6-char alphanumeric code from md5(random + timestamp). md5 is
+    -- core PostgreSQL — no pgcrypto / schema-qualification gotchas.
+    v_code := upper(
+      substr(md5(random()::text || clock_timestamp()::text), 1, 6)
+    );
     INSERT INTO invite_codes (date, code, generated_by)
     VALUES (v_today, v_code, v_uid);
   END IF;

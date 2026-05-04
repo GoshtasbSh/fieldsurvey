@@ -4540,9 +4540,14 @@ async function loadTeamRoster() {
     const { data, error } = await sbClient.rpc('list_team');
     if (error) throw error;
     const members = data || [];
-    if (!members.length) { list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No team members yet.</div>'; return; }
+    if (!members.length) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No team members yet.</div>';
+      return;
+    }
     const myUid = currentUserId;
-    list.innerHTML = members.map(m => {
+    const nonAdminCount = members.filter(m => m.role !== 'admin').length;
+
+    const rowsHtml = members.map(m => {
       const isMe    = m.id === myUid;
       const isAdmin = m.role === 'admin';
       const tag = isAdmin
@@ -4559,10 +4564,22 @@ async function loadTeamRoster() {
           ${promote}${demote}
         </div>`;
     }).join('');
+
+    // If admin and only admins are in the team, show the "no members yet to
+    // promote" hint so the missing Promote buttons aren't confusing.
+    const hint = (_myRole === 'admin' && nonAdminCount === 0)
+      ? `<div style="margin-top:10px;padding:11px 13px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--muted);line-height:1.5">
+          <b style="color:var(--text)">No members to promote yet.</b> The Promote → admin button only appears next to non-admin members. New people become members by signing up at <code>/login</code>, then entering today's invite code on the claim screen. Once they appear here, click Refresh and you'll see Promote next to their row.
+          <button class="btn btn-sm" onclick="loadTeamRoster()" style="margin-top:8px;font-size:11px;padding:4px 10px">Refresh team</button>
+         </div>`
+      : '';
+
+    list.innerHTML = rowsHtml + hint;
   } catch (e) {
     list.innerHTML = `<div style="font-size:12px;color:#ef4444">Failed to load: ${_esc(e.message || e)}</div>`;
   }
 }
+window.loadTeamRoster = loadTeamRoster;
 
 async function getTodayInviteCode() {
   const btn  = document.getElementById('team-btn-code');
