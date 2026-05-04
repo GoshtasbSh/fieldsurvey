@@ -11,12 +11,12 @@
     "api/upload/results.py": { "maxDuration": 60 }
   },
   "rewrites": [
-    { "source": "/",                 "destination": "/keystone_field_web/index.html" },
-    { "source": "/field",            "destination": "/keystone_field_web/index.html" },
-    { "source": "/field/",           "destination": "/keystone_field_web/index.html" },
+    { "source": "/",                 "destination": "/keystone_field_web/index" },
+    { "source": "/field",            "destination": "/keystone_field_web/index" },
+    { "source": "/field/",           "destination": "/keystone_field_web/index" },
     { "source": "/field/:path*",     "destination": "/keystone_field_web/:path*" },
-    { "source": "/login",            "destination": "/keystone_field_web/login.html" },
-    { "source": "/admin",            "destination": "/keystone_field_web/admin.html" },
+    { "source": "/login",            "destination": "/keystone_field_web/login" },
+    { "source": "/admin",            "destination": "/keystone_field_web/admin" },
     { "source": "/dashboard",        "destination": "/static/index.html" },
     { "source": "/dashboard/",       "destination": "/static/index.html" },
     { "source": "/dashboard/:path*", "destination": "/static/:path*" }

@@ -392,6 +392,10 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         History
       </button>
+      <button class="btn btn-sm" id="btn-team" title="Team & invite code (admin)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Team
+      </button>
       <button class="btn" id="btn-import" title="Review or replace the uploaded datasets">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 12a9 9 0 1 1-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
         Update Data
@@ -399,6 +403,22 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       <button class="btn btn-icon" id="btn-fullscreen" title="Fullscreen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
       </button>
+      <div class="user-menu" id="user-menu" style="position:relative;display:none">
+        <button class="btn btn-sm" id="btn-user-menu" title="Account">
+          <span id="user-menu-initials" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#0d1117;font-size:11px;font-weight:700;margin-right:6px">??</span>
+          <span id="user-menu-label" style="font-size:12px;font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" style="margin-left:4px"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="user-menu-pop" style="display:none;position:absolute;top:calc(100% + 6px);right:0;min-width:240px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45);padding:14px;z-index:110">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:2px">Signed in as</div>
+          <div id="user-menu-email" style="font-size:13px;font-weight:600;margin-bottom:6px;word-break:break-all"></div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Role: <span id="user-menu-role" style="font-weight:700">—</span></div>
+          <button class="btn btn-sm" id="btn-signout" style="width:100%;justify-content:center;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign out
+          </button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -959,6 +979,49 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         Run Daily Refresh Now
       </button>
       <span style="font-size:11px;color:var(--muted)">Merges new field survey points collected since last snapshot</span>
+    </div>
+  </div>
+</div>
+
+<!-- Team modal -->
+<div class="modal-overlay" id="team-modal">
+  <div class="modal" style="width:680px;max-width:90vw">
+    <div class="modal-header">
+      <div>
+        <h2>Team &amp; Invite Code</h2>
+        <p style="font-size:12px;color:var(--muted);margin-top:3px" id="team-modal-sub">
+          Generate today's invite code for new surveyors. Promote teammates to admin.
+        </p>
+      </div>
+      <button class="btn btn-icon" id="team-modal-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto;padding:18px 24px">
+      <!-- Today's code (admins only) -->
+      <div id="team-code-row" style="display:none;align-items:center;gap:12px;padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:16px;background:var(--panel-2,#0d1117)">
+        <button class="btn btn-sm btn-accent" id="team-btn-code" style="flex-shrink:0">Get today's code</button>
+        <div id="team-code-display" style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:700;letter-spacing:.18em;padding:6px 12px;border-radius:7px;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.28);color:var(--accent);min-width:110px;text-align:center;flex-shrink:0">—</div>
+        <span id="team-code-meta" style="font-size:11px;color:var(--muted)"></span>
+      </div>
+      <!-- Roster -->
+      <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Team</div>
+      <div id="team-list" style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:12px;color:var(--muted)">Loading…</div>
+      </div>
+      <!-- Guest sessions (admins only) -->
+      <div id="guest-sessions-section" style="display:none;margin-top:18px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;flex:1">Today's guest surveyors</div>
+          <button class="btn btn-icon btn-sm" id="team-btn-refresh-guests" title="Refresh guest list">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+        </div>
+        <div id="guest-list" style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:12px;color:var(--muted)">No guest sessions today.</div>
+        </div>
+      </div>
+      <div id="team-msg" style="display:none;margin-top:12px;padding:10px 13px;border-radius:8px;font-size:12px"></div>
     </div>
   </div>
 </div>

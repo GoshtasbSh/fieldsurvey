@@ -555,6 +555,10 @@ async function initFieldPoints() {
       || 'Teammate';
   } catch (e) { /* ignore */ }
 
+  // Bootstrap the user-menu chip + Team modal handlers if signed in.
+  if (currentSession?.user) initUserMenu(currentSession.user);
+  initTeamModal();
+
   // Presence heartbeat (only when authenticated)
   if (currentSession?.user?.id) {
     const uid = currentSession.user.id;
@@ -4425,6 +4429,233 @@ function initResizeHandles() {
     chatEl.style.width = panelSizes.chat + 'px';
   }, 'ew');
 }
+
+// ── Team modal + user menu (Phase 1 admin UI) ───────────────────────────────
+let _myRole = null;
+
+function initUserMenu(user) {
+  const menu = document.getElementById('user-menu');
+  if (!menu) return;
+  const email = user.email || 'unknown';
+  const name  = user.user_metadata?.full_name || email.split('@')[0];
+  const initials = (name || '?').split(/\s+/).map(s => s[0]).filter(Boolean).join('').slice(0, 2).toUpperCase() || '??';
+  document.getElementById('user-menu-initials').textContent = initials;
+  document.getElementById('user-menu-label').textContent    = name;
+  document.getElementById('user-menu-email').textContent    = email;
+  menu.style.display = '';
+
+  const btn = document.getElementById('btn-user-menu');
+  const pop = document.getElementById('user-menu-pop');
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pop.style.display = pop.style.display === 'none' ? '' : 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target)) pop.style.display = 'none';
+  });
+  document.getElementById('btn-signout').addEventListener('click', async () => {
+    try { await sbClient?.auth.signOut(); } catch {}
+    window.location.replace('/login');
+  });
+
+  // Resolve role and update the chip + gate the Team button.
+  refreshMyRole();
+}
+
+async function refreshMyRole() {
+  if (!sbClient) return;
+  try {
+    const { data, error } = await sbClient.rpc('my_team_role');
+    if (error) return;
+    _myRole = (data && data.role) || null;
+    const roleEl = document.getElementById('user-menu-role');
+    if (roleEl) {
+      roleEl.textContent = _myRole || 'no role yet';
+      roleEl.style.color = _myRole === 'admin' ? 'var(--accent)' : 'var(--muted)';
+    }
+    // Hide the Team button entirely for users who aren't members; show it
+    // for members (read-only roster) and admins (full controls).
+    const teamBtn = document.getElementById('btn-team');
+    if (teamBtn) teamBtn.style.display = _myRole ? '' : 'none';
+  } catch {}
+}
+
+function _esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function _teamMsg(text, kind) {
+  const el = document.getElementById('team-msg');
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; return; }
+  el.textContent = text;
+  el.style.display = '';
+  el.style.background = kind === 'err' ? 'rgba(239,68,68,.1)' : 'rgba(52,211,153,.1)';
+  el.style.color      = kind === 'err' ? '#ef4444' : '#34d399';
+  el.style.border     = kind === 'err' ? '1px solid rgba(239,68,68,.25)' : '1px solid rgba(52,211,153,.25)';
+}
+
+function initTeamModal() {
+  const overlay = document.getElementById('team-modal');
+  const openBtn = document.getElementById('btn-team');
+  const close   = document.getElementById('team-modal-close');
+  if (!overlay || !openBtn) return;
+
+  openBtn.addEventListener('click', async () => {
+    if (!sbClient) { alert('Sign in first.'); return; }
+    if (_myRole === null) await refreshMyRole();
+    const isAdmin = _myRole === 'admin';
+    document.getElementById('team-code-row').style.display          = isAdmin ? 'flex' : 'none';
+    document.getElementById('guest-sessions-section').style.display = isAdmin ? '' : 'none';
+    document.getElementById('team-modal-sub').textContent = isAdmin
+      ? "Generate today's invite code for new surveyors. Promote teammates to admin."
+      : 'Roster of your team. Ask an admin if you need an invite code or role change.';
+    overlay.classList.add('show');
+    overlay.style.display = 'flex';
+    _teamMsg('');
+    loadTeamRoster();
+    if (isAdmin) loadGuestSessionsForToday();
+  });
+
+  close.addEventListener('click', () => {
+    overlay.classList.remove('show');
+    overlay.style.display = 'none';
+  });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      overlay.classList.remove('show');
+      overlay.style.display = 'none';
+    }
+  });
+
+  document.getElementById('team-btn-code').addEventListener('click', getTodayInviteCode);
+  document.getElementById('team-btn-refresh-guests').addEventListener('click', loadGuestSessionsForToday);
+}
+
+async function loadTeamRoster() {
+  const list = document.getElementById('team-list');
+  if (!sbClient) return;
+  try {
+    const { data, error } = await sbClient.rpc('list_team');
+    if (error) throw error;
+    const members = data || [];
+    if (!members.length) { list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No team members yet.</div>'; return; }
+    const myUid = currentUserId;
+    list.innerHTML = members.map(m => {
+      const isMe    = m.id === myUid;
+      const isAdmin = m.role === 'admin';
+      const tag = isAdmin
+        ? '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(56,189,248,.15);color:var(--accent);border:1px solid rgba(56,189,248,.28)">ADMIN</span>'
+        : '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:\'IBM Plex Mono\',monospace;background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border)">MEMBER</span>';
+      const promote = (_myRole === 'admin' && !isAdmin)
+        ? `<button class="btn btn-sm" onclick="dashboardPromote('${_esc(m.id)}')" style="font-size:11px;padding:4px 10px">Promote → admin</button>` : '';
+      const demote  = (_myRole === 'admin' && isAdmin && !isMe)
+        ? `<button class="btn btn-sm" onclick="dashboardDemote('${_esc(m.id)}')" style="font-size:11px;padding:4px 10px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)">Demote</button>` : '';
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel-2,#0d1117)">
+          <div style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(m.email)}${isMe ? ' <span style="color:var(--muted);font-weight:400">(you)</span>' : ''}</div>
+          ${tag}
+          ${promote}${demote}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div style="font-size:12px;color:#ef4444">Failed to load: ${_esc(e.message || e)}</div>`;
+  }
+}
+
+async function getTodayInviteCode() {
+  const btn  = document.getElementById('team-btn-code');
+  const out  = document.getElementById('team-code-display');
+  const meta = document.getElementById('team-code-meta');
+  if (!sbClient) return;
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {
+    const { data, error } = await sbClient.rpc('get_or_create_today_code');
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Failed to get code');
+    out.textContent = data.code;
+    meta.textContent = `for ${data.date} (UTC) · share verbally`;
+    _teamMsg('Code copied to clipboard', 'ok');
+    try { await navigator.clipboard.writeText(data.code); } catch {}
+  } catch (e) {
+    _teamMsg(e.message || 'Failed to get code', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = "Get today's code";
+  }
+}
+
+async function dashboardPromote(uid) {
+  if (!confirm('Promote this user to admin? They gain full upload + delete + team-management privileges.')) return;
+  try {
+    const { data, error } = await sbClient.rpc('promote_member', { p_target: uid });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Promote failed');
+    _teamMsg('User promoted to admin', 'ok');
+    await loadTeamRoster();
+  } catch (e) { _teamMsg(e.message || 'Promote failed', 'err'); }
+}
+
+async function dashboardDemote(uid) {
+  if (!confirm('Demote this admin to member?')) return;
+  try {
+    const { data, error } = await sbClient.rpc('demote_member', { p_target: uid });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Demote failed');
+    _teamMsg('User demoted to member', 'ok');
+    await loadTeamRoster();
+  } catch (e) { _teamMsg(e.message || 'Demote failed', 'err'); }
+}
+
+async function loadGuestSessionsForToday() {
+  const list = document.getElementById('guest-list');
+  if (!sbClient || _myRole !== 'admin') return;
+  list.innerHTML = '<div style="font-size:12px;color:var(--muted)">Loading…</div>';
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await sbClient.rpc('list_guest_sessions', { p_date: today });
+    if (error) throw error;
+    const sessions = data || [];
+    if (!sessions.length) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--muted)">No guest sessions today.</div>';
+      return;
+    }
+    list.innerHTML = sessions.map(g => {
+      const revoked = !!g.revoked_at;
+      const expired = g.expires_at && new Date(g.expires_at) < new Date();
+      const status  = revoked ? 'revoked' : (expired ? 'expired' : 'active');
+      const color   = revoked ? '#ef4444' : (expired ? '#9ca3af' : '#34d399');
+      const isLive  = status === 'active';
+      const revokeBtn = isLive
+        ? `<button class="btn btn-sm" onclick="dashboardRevokeGuest('${_esc(g.id)}')" style="font-size:11px;padding:4px 10px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)">Revoke</button>` : '';
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px">
+          <div style="flex:1;font-size:13px;font-weight:600">${_esc(g.name)}</div>
+          <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:'IBM Plex Mono',monospace;background:${color}22;color:${color};border:1px solid ${color}44">${status}</span>
+          <span style="font-size:11px;color:var(--muted)">${g.point_count ?? 0} pin(s)</span>
+          ${revokeBtn}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div style="font-size:12px;color:#ef4444">Failed: ${_esc(e.message || e)}</div>`;
+  }
+}
+
+async function dashboardRevokeGuest(sid) {
+  if (!confirm('Revoke this guest session? Their next save attempt will fail.')) return;
+  try {
+    const { data, error } = await sbClient.rpc('revoke_guest_session', { p_session: sid });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Revoke failed');
+    _teamMsg('Guest session revoked', 'ok');
+    await loadGuestSessionsForToday();
+  } catch (e) { _teamMsg(e.message || 'Revoke failed', 'err'); }
+}
+
+// Expose handlers used in inline onclick.
+window.dashboardPromote     = dashboardPromote;
+window.dashboardDemote      = dashboardDemote;
+window.dashboardRevokeGuest = dashboardRevokeGuest;
 
 // ── Init ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
