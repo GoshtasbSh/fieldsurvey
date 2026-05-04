@@ -1,28 +1,138 @@
-"""POST /api/chat — AI survey analyst.
+"""POST /api/chat — AI survey analyst with full map action support.
 
-Minimal Vercel port of the Groq-backed chatbot in app.py. Replies to questions
-about the IAQ + community survey data using a compact JSON context built live
-from Supabase blobs.
-
-Not yet ported: multi-model fallback chain (Gemini), structured json_actions
-block parsing for map actions. Responses are text-only for now — the frontend's
-existing code gracefully handles an empty map_actions list.
+Ports the complete chat implementation from app.py including:
+- Rich CHAT_SYSTEM_PROMPT with MAP ACTIONS section
+- TEXT_ACTION_PROTOCOL for json_actions fenced-block output
+- json_actions parser to extract map actions from LLM response
+- _infer_map_actions fallback for common queries
 
 Requires GROQ_API_KEY env var on Vercel.
 """
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import supabase_admin, supabase_anon, load_cached, json_response
+from _lib import load_cached, json_response
 
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+CHAT_SYSTEM_PROMPT = """Analyst for KeyStone Heights, FL housing vulnerability dashboard.
+IAQ Survey: {n_iaq} households · Community Contact: {n_contact} visits · Map: {map_state}
+Data (streets_by_risk ordered worst→best; risk_rank 1=worst; only streets ≥3 responses shown):
+{data}
+
+SCORES (0–100, higher=worse):
+overall_risk=35%health+35%iaq+30%struct | Low<34(green) Medium34-66(orange) High≥67(red)
+health: symptom freq (resp.ill,asthma,wheeze,headache — weekly/monthly/season="active") + hospital respiratory +20
+iaq: mold+30 · leakage+7.5/zone(×4max) · cooling>15yr +4/zone(×4max) · gas/propane cooking+10
+struct: yr<1960+30, 1960-79+20, 1980-99+10 · single-wide+25, double-wide+15 · poor+25, fair+15
+contacts: Completed=done · No Answer=nobody home · Inaccessible=locked/dog/gate
+  Not Interested=declined · Left Info=QR/flyer · Vacant=empty · Follow Up=will complete later
+
+MAP ACTIONS (all layers auto-cleared before each response; activate only what was asked):
+highlight_streets {{streets:["Exact"],color:"#hex"}}  — OSM road line only (NO circles/points); pair with zoom_to_street; accepts multiple streets
+  color MUST reflect the query context — pick from:
+    worst health/risk → "#ef4444"  (red)
+    worst structural/age → "#f97316"  (orange)
+    worst IAQ/mold → "#8b5cf6"  (purple)
+    best/safest → "#10b981"  (green)
+    neutral comparison → "#3b82f6"  (blue)
+zoom_to_street {{street:"Exact"}}  — always with highlight_streets
+filter_iaq_symptom {{field,values}}  — auto-shows iaq_points
+  respiratory_ill|asthma_freq|wheeze_freq|headache_freq → ["weekly","month","season"]
+  has_mold→[true] · hospital_visit→["yes"] · ownership→["Owner"/"Renter"]
+  risk_tier→["High"/"Medium"/"Low"] · housing_type→["Single Wide"/"Double Wide"/"Site Built"]
+  coord_source→["geocoded"]
+filter_contact_status {{statuses:[...]}}  — auto-shows contact_survey
+  "Completed"|"No Answer"|"Inaccessible"|"Not Interested"|"Left Info"|"Vacant"|"Follow Up" · []=all
+show_iaq_choropleth {{field}}  — auto-shows iaq_points | overall_risk|health_score|iaq_score|struct_score
+set_layer_visibility {{layer,visible}}  — extras only: heatmap|parcels|clusters|labels|3d
+clear_filters  — restore default view (both layers on)
+show_analysis_tab {{tab}}  — summary|charts|streets|parcels|results
+
+PATTERNS:
+worst street (overall) → highlight_streets([risk_rank=1 name], color="#ef4444") + zoom_to_street + detailed report
+worst-by-health → highlight_streets([top health_score name], color="#ef4444") + zoom_to_street + detailed report
+worst-by-struct/age → highlight_streets([top struct_score name], color="#f97316") + zoom_to_street + detailed report
+worst-by-mold/IAQ → highlight_streets([top iaq_score name], color="#8b5cf6") + zoom_to_street + detailed report
+best/safest street → highlight_streets([context.best_street — the one with LOWEST mean_risk / HIGHEST risk_rank], color="#10b981") + zoom_to_street + detailed report
+compare streets → highlight_streets([A,B,...], color="#3b82f6") + zoom_to_street(A) + markdown table
+mold → filter_iaq_symptom(has_mold,[true])
+symptom → filter_iaq_symptom(field,["weekly","month","season"])
+renters/owners → filter_iaq_symptom(ownership,["Renter"/"Owner"])
+mobile homes → filter_iaq_symptom(housing_type,["Single Wide"])
+high-risk only → filter_iaq_symptom(risk_tier,["High"])
+risk choropleth → show_iaq_choropleth(overall_risk|health_score|iaq_score|struct_score)
+contact filter → filter_contact_status(["status"])
+clusters → ASK "By contact outcomes or IAQ risk?" then set_layer_visibility(clusters,true) or show_iaq_choropleth
+reset → clear_filters
+text-only (no action): match rate · validation · overall summary · which streets need follow-up
+
+RULES:
+1. ALWAYS write a text response BEFORE or ALONGSIDE every tool call. NEVER return a tool call with no text. Every single response must contain a written analysis.
+2. Street cite: "[Name] ranks #N — risk X/100 (health H, IAQ I, struct S, n=N). Primary driver: [reason]."
+3. 2+ street comparison: markdown table — Street|N|Risk|Health|IAQ|Struct|Mold%|Resp%
+4. Exact street names from streets_by_risk only. If not found, say so and offer closest match.
+5. Ambiguous query → ask one clarifying question, do not act yet.
+6. End every response: 💡 Follow-up: [specific question about what was shown]
+7. ≤200 words for layer toggles · ≤400 words for analysis. Lead with the finding.
+8. For best/worst street queries: always write a full report (scores, primary driver, housing types, mold rate, hospital rate) in the text — the map alone is not sufficient."""
+
+TEXT_ACTION_PROTOCOL = """
+
+=== CRITICAL: MAP ACTION OUTPUT ===
+ANY response that references a specific street, filter, layer, or view MUST end
+with a ```json_actions``` fenced block. NEVER describe actions in prose like
+"we need to filter X" — EMIT the action instead. The block is hidden from the
+user; your prose is the analysis, the block is the action.
+
+Required format (exact fence tag `json_actions`, NOT `json`):
+```json_actions
+[{"type":"highlight_streets","params":{"streets":["Harvard Ave"],"color":"#ef4444"}},
+ {"type":"zoom_to_street","params":{"street":"Harvard Ave"}}]
+```
+
+Examples of user queries and the REQUIRED action block:
+
+Q: "worst street" / "highest risk street" / "show survey points for Harvard Ave"
+→ ```json_actions
+[{"type":"highlight_streets","params":{"streets":["Harvard Ave"],"color":"#ef4444"}},
+ {"type":"zoom_to_street","params":{"street":"Harvard Ave"}}]
+```
+
+Q: "show mold cases" / "houses with mold"
+→ ```json_actions
+[{"type":"filter_iaq_symptom","params":{"field":"has_mold","values":[true]}}]
+```
+
+Q: "overall risk choropleth" / "heatmap of risk"
+→ ```json_actions
+[{"type":"show_iaq_choropleth","params":{"field":"overall_risk"}}]
+```
+
+Q: "completed surveys" / "which homes are done"
+→ ```json_actions
+[{"type":"filter_contact_status","params":{"statuses":["Completed"]}}]
+```
+
+Q: "reset" / "clear all"
+→ ```json_actions
+[{"type":"clear_filters","params":{}}]
+```
+
+FORBIDDEN: saying "we need to filter X" or "to do this we would..." or "this
+will require the action:" without emitting the block. That leaves the map
+unchanged and the user frustrated. Always emit the block when the query
+mentions a street/filter/layer — even if you're not 100% sure, ship the most
+likely action.
+"""
 
 
 def _build_context() -> dict:
@@ -67,27 +177,105 @@ def _build_context() -> dict:
         },
         # Trim to top 15 worst + bottom 5 best for token budget
         "streets_by_risk": {s: d for s, d in (ranked[:15] + ranked[-5:])},
+        "_street_stats_all": street_stats,  # used by _infer_map_actions fallback
     }
 
 
-SYSTEM_PROMPT = """You are the analyst for the KeyStone Heights, FL housing vulnerability dashboard.
+def _infer_map_actions(query: str, street_stats: dict) -> list:
+    """Deterministic fallback when LLM doesn't emit a json_actions block."""
+    if not query or not street_stats:
+        return []
 
-You answer questions about two datasets:
-1. IAQ (indoor air quality) survey — {n_iaq} responses, grouped by street.
-2. Community contact survey — {n_contact} address-level contact records.
+    q = query.lower()
 
-Map state: {map_state}
+    show_words  = ('show', 'highlight', 'where', 'find', 'display', 'mark',
+                   'see', 'locate', 'point', 'info', 'data', 'for the',
+                   'on the map', 'on map')
+    worst_words = ('worst', 'highest', 'most', 'top', 'dangerous')
+    best_words  = ('best', 'safest', 'lowest', 'least')
+    reset_words = ('reset', 'clear', 'remove filter', 'all streets', 'show all')
 
-Ground truth data (JSON):
-{data}
+    color = '#3b82f6'
+    if any(w in q for w in worst_words):
+        color = '#ef4444'
+    elif any(w in q for w in best_words):
+        color = '#10b981'
+    if 'mold' in q or 'iaq' in q:
+        color = '#8b5cf6'
+    elif 'struct' in q or 'age' in q or 'old' in q or 'year built' in q:
+        color = '#f97316'
+    elif 'health' in q or 'asthma' in q or 'respiratory' in q:
+        color = '#ef4444'
 
-Rules:
-- Use ONLY the data above; never invent numbers.
-- "Best" means LOWEST mean_risk (safer). "Worst" = HIGHEST mean_risk.
-- If the user asks to show/filter/highlight anything on the map, answer with
-  a clear text explanation. (Map actions will be wired up in a later update.)
-- Keep responses under 180 words unless the user explicitly asks for detail.
-- Cite exact numbers (e.g., "mean_risk = 72") when stating claims."""
+    known_streets = [s for s, d in street_stats.items() if not d.get('insufficient_data')]
+    matched_streets = []
+    for street in known_streets:
+        s_lower = street.lower()
+        first_word = street.split()[0].lower()
+        if s_lower in q or (len(first_word) >= 4 and re.search(rf'\b{re.escape(first_word)}\b', q)):
+            matched_streets.append(street)
+
+    ranked = sorted(
+        [(s, d) for s, d in street_stats.items() if not d.get('insufficient_data')],
+        key=lambda x: -x[1].get('mean_risk', 0)
+    )
+    if not matched_streets and ranked:
+        if any(w in q for w in worst_words) and 'street' in q:
+            matched_streets = [ranked[0][0]]
+        elif any(w in q for w in best_words) and 'street' in q:
+            matched_streets = [ranked[-1][0]]
+
+    if matched_streets:
+        return [
+            {"type": "highlight_streets", "params": {"streets": matched_streets, "color": color}},
+            {"type": "zoom_to_street",    "params": {"street": matched_streets[0]}},
+        ]
+
+    if 'mold' in q and any(w in q for w in show_words + ('with', 'houses', 'homes')):
+        return [{"type": "filter_iaq_symptom", "params": {"field": "has_mold", "values": [True]}}]
+
+    if 'choropleth' in q or 'heatmap of risk' in q or 'risk map' in q:
+        field = 'overall_risk'
+        if 'health' in q:   field = 'health_score'
+        elif 'iaq' in q:    field = 'iaq_score'
+        elif 'struct' in q: field = 'struct_score'
+        return [{"type": "show_iaq_choropleth", "params": {"field": field}}]
+
+    if 'completed' in q and 'surveys' in q:
+        return [{"type": "filter_contact_status", "params": {"statuses": ["Completed"]}}]
+    if 'no answer' in q:
+        return [{"type": "filter_contact_status", "params": {"statuses": ["No Answer"]}}]
+    if 'vacant' in q:
+        return [{"type": "filter_contact_status", "params": {"statuses": ["Vacant"]}}]
+
+    if 'asthma' in q and any(w in q for w in show_words):
+        return [{"type": "filter_iaq_symptom", "params": {"field": "asthma_freq",
+                 "values": ["weekly", "month", "season"]}}]
+    if 'respiratory' in q and any(w in q for w in show_words):
+        return [{"type": "filter_iaq_symptom", "params": {"field": "respiratory_ill",
+                 "values": ["weekly", "month", "season"]}}]
+
+    if any(w in q for w in reset_words):
+        return [{"type": "clear_filters", "params": {}}]
+
+    return []
+
+
+def _extract_json_actions(txt: str):
+    """Extract ```json_actions [...] ``` block from LLM text. Returns (actions, cleaned_text)."""
+    if not txt:
+        return [], txt
+    m = re.search(r"```json_actions\s*(\[.*?\])\s*```", txt, re.DOTALL)
+    if not m:
+        return [], txt
+    try:
+        parsed = json.loads(m.group(1))
+        if isinstance(parsed, list):
+            cleaned = re.sub(r"```json_actions\s*\[.*?\]\s*```", "", txt, flags=re.DOTALL).strip()
+            return parsed, cleaned
+    except Exception:
+        pass
+    return [], txt
 
 
 def _call_groq(messages: list, api_key: str) -> str:
@@ -147,14 +335,15 @@ class handler(BaseHTTPRequestHandler):
             })
             return
 
-        system = SYSTEM_PROMPT.format(
+        street_stats = ctx.pop("_street_stats_all", {})
+
+        system = (CHAT_SYSTEM_PROMPT + TEXT_ACTION_PROTOCOL).format(
             n_iaq=ctx["dataset"]["n_surveyed"],
             n_contact=ctx["dataset"]["n_community_contacts"],
             map_state=map_state,
             data=json.dumps(ctx, separators=(",", ":")),
         )
         msgs = [{"role": "system", "content": system}]
-        # Last 5 turns of history
         for h in history[-5:]:
             role = h.get("role") or "user"
             content = h.get("content") or ""
@@ -163,14 +352,24 @@ class handler(BaseHTTPRequestHandler):
         msgs.append({"role": "user", "content": message})
 
         try:
-            text = _call_groq(msgs, groq_key)
-            json_response(self, 200, {
-                "text": text,
-                "map_actions": [],
-                "model_used": f"groq/{GROQ_MODEL}",
-            })
+            raw_text = _call_groq(msgs, groq_key)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="ignore")[:400]
             json_response(self, 502, {"error": f"Groq API {e.code}: {detail}"})
+            return
         except Exception as e:
             json_response(self, 500, {"error": f"{type(e).__name__}: {e}"})
+            return
+
+        # Extract json_actions block; strip it from the visible text
+        map_actions, text = _extract_json_actions(raw_text)
+
+        # Deterministic fallback: keyword + street-name matching
+        if not map_actions:
+            map_actions = _infer_map_actions(message, street_stats)
+
+        json_response(self, 200, {
+            "text": text,
+            "map_actions": map_actions,
+            "model_used": f"groq/{GROQ_MODEL}",
+        })
