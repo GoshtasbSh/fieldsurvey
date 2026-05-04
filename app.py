@@ -2185,8 +2185,72 @@ async def api_results():
 
 # ── IAQ endpoints ──────────────────────────────────────────────────────────────
 
+def _strip_survey_answers_local(geojson):
+    """Mirror of api/_lib.strip_survey_answers — drops per-respondent
+    SURVEY_QUESTIONS keys from every feature so the public IAQ endpoint
+    doesn't leak individuals' answers. Auth-gated /api/iaq-points-full
+    serves the un-stripped payload."""
+    if not isinstance(geojson, dict):
+        return geojson
+    feats_in = geojson.get('features') or []
+    if not isinstance(feats_in, list):
+        return geojson
+    keys = set(SURVEY_QUESTIONS.keys())
+    feats_out = []
+    for f in feats_in:
+        if not isinstance(f, dict):
+            feats_out.append(f); continue
+        props = f.get('properties') or {}
+        if not isinstance(props, dict):
+            feats_out.append(f); continue
+        feats_out.append({**f, 'properties': {k: v for k, v in props.items() if k not in keys}})
+    return {**geojson, 'features': feats_out}
+
+
+_iaq_full_anon_sb = None  # lazy-init; uses anon key, NOT the service-role key.
+
+def _check_auth_header_local(request) -> str | None:
+    """Verify the request's Supabase Bearer token. Returns the user id on
+    success, None otherwise (caller must respond 401)."""
+    global _iaq_full_anon_sb
+    auth = request.headers.get('authorization') or request.headers.get('Authorization') or ''
+    if not auth.lower().startswith('bearer '):
+        return None
+    jwt = auth.split(' ', 1)[1].strip()
+    if not jwt:
+        return None
+    if _iaq_full_anon_sb is None:
+        try:
+            url  = os.environ.get('SUPABASE_URL', '')
+            anon = os.environ.get('SUPABASE_ANON_KEY', '')
+            if not (url and anon):
+                return None
+            from supabase import create_client as _cc
+            _iaq_full_anon_sb = _cc(url, anon)
+        except Exception:
+            return None
+    try:
+        resp = _iaq_full_anon_sb.auth.get_user(jwt)
+        user = getattr(resp, 'user', None)
+        return getattr(user, 'id', None) if user else None
+    except Exception:
+        return None
+
+
 @app.get("/api/iaq-points")
 async def api_iaq_pts():
+    """Public — per-respondent answers stripped before serving."""
+    if not iaq_data:
+        return JSONResponse({"type": "FeatureCollection", "features": []})
+    return JSONResponse(_strip_survey_answers_local(iaq_data))
+
+
+@app.get("/api/iaq-points-full")
+async def api_iaq_pts_full(request: Request):
+    """Auth-gated — full payload including per-respondent SURVEY_QUESTIONS
+    answers, used by the dashboard's Survey Answers popup tab."""
+    if _check_auth_header_local(request) is None:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
     if not iaq_data:
         return JSONResponse({"type": "FeatureCollection", "features": []})
     return JSONResponse(iaq_data)

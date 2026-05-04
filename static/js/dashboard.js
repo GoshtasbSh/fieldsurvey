@@ -117,6 +117,27 @@ function initMap() {
   map.on('load', loadData);
 }
 
+// IAQ points come in two flavours:
+//   - /api/iaq-points       (public, per-respondent answers stripped)
+//   - /api/iaq-points-full  (auth-gated, includes answers for the popup tab)
+// Try the full endpoint first when the user has a Supabase session, fall
+// back to the public one otherwise. Anonymous viewers still get the map
+// dots + risk scores; only the per-question popup tab is blank.
+async function fetchIaqPoints() {
+  try {
+    const session = (sbClient && sbClient.auth)
+      ? (await sbClient.auth.getSession()).data?.session
+      : null;
+    if (session?.access_token) {
+      const r = await fetch('/api/iaq-points-full', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+      if (r.ok) return r;
+    }
+  } catch (e) { /* fall through to public */ }
+  return fetch('/api/iaq-points');
+}
+
 // ── Data loading ────────────────────────────────────────────────────────────
 async function loadData() {
   try {
@@ -124,7 +145,7 @@ async function loadData() {
       fetch('/api/survey-points'),
       fetch('/api/parcels'),
       fetch('/api/analysis'),
-      fetch('/api/iaq-points'),
+      fetchIaqPoints(),
       fetch('/api/iaq-analysis'),
     ]);
     const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
@@ -192,7 +213,7 @@ async function refreshAllData() {
       fetch('/api/survey-points'),
       fetch('/api/parcels'),
       fetch('/api/analysis'),
-      fetch('/api/iaq-points'),
+      fetchIaqPoints(),
       fetch('/api/iaq-analysis'),
     ]);
     const safe = async (res, fb) => {
@@ -2169,7 +2190,7 @@ async function restoreVersion(id, label, type) {
       buildAnalysis();
       fitBounds();
     } else {
-      const iaqPts = await (await fetch('/api/iaq-points')).json();
+      const iaqPts = await (await fetchIaqPoints()).json();
       iaqData = iaqPts;
       const iaqAna = await (await fetch('/api/iaq-analysis')).json();
       if (iaqAna.loaded) iaqAnalysis = iaqAna;
