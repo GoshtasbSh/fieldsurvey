@@ -1166,7 +1166,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     sb = null;
     initMap([]);
     if (navigator.onLine) {
-      loadGuestPoints();        // own pins + ALL team pins (via /api/guest action=points-all)
+      loadGuestPoints();        // own + ALL team pins (via /api/guest action=points-all)
+      loadCommunityContacts();  // CSV community contacts — /api/survey-points is public,
+                                // no proxy needed; previously skipped for guests so the
+                                // Community Contact Visits panel was empty.
       loadTodayMessages();      // populates the chat tab on first open
     }
     startGuestHeartbeat();
