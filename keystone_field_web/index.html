@@ -2339,6 +2339,10 @@ async function loadFieldPointsFromServer() {
         status: p.status, notes: p.notes,
         collector_id: p.collector_id,
         collector_name: p.collector,
+        // Carry guest_session_id through so a guest's own pins still
+        // resolve as is_mine=true after the 30 s polling refresh —
+        // otherwise Edit/Delete buttons disappear from popups.
+        guest_session_id: p.guest_session_id || null,
         collected_at: p.collected_at,
       };
     });
@@ -2361,7 +2365,17 @@ function startFieldDataPolling() {
   _ccPollTimer = setInterval(async () => {
     if (document.hidden) return;
     await loadCommunityContacts();
-    await loadFieldPointsFromServer();
+    // Guests must use /api/guest action=points-all (it includes their
+    // guest_session_id and validates the session). loadFieldPointsFromServer
+    // hits /api/field-points which is service-role and works for everyone
+    // else — but routing guests through it bypasses session validation
+    // and used to drop guest_session_id, which broke Edit/Delete on
+    // every popup after the first poll tick.
+    if (IS_GUEST) {
+      await loadGuestPoints();
+    } else {
+      await loadFieldPointsFromServer();
+    }
   }, 30000);
 }
 

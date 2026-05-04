@@ -36,7 +36,7 @@ class handler(BaseHTTPRequestHandler):
                     sb.table("field_survey_points")
                     .select(
                         "id,lat,lon,status,notes,collector_id,"
-                        "collector_name,collected_at"
+                        "collector_name,guest_session_id,collected_at"
                     )
                     .order("collected_at", desc=True)
                     .range(offset, offset + PAGE - 1)
@@ -69,6 +69,11 @@ class handler(BaseHTTPRequestHandler):
                     "notes": p.get("notes") or "",
                     "collector_id": p.get("collector_id"),
                     "collector": p.get("collector_name") or "Unknown",
+                    # Required so the field-web's pointsToGeoJSON can
+                    # mark a guest's own pins as is_mine=true. Without
+                    # this, the 30 s polling refresh wiped guest_session_id
+                    # from every pin and Edit/Delete buttons disappeared.
+                    "guest_session_id": p.get("guest_session_id"),
                     "collected_at": p.get("collected_at"),
                     "is_field": True,
                 },
