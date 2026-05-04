@@ -1171,6 +1171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 // no proxy needed; previously skipped for guests so the
                                 // Community Contact Visits panel was empty.
       loadTodayMessages();      // populates the chat tab on first open
+      startFieldDataPolling();  // 30 s refresh keeps totals matching the desktop
     }
     startGuestHeartbeat();
     startGuestChatPoll();
@@ -1436,7 +1437,12 @@ function addCommunityLayerGeoJSON(gj) {
       id:'community-dots', type:'circle', source:'community',
       layout:{ visibility:'visible' },
       paint:{
-        'circle-radius': ['interpolate',['linear'],['zoom'], 11,4, 17,9],
+        // Match the "not-mine" field-pin style: smaller, faded, gray
+        // outline. Only the currently-signed-in surveyor's field pins
+        // remain solid + bright + white-outlined, so it's instantly
+        // obvious which dots they personally collected vs. CSV imports
+        // and teammates' visits.
+        'circle-radius': ['interpolate',['linear'],['zoom'], 11,3.5, 17,8],
         'circle-color': [
           'match', ['get','status'],
           'Completed',    '#10b981',
@@ -1449,9 +1455,9 @@ function addCommunityLayerGeoJSON(gj) {
           'Other',        '#ec4899',
           '#9ca3af'
         ],
-        'circle-stroke-width':1.5,
-        'circle-stroke-color':'rgba(255,255,255,0.55)',
-        'circle-opacity': 0.9,
+        'circle-stroke-width': 0.6,
+        'circle-stroke-color': '#9ca3af',
+        'circle-opacity': 0.45,
       }
     });
     // Ensure visibility after adding (belt-and-suspenders)
@@ -1534,8 +1540,18 @@ async function loadSupabaseData() {
     recalcCounts(_allFieldPoints);
   } catch (e) { console.warn('Load field points failed:', e); }
 
+  // Fallback: if the direct Supabase read returned zero rows (typically
+  // because the signed-in user isn't yet in team_members so RLS blocks
+  // the SELECT), pull from the service-role endpoint so the field web
+  // sees the same field points the desktop dashboard does.
+  if (!_allFieldPoints.length) {
+    await loadFieldPointsFromServer();
+  }
+
   // Community contacts come from the server (geocoded from Excel)
   await loadCommunityContacts();
+  // Keep totals in sync with the desktop on a 30 s tick.
+  startFieldDataPolling();
 
   // IAQ points come from the server
   try {
@@ -2105,6 +2121,11 @@ function computeUnifiedFieldCounts() {
   return out;
 }
 
+// Personal status counts — drives the "Survey Legend" panel so each
+// surveyor sees a breakdown of THEIR collected pins (matches the
+// "0 total · +0 today" line below it).
+let personalCounts = {};
+
 function recalcCounts(pts) {
   const myId   = currentUser?.id || null;
   const myGsid = (IS_GUEST && GUEST?.session_id) || null;
@@ -2116,9 +2137,16 @@ function recalcCounts(pts) {
   const mineToday = mine.filter(p => new Date(p.collected_at).toDateString() === today);
   totalPts = mine.length;
   todayPts = mineToday.length;
-  // Survey Legend + filter chips show unified totals so every user
-  // (admin, member, guest) sees the same community-contact picture
-  // the desktop dashboard does.
+  // Survey Legend = MY collected breakdown (per-status). All-time so the
+  // PI can review what each surveyor has gathered when they sign in.
+  personalCounts = {};
+  Object.keys(STATUS_COLORS).forEach(s => personalCounts[s] = 0);
+  mine.forEach(p => {
+    const s = p.status || 'Unknown';
+    if (personalCounts[s] !== undefined) personalCounts[s]++;
+  });
+  // Community Contact Visits panel + top filter chips = unified totals
+  // (CSV + field, deduped). Same picture as the desktop dashboard.
   counts = computeUnifiedFieldCounts();
   renderCounts();
 }
@@ -2131,17 +2159,17 @@ function updateCountUI(status) {
 }
 
 function renderCounts() {
-  document.getElementById('lc-Completed').textContent    = counts['Completed'] || 0;
-  document.getElementById('lc-NoAnswer').textContent     = counts['No Answer'] || 0;
-  document.getElementById('lc-Inaccessible').textContent = counts['Inaccessible'] || 0;
-  document.getElementById('lc-NotInterested').textContent= counts['Not Interested'] || 0;
-  document.getElementById('lc-LeftInfo').textContent     = counts['Left Info'] || 0;
-  document.getElementById('lc-Vacant').textContent       = counts['Vacant'] || 0;
-  document.getElementById('lc-FollowUp').textContent     = counts['Follow Up'] || 0;
-  document.getElementById('lc-Other').textContent        = counts['Other'] || 0;
-  document.getElementById('lc-Unknown').textContent      = counts['Unknown'] || 0;
-  // "All" chip = unified community-contact total (CSV + field, deduped),
-  // mirroring desktop. Personal totals live in sb-stat-total below.
+  // Survey Legend = MY collected breakdown (per-user, all-time)
+  document.getElementById('lc-Completed').textContent    = personalCounts['Completed'] || 0;
+  document.getElementById('lc-NoAnswer').textContent     = personalCounts['No Answer'] || 0;
+  document.getElementById('lc-Inaccessible').textContent = personalCounts['Inaccessible'] || 0;
+  document.getElementById('lc-NotInterested').textContent= personalCounts['Not Interested'] || 0;
+  document.getElementById('lc-LeftInfo').textContent     = personalCounts['Left Info'] || 0;
+  document.getElementById('lc-Vacant').textContent       = personalCounts['Vacant'] || 0;
+  document.getElementById('lc-FollowUp').textContent     = personalCounts['Follow Up'] || 0;
+  document.getElementById('lc-Other').textContent        = personalCounts['Other'] || 0;
+  document.getElementById('lc-Unknown').textContent      = personalCounts['Unknown'] || 0;
+  // Top filter chips = unified totals matching desktop dashboard.
   const unifiedAll = Object.values(counts || {}).reduce((s, n) => s + (n || 0), 0);
   document.getElementById('fc-all').textContent          = unifiedAll;
   document.getElementById('fc-Completed').textContent    = counts['Completed'] || 0;
@@ -2168,6 +2196,7 @@ function renderCounts() {
 
 /* ── COMMUNITY CONTACTS LOADER ── */
 let _ccRetryTimer = null;
+let _ccPollTimer  = null;
 
 async function loadCommunityContacts() {
   try {
@@ -2192,6 +2221,51 @@ async function loadCommunityContacts() {
   } catch (e) { console.warn('Load community failed:', e); }
 }
 
+// Pull every field-collected point from the server (uses service-role,
+// bypasses RLS). Used as a fallback when the direct Supabase read is
+// blocked (e.g. signed-in user not yet in team_members) and as the
+// primary source for guests.
+async function loadFieldPointsFromServer() {
+  try {
+    const r = await fetch('/api/field-points', { cache: 'no-store' });
+    if (!r.ok) return false;
+    const gj = await r.json();
+    const feats = (gj && Array.isArray(gj.features)) ? gj.features : [];
+    _allFieldPoints = feats.map(f => {
+      const c = f.geometry?.coordinates || [];
+      const p = f.properties || {};
+      return {
+        id: p.id,
+        lon: c[0], lat: c[1],
+        status: p.status, notes: p.notes,
+        collector_id: p.collector_id,
+        collector_name: p.collector,
+        collected_at: p.collected_at,
+      };
+    });
+    const src = map && map.getSource && map.getSource('survey');
+    if (src) src.setData(pointsToGeoJSON(_allFieldPoints));
+    recalcCounts(_allFieldPoints);
+    updateCcPanel();
+    return true;
+  } catch (e) {
+    console.warn('GET /api/field-points failed:', e);
+    return false;
+  }
+}
+
+// Poll both endpoints every 30 s so the field web stays in sync with
+// the desktop dashboard — a daily-refresh on a teammate's machine, or
+// new CSV upload, surfaces here within half a minute without a reload.
+function startFieldDataPolling() {
+  if (_ccPollTimer) clearInterval(_ccPollTimer);
+  _ccPollTimer = setInterval(async () => {
+    if (document.hidden) return;
+    await loadCommunityContacts();
+    await loadFieldPointsFromServer();
+  }, 30000);
+}
+
 /* ── COMMUNITY VISITS PANEL ── */
 function setCcMode(mode) {
   ccMode = mode;
@@ -2213,25 +2287,40 @@ function setCcMode(mode) {
 }
 
 function updateCcPanel() {
-  const today = new Date().toISOString().split('T')[0];
-  const filtered = ccMode === 'today'
-    ? communityFeatures.filter(f => (f.properties?.date || '') === today)
-    : communityFeatures;
-  const total = filtered.length;
+  // "All Time" = unified totals (CSV + field, deduped) so the field-app
+  // matches the desktop dashboard. "Today" = points whose date is today
+  // (CSV `date` field) plus field points collected today, deduped.
+  const todayISO = new Date().toISOString().split('T')[0];
+  const todayLabel = new Date().toDateString();
+  let cts;
+  if (ccMode === 'today') {
+    cts = {};
+    Object.keys(STATUS_COLORS).forEach(s => cts[s] = 0);
+    const csvToday = (communityFeatures || []).filter(f =>
+      (f.properties?.date || '') === todayISO);
+    csvToday.forEach(f => {
+      const s = f.properties?.status || 'Unknown';
+      cts[s] = (cts[s] || 0) + 1;
+    });
+    const fieldToday = (_allFieldPoints || []).filter(p =>
+      p.collected_at && new Date(p.collected_at).toDateString() === todayLabel);
+    fieldToday.forEach(p => {
+      const s = p.status || 'Unknown';
+      cts[s] = (cts[s] || 0) + 1;
+    });
+  } else {
+    cts = computeUnifiedFieldCounts();
+  }
+  const total = Object.values(cts).reduce((s, n) => s + (n || 0), 0);
   const nEl = document.getElementById('cc-n');
   if (nEl) nEl.textContent = total;
   const statusOrder = ['Completed','No Answer','Inaccessible','Not Interested','Left Info','Vacant','Follow Up','Other','Unknown'];
-  const cts = {};
-  filtered.forEach(f => {
-    const s = f.properties?.status || 'Unknown';
-    cts[s] = (cts[s] || 0) + 1;
-  });
   const rows = statusOrder.filter(s => cts[s] > 0).map(s => {
     const col = STATUS_COLORS[s] || '#9ca3af';
     return `<div class="cc-leg-row"><div class="cc-leg-dot" style="background:${col}"></div><div class="cc-leg-lbl">${s}</div><div class="cc-leg-ct">${cts[s]}</div></div>`;
   }).join('');
   const bd = document.getElementById('cc-breakdown');
-  if (bd) bd.innerHTML = rows || `<div class="cc-empty">${communityFeatures.length ? 'No visits today' : 'No data loaded'}</div>`;
+  if (bd) bd.innerHTML = rows || `<div class="cc-empty">${communityFeatures.length || _allFieldPoints.length ? 'No visits today' : 'No data loaded'}</div>`;
 }
 
 /* ── FILTER CHIPS ── */
