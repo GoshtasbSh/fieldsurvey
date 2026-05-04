@@ -1,14 +1,23 @@
 """POST /api/guest — ephemeral guest-surveyor proxy.
 
-Body: {"action": "claim"|"add-point"|"my-points"|"heartbeat", ...}
+Body: {"action": <action>, ...}
 
-Consolidates the previous api/guest/{claim,add-point,my-points,heartbeat}.py
-into a single Vercel function so we stay within the Hobby plan's 12-function
-ceiling. All the same validation, sliding-window TTL, IP-hashing, and
-session-status semantics carry over unchanged.
+Actions:
+  claim       — name + today's invite code → returns session_id, expires_at
+  heartbeat   — session_id → keep-alive (sliding TTL)
+  add-point   — session_id + lat/lon/status/notes → insert field_survey_points
+  my-points   — session_id → guest's own pins
+  points-all  — session_id → all team field_survey_points (for the map)
+  team-list   — session_id → recent points + presence (for renderTeam)
+  chat-list   — session_id → today's team_chat_messages
+  chat-send   — session_id + body → insert team_chat_message as guest
+  chat-poll   — session_id + since_id (optional) → only newer messages
 
-Auth: NONE for `claim` (the whole point — guests have no Supabase account).
-      session_id (validated) for the others.
+Single Vercel function — all action dispatch happens via the body's
+`action` field. Stays inside the Hobby plan's 12-function cap.
+
+Auth: NONE for `claim` (guests have no Supabase account).
+      Validated session_id for everything else.
 """
 from http.server import BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
@@ -164,6 +173,16 @@ class handler(BaseHTTPRequestHandler):
             return self._my_points(sb, sess)
         if action == "heartbeat":
             return self._heartbeat(sb, sess)
+        if action == "points-all":
+            return self._points_all(sb, sess)
+        if action == "team-list":
+            return self._team_list(sb, sess)
+        if action == "chat-list":
+            return self._chat_list(sb, sess)
+        if action == "chat-poll":
+            return self._chat_poll(body, sb, sess)
+        if action == "chat-send":
+            return self._chat_send(body, sb, sess)
         json_response(self, 400, {"ok": False, "error": f"Unknown action {action!r}."})
 
     # ── action: claim ───────────────────────────────────────────────
@@ -278,3 +297,119 @@ class handler(BaseHTTPRequestHandler):
             "name":       fresh["name"],
             "expires_at": fresh["expires_at"],
         })
+
+    # ── action: points-all (every team field_survey_point) ────────────
+    def _points_all(self, sb, sess: dict):
+        try:
+            rows: list = []
+            PAGE = 1000
+            HARD_CAP = 50_000
+            offset = 0
+            while offset < HARD_CAP:
+                page = (sb.table("field_survey_points")
+                          .select("id,lat,lon,status,notes,collector_id,collector_name,collected_at")
+                          .order("collected_at", desc=True)
+                          .range(offset, offset + PAGE - 1)
+                          .execute().data) or []
+                if not page:
+                    break
+                rows.extend(page)
+                if len(page) < PAGE:
+                    break
+                offset += PAGE
+        except Exception as e:
+            print(f"[guest/points-all] read FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not load points."})
+            return
+        _touch_session(sb, sess["id"])
+        json_response(self, 200, {"ok": True, "points": rows})
+
+    # ── action: team-list (collector breakdown + presence) ────────────
+    def _team_list(self, sb, sess: dict):
+        try:
+            pts_q = (sb.table("field_survey_points")
+                       .select("collector_id,collector_name,status,collected_at")
+                       .order("collected_at", desc=True)
+                       .limit(5000)
+                       .execute())
+            pres_q = (sb.table("user_presence")
+                        .select("user_id,display_name,last_active_at")
+                        .order("last_active_at", desc=True)
+                        .execute())
+            pts      = pts_q.data or []
+            presence = pres_q.data or []
+        except Exception as e:
+            print(f"[guest/team-list] read FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not load team activity."})
+            return
+        _touch_session(sb, sess["id"])
+        json_response(self, 200, {
+            "ok":       True,
+            "points":   pts,
+            "presence": presence,
+        })
+
+    # ── action: chat-list (today's team chat messages) ────────────────
+    def _chat_list(self, sb, sess: dict):
+        try:
+            today_utc = datetime.now(timezone.utc).date().isoformat()
+            r = (sb.table("team_chat_messages")
+                   .select("id,user_id,display_name,body,sent_at,attachment_url,attachment_type,guest_session_id")
+                   .gte("sent_at", today_utc + "T00:00:00Z")
+                   .order("sent_at", desc=False)
+                   .limit(500)
+                   .execute())
+            msgs = r.data or []
+        except Exception as e:
+            print(f"[guest/chat-list] read FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not load chat."})
+            return
+        _touch_session(sb, sess["id"])
+        json_response(self, 200, {"ok": True, "messages": msgs})
+
+    # ── action: chat-poll (only messages newer than since_id) ─────────
+    def _chat_poll(self, body: dict, sb, sess: dict):
+        since = (body.get("since_sent_at") or "").strip()
+        try:
+            today_utc = datetime.now(timezone.utc).date().isoformat()
+            q = (sb.table("team_chat_messages")
+                   .select("id,user_id,display_name,body,sent_at,attachment_url,attachment_type,guest_session_id")
+                   .gte("sent_at", today_utc + "T00:00:00Z")
+                   .order("sent_at", desc=False)
+                   .limit(500))
+            if since:
+                q = q.gt("sent_at", since)
+            r = q.execute()
+            msgs = r.data or []
+        except Exception as e:
+            print(f"[guest/chat-poll] read FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not poll chat."})
+            return
+        _touch_session(sb, sess["id"])
+        json_response(self, 200, {"ok": True, "messages": msgs})
+
+    # ── action: chat-send (guest posts a chat message) ────────────────
+    def _chat_send(self, body: dict, sb, sess: dict):
+        text = (body.get("body") or "").strip()
+        if not text:
+            json_response(self, 400, {"ok": False, "error": "Empty message."})
+            return
+        if len(text) > 1000:
+            text = text[:1000]
+        try:
+            r = (sb.table("team_chat_messages").insert({
+                "user_id":          None,
+                "display_name":     sess["name"],
+                "body":             text,
+                "guest_session_id": sess["id"],
+            }).execute())
+            row = (r.data or [None])[0]
+        except Exception as e:
+            print(f"[guest/chat-send] insert FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not send message."})
+            return
+        _touch_session(sb, sess["id"])
+        if not row:
+            json_response(self, 500, {"ok": False, "error": "Could not send message."})
+            return
+        json_response(self, 200, {"ok": True, "message": row})

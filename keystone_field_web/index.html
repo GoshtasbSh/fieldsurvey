@@ -1165,8 +1165,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // use proxy endpoints exclusively.
     sb = null;
     initMap([]);
-    if (navigator.onLine) loadGuestPoints();
+    if (navigator.onLine) {
+      loadGuestPoints();        // own pins + ALL team pins (via /api/guest action=points-all)
+      loadTodayMessages();      // populates the chat tab on first open
+    }
     startGuestHeartbeat();
+    startGuestChatPoll();
     return;
   }
 
@@ -1196,22 +1200,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 // renders an empty-state for guests in renderTeam() instead of fake data.
 function showGuestBanner() { /* intentionally empty — kept for call-site stability */ }
 async function loadGuestPoints() {
+  // Fetch ALL team pins via /api/guest action=points-all so guests see
+  // the same map a member sees. Service-role on the server side bypasses
+  // RLS — guests get the same fields a member would query.
   try {
     const r = await fetch('/api/guest', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: 'my-points', session_id: GUEST.session_id }),
+      body:    JSON.stringify({ action: 'points-all', session_id: GUEST.session_id }),
     });
     if (r.status === 401) { handleGuestExpired(); return; }
     const data = await r.json().catch(() => ({}));
     if (!data.ok) return;
-    _allFieldPoints = (data.points || []).map(p => ({
-      ...p,
-      collector_id:   null,
-      collector_name: GUEST.name,
-    }));
-    if (data.expires_at) _guestExpiresAt = new Date(data.expires_at);
+    _allFieldPoints = data.points || [];
     updateAfterDataLoad();
+    const src = map && map.getSource('survey');
+    if (src) src.setData(pointsToGeoJSON(_allFieldPoints));
   } catch (e) {
     console.error('[guest] loadGuestPoints failed:', e);
   }
@@ -2492,13 +2496,27 @@ async function renderTeam() {
   const sub  = document.getElementById('team-sub');
 
   if (IS_GUEST) {
-    // Guests have no Supabase auth → can't read team_chat / presence /
-    // collector breakdowns. Show a friendly empty-state instead of fake
-    // demo data. The user's own pins remain visible on the map.
-    sub.textContent = 'Team activity is for signed-in members';
-    grid.innerHTML = '<div style="padding:18px;text-align:center;color:#8b949e;font-size:13px;line-height:1.55">Team chat and surveyor activity are available to signed-in members.<br>Sign up at <code style="background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px">/login</code> to join the team.</div>';
-    const badge = document.getElementById('team-badge');
-    if (badge) { badge.textContent = ''; badge.classList.remove('show'); }
+    // Fetch the same data members see, via the /api/guest proxy
+    // (service-role on the server bypasses RLS). Then fall through into
+    // the shared rendering path below.
+    sub.textContent = 'Loading…';
+    grid.innerHTML = '';
+    try {
+      const r = await fetch('/api/guest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'team-list', session_id: GUEST.session_id }),
+      });
+      if (r.status === 401) { handleGuestExpired(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!data.ok) throw new Error(data.error || 'team-list failed');
+      const pts      = data.points || [];
+      const presence = data.presence || [];
+      _renderTeamFromData(pts, presence);
+    } catch (e) {
+      console.warn('[guest] team-list failed:', e);
+      grid.innerHTML = '<div style="padding:18px;text-align:center;color:#8b949e;font-size:13px">Could not load team activity. Check your connection.</div>';
+    }
     return;
   }
   if (!sb) {
@@ -2519,7 +2537,6 @@ async function renderTeam() {
   sub.textContent = 'Loading…';
   grid.innerHTML = '';
   try {
-    const today = new Date(); today.setHours(0,0,0,0);
     const [ptsQ, presQ] = await Promise.all([
       sb.from('field_survey_points')
         .select('collector_id,collector_name,status,collected_at')
@@ -2528,51 +2545,57 @@ async function renderTeam() {
         .select('user_id,display_name,last_active_at')
         .order('last_active_at', { ascending: false }),
     ]);
-    const pts = ptsQ.data || [];
-    const presence = presQ.data || [];
-
-    // Seed members from presence (so teammates show up even with zero points)
-    const byId = {};
-    for (const pr of presence) {
-      byId[pr.user_id] = {
-        id: pr.user_id,
-        name: pr.display_name || 'Teammate',
-        total: 0, today: 0, last: '', statuses: {},
-        last_active_at: pr.last_active_at,
-      };
-    }
-    // Fold in points
-    for (const p of pts) {
-      const key = p.collector_id || ('name:' + (p.collector_name || 'Unknown'));
-      if (!byId[key]) {
-        byId[key] = { id: key, name: p.collector_name || 'Unknown',
-          total:0, today:0, last:'', statuses:{}, last_active_at:null };
-      }
-      const m = byId[key];
-      if (!m.name || m.name === 'Teammate') m.name = p.collector_name || m.name;
-      m.total++;
-      if (new Date(p.collected_at) >= today) m.today++;
-      if (!m.last) m.last = `${p.status} – ${timeAgo(p.collected_at)}`;
-      m.statuses[p.status] = (m.statuses[p.status] || 0) + 1;
-    }
-
-    const members = Object.values(byId).map(m => {
-      m.initials = (m.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
-      m.is_mine = currentUser && m.id === currentUser.id;
-      m.active_label = activeLabel(m.last_active_at);
-      return m;
-    }).sort((a,b) => {
-      if (a.is_mine !== b.is_mine) return a.is_mine ? -1 : 1;  // me first
-      if (b.today !== a.today) return b.today - a.today;
-      return (new Date(b.last_active_at || 0)) - (new Date(a.last_active_at || 0));
-    });
-
-    const todayTotal = members.reduce((a,m)=>a+m.today,0);
-    sub.textContent = `${todayTotal} points logged today · ${members.length} surveyors`;
-    grid.innerHTML = members.map(m => teamCardHTML(m)).join('');
-    document.getElementById('team-badge').textContent = members.length;
-    document.getElementById('team-badge').classList.add('show');
+    _renderTeamFromData(ptsQ.data || [], presQ.data || []);
   } catch(e) { sub.textContent = 'Could not load team data.'; console.warn(e); }
+}
+
+// Shared rendering — used by both the member path (Supabase JS) and the
+// guest path (/api/guest team-list proxy). Handles the dedup, presence
+// merge, and grid render.
+function _renderTeamFromData(pts, presence) {
+  const grid = document.getElementById('team-grid');
+  const sub  = document.getElementById('team-sub');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const byId = {};
+  for (const pr of (presence || [])) {
+    byId[pr.user_id] = {
+      id: pr.user_id,
+      name: pr.display_name || 'Teammate',
+      total: 0, today: 0, last: '', statuses: {},
+      last_active_at: pr.last_active_at,
+    };
+  }
+  for (const p of (pts || [])) {
+    const key = p.collector_id || ('name:' + (p.collector_name || 'Unknown'));
+    if (!byId[key]) {
+      byId[key] = { id: key, name: p.collector_name || 'Unknown',
+        total:0, today:0, last:'', statuses:{}, last_active_at:null };
+    }
+    const m = byId[key];
+    if (!m.name || m.name === 'Teammate') m.name = p.collector_name || m.name;
+    m.total++;
+    if (new Date(p.collected_at) >= today) m.today++;
+    if (!m.last) m.last = `${p.status} – ${timeAgo(p.collected_at)}`;
+    m.statuses[p.status] = (m.statuses[p.status] || 0) + 1;
+  }
+  const members = Object.values(byId).map(m => {
+    m.initials = (m.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+    m.is_mine = (
+      (currentUser?.id && m.id === currentUser.id)
+      || (IS_GUEST && m.name === GUEST?.name)
+    );
+    m.active_label = activeLabel(m.last_active_at);
+    return m;
+  }).sort((a,b) => {
+    if (a.is_mine !== b.is_mine) return a.is_mine ? -1 : 1;
+    if (b.today !== a.today) return b.today - a.today;
+    return (new Date(b.last_active_at || 0)) - (new Date(a.last_active_at || 0));
+  });
+  const todayTotal = members.reduce((a,m)=>a+m.today,0);
+  sub.textContent = `${todayTotal} points logged today · ${members.length} surveyors`;
+  grid.innerHTML = members.map(m => teamCardHTML(m)).join('');
+  const badge = document.getElementById('team-badge');
+  if (badge) { badge.textContent = members.length; badge.classList.add('show'); }
 }
 
 function activeLabel(iso) {
@@ -2643,6 +2666,23 @@ function switchMobileTeamSubtab(tab) {
 }
 
 async function loadTodayMessages() {
+  // Guest path: read via the /api/guest proxy (service-role on the
+  // server side bypasses RLS, so guests see the same chat as members).
+  if (IS_GUEST) {
+    try {
+      const r = await fetch('/api/guest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'chat-list', session_id: GUEST.session_id }),
+      });
+      if (r.status === 401) { handleGuestExpired(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!data.ok) return;
+      _mobileChats = data.messages || [];
+      renderChatMessages();
+    } catch (e) { console.warn('[guest] chat load failed:', e); }
+    return;
+  }
   if (!sb) return;
   const todayUtc = new Date().toISOString().slice(0, 10);
   try {
@@ -2656,6 +2696,39 @@ async function loadTodayMessages() {
     _mobileChats = data || [];
     renderChatMessages();
   } catch (e) { console.warn('Team chat load failed:', e); }
+}
+
+// Guests don't get Supabase Realtime — poll the chat every 8s while
+// the chat tab is open and the tab is visible. Cheap and bounded.
+let _guestChatPollTimer = null;
+function startGuestChatPoll() {
+  if (_guestChatPollTimer) return;
+  _guestChatPollTimer = setInterval(async () => {
+    if (!IS_GUEST || document.hidden || !navigator.onLine) return;
+    if (_activeTeamSubtab !== 'chats') return;
+    const since = _mobileChats.length
+      ? _mobileChats[_mobileChats.length - 1].sent_at
+      : null;
+    try {
+      const r = await fetch('/api/guest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          action: 'chat-poll',
+          session_id: GUEST.session_id,
+          since_sent_at: since,
+        }),
+      });
+      if (r.status === 401) { handleGuestExpired(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!data.ok) return;
+      const fresh = data.messages || [];
+      if (!fresh.length) return;
+      const seen = new Set(_mobileChats.map(m => m.id));
+      for (const m of fresh) if (!seen.has(m.id)) _mobileChats.push(m);
+      renderChatMessages();
+    } catch {}
+  }, 8000);
 }
 
 function renderChatMessages() {
@@ -2686,6 +2759,34 @@ function renderChatMessages() {
 }
 
 async function sendTeamMessage() {
+  // Guest path: route through the /api/guest proxy so the message lands
+  // in team_chat_messages with the guest's name (no Supabase JWT needed).
+  if (IS_GUEST) {
+    const input = document.getElementById('team-chat-input');
+    const body  = (input?.value || '').trim();
+    if (!body) return;
+    input.value = '';
+    try {
+      const r = await fetch('/api/guest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'chat-send', session_id: GUEST.session_id, body }),
+      });
+      if (r.status === 401) { handleGuestExpired(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      const m = data.message;
+      if (m && !_mobileChats.some(x => x.id === m.id)) {
+        _mobileChats.push(m);
+        renderChatMessages();
+      }
+    } catch (e) {
+      console.warn('[guest] chat send failed:', e);
+      showToast('Could not send message', '#ef4444');
+    }
+    return;
+  }
+
   if (!sb || !currentUser?.id) { showToast('Sign in to chat', '#f59e0b'); return; }
   const input = document.getElementById('team-chat-input');
   const body  = (input?.value || '').trim();
