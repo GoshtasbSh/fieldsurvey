@@ -50,7 +50,6 @@ html,body{
   font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:800;
   color:var(--text);letter-spacing:.01em;
 }
-/* Tab switcher */
 .tabs{display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:24px;}
 .tab{
   flex:1;padding:9px;border-radius:7px;border:none;background:none;
@@ -90,6 +89,15 @@ form.active{display:block;}
 .btn-submit:active{transform:scale(.98);}
 .btn-submit:disabled{opacity:.55;cursor:not-allowed;}
 
+.btn-secondary{
+  width:100%;padding:10px;margin-top:8px;
+  background:transparent;color:var(--muted);
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;
+  border:1px solid var(--border);border-radius:8px;cursor:pointer;
+  transition:opacity .15s;
+}
+.btn-secondary:hover{opacity:.7;}
+
 .msg{
   margin-top:12px;padding:10px 13px;border-radius:8px;
   font-size:12px;font-weight:500;line-height:1.45;display:none;
@@ -97,6 +105,24 @@ form.active{display:block;}
 .msg.error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:var(--error);}
 .msg.info{background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);color:var(--success);}
 .msg.show{display:block;}
+
+.claim-hint{
+  margin-bottom:14px;padding:12px;border-radius:9px;
+  background:var(--accent-l);border:1px solid var(--accent-b);
+  font-size:12.5px;line-height:1.5;color:var(--text);
+}
+.claim-hint b{font-weight:700;}
+.claim-hint code{
+  background:var(--bg);padding:1px 5px;border-radius:4px;
+  font-family:ui-monospace,'SFMono-Regular','Menlo',monospace;
+  font-size:11.5px;
+}
+
+.field input.invite-code{
+  text-transform:uppercase;letter-spacing:.18em;
+  text-align:center;font-size:18px;font-weight:700;
+  font-family:ui-monospace,'SFMono-Regular','Menlo',monospace;
+}
 
 .footer-txt{
   margin-top:20px;text-align:center;font-size:11px;color:var(--muted);
@@ -112,48 +138,88 @@ form.active{display:block;}
     <span class="logo-name">KeyStone Field</span>
   </div>
 
-  <div class="tabs">
-    <button class="tab active" id="tab-login" onclick="showTab('login')">Sign In</button>
-    <button class="tab" id="tab-register" onclick="showTab('register')">Create Account</button>
+  <!-- AUTH STAGE: sign-in / register / guest tabs -->
+  <div id="stage-auth">
+    <div class="tabs">
+      <button class="tab active" id="tab-login" onclick="showTab('login')">Sign In</button>
+      <button class="tab" id="tab-register" onclick="showTab('register')">Create Account</button>
+      <button class="tab" id="tab-guest" onclick="showTab('guest')">Guest</button>
+    </div>
+
+    <form id="form-login" class="active" onsubmit="doLogin(event)">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn-submit" id="login-btn">Sign In</button>
+      <div class="msg" id="login-msg"></div>
+    </form>
+
+    <form id="form-register" onsubmit="doRegister(event)">
+      <div class="field">
+        <label>Full Name</label>
+        <input type="text" id="reg-name" placeholder="Jane Smith" required autocomplete="name">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="reg-email" placeholder="you@example.com" required autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Password <span style="font-weight:400;opacity:.6">(min 6 characters)</span></label>
+        <input type="password" id="reg-password" placeholder="••••••••" required minlength="6" autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn-submit" id="reg-btn">Create Account</button>
+      <div class="msg" id="reg-msg"></div>
+    </form>
+
+    <form id="form-guest" onsubmit="doGuest(event)">
+      <div class="claim-hint" style="margin-bottom:14px;">
+        <b>One-day surveyor?</b> No account needed. Enter your name and
+        today's invite code (ask the admin). You'll be able to drop pins
+        in the field for the rest of the day.
+      </div>
+      <div class="field">
+        <label>Your Name</label>
+        <input type="text" id="guest-name" placeholder="Jane Smith" required autocomplete="name" maxlength="80">
+      </div>
+      <div class="field">
+        <label>Today's invite code</label>
+        <input type="text" id="guest-code" class="invite-code"
+               placeholder="ABC123" required maxlength="12" autocomplete="off"
+               autocapitalize="characters" spellcheck="false">
+      </div>
+      <button type="submit" class="btn-submit" id="guest-btn">Start surveying</button>
+      <div class="msg" id="guest-msg"></div>
+    </form>
   </div>
 
-  <!-- LOGIN FORM -->
-  <form id="form-login" class="active" onsubmit="doLogin(event)">
-    <div class="field">
-      <label>Email</label>
-      <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email">
+  <!-- CLAIM STAGE: redeem today's invite code -->
+  <form id="stage-claim" style="display:none;" onsubmit="doClaim(event)">
+    <div class="claim-hint">
+      <b>One more step.</b> KeyStone access is invite-only. Ask your project
+      admin for <b>today's invite code</b> — it changes every day. Enter it
+      below to activate your account.
     </div>
     <div class="field">
-      <label>Password</label>
-      <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+      <label>Today's invite code</label>
+      <input type="text" id="claim-code" class="invite-code"
+             placeholder="ABC123" required maxlength="12" autocomplete="off"
+             autocapitalize="characters" spellcheck="false">
     </div>
-    <button type="submit" class="btn-submit" id="login-btn">Sign In</button>
-    <div class="msg" id="login-msg"></div>
-  </form>
-
-  <!-- REGISTER FORM -->
-  <form id="form-register" onsubmit="doRegister(event)">
-    <div class="field">
-      <label>Full Name</label>
-      <input type="text" id="reg-name" placeholder="Jane Smith" required autocomplete="name">
-    </div>
-    <div class="field">
-      <label>Email</label>
-      <input type="email" id="reg-email" placeholder="you@example.com" required autocomplete="email">
-    </div>
-    <div class="field">
-      <label>Password <span style="font-weight:400;opacity:.6">(min 6 characters)</span></label>
-      <input type="password" id="reg-password" placeholder="••••••••" required minlength="6" autocomplete="new-password">
-    </div>
-    <button type="submit" class="btn-submit" id="reg-btn">Create Account</button>
-    <div class="msg" id="reg-msg"></div>
+    <button type="submit" class="btn-submit" id="claim-btn">Activate access</button>
+    <button type="button" class="btn-secondary" onclick="signOutAndReset()">Sign out</button>
+    <div class="msg" id="claim-msg"></div>
   </form>
 
   <div class="footer-txt">KeyStone Field Survey</div>
 </div>
 
 <script>
-// Supabase URL + anon key are fetched from /api/config. Never hardcoded.
+// Supabase URL + anon key fetched from /api/config — never hardcoded.
 let SUPABASE_URL  = '';
 let SUPABASE_ANON = '';
 let sb = null;
@@ -174,19 +240,49 @@ function redirectAfterLogin() {
   window.location.replace(mobile ? '/field/' : '/dashboard');
 }
 
+function showStage(stage) {
+  document.getElementById('stage-auth').style.display  = stage === 'auth'  ? '' : 'none';
+  document.getElementById('stage-claim').style.display = stage === 'claim' ? '' : 'none';
+}
+
+// Check whether the signed-in user already has a team_members row. If yes,
+// redirect into the dashboard / field app. If no, present the claim-code UI.
+async function checkMembershipAndRoute() {
+  if (!sb) { redirectAfterLogin(); return; }
+  try {
+    const { data, error } = await sb.rpc('my_team_role');
+    if (error) {
+      // RPC missing — assume legacy unmigrated DB; pass through.
+      console.error('my_team_role RPC failed:', error);
+      redirectAfterLogin();
+      return;
+    }
+    const role = (data && (data.role ?? null));
+    if (role) {
+      redirectAfterLogin();
+    } else {
+      showStage('claim');
+      setTimeout(() => document.getElementById('claim-code').focus(), 50);
+    }
+  } catch (e) {
+    console.error(e);
+    redirectAfterLogin();
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSupabaseConfig();
   if (!SUPABASE_URL) return;
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
   const { data: { session } } = await sb.auth.getSession();
-  if (session) redirectAfterLogin();
+  if (session) await checkMembershipAndRoute();
 });
 
 function showTab(t) {
-  document.getElementById('tab-login').classList.toggle('active', t === 'login');
-  document.getElementById('tab-register').classList.toggle('active', t === 'register');
-  document.getElementById('form-login').classList.toggle('active', t === 'login');
-  document.getElementById('form-register').classList.toggle('active', t === 'register');
+  ['login','register','guest'].forEach(name => {
+    document.getElementById('tab-' + name).classList.toggle('active', t === name);
+    document.getElementById('form-' + name).classList.toggle('active', t === name);
+  });
 }
 
 function showMsg(id, text, type) {
@@ -197,7 +293,7 @@ function showMsg(id, text, type) {
 
 async function doLogin(e) {
   e.preventDefault();
-  if (!sb) { redirectAfterLogin(); return; } // demo: skip auth
+  if (!sb) { redirectAfterLogin(); return; }
   const email    = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
   const btn = document.getElementById('login-btn');
@@ -206,9 +302,12 @@ async function doLogin(e) {
   if (error) {
     showMsg('login-msg', error.message, 'error');
     btn.disabled = false; btn.textContent = 'Sign In';
-  } else {
-    redirectAfterLogin();
+    return;
   }
+  // After sign-in, check membership before routing.
+  await checkMembershipAndRoute();
+  // If we landed on the claim stage, restore the button state for if the user signs out.
+  btn.disabled = false; btn.textContent = 'Sign In';
 }
 
 async function doRegister(e) {
@@ -227,11 +326,86 @@ async function doRegister(e) {
     showMsg('reg-msg', error.message, 'error');
     btn.disabled = false; btn.textContent = 'Create Account';
   } else if (data.session) {
-    // Email confirmation disabled — user is signed in immediately
-    window.location.href = 'index.html';
+    // Email confirmation disabled — user is signed in immediately.
+    // Force them through the claim-code stage before they can use the app.
+    await checkMembershipAndRoute();
+    btn.disabled = false; btn.textContent = 'Create Account';
   } else {
     showMsg('reg-msg', 'Account created! You can now sign in.', 'info');
     btn.disabled = false; btn.textContent = 'Create Account';
+  }
+}
+
+async function doClaim(e) {
+  e.preventDefault();
+  if (!sb) return;
+  const code = (document.getElementById('claim-code').value || '').trim().toUpperCase();
+  const btn  = document.getElementById('claim-btn');
+  if (!code) {
+    showMsg('claim-msg', 'Enter today’s invite code.', 'error');
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Activating…';
+  try {
+    const { data, error } = await sb.rpc('claim_membership', { p_code: code });
+    if (error) {
+      showMsg('claim-msg', error.message || 'Activation failed.', 'error');
+      btn.disabled = false; btn.textContent = 'Activate access';
+      return;
+    }
+    if (!data || data.ok !== true) {
+      const msg = (data && data.error) || 'Invalid invite code.';
+      showMsg('claim-msg', msg, 'error');
+      btn.disabled = false; btn.textContent = 'Activate access';
+      return;
+    }
+    redirectAfterLogin();
+  } catch (err) {
+    showMsg('claim-msg', err.message || 'Network error.', 'error');
+    btn.disabled = false; btn.textContent = 'Activate access';
+  }
+}
+
+async function signOutAndReset() {
+  try { await sb?.auth.signOut(); } catch {}
+  showStage('auth');
+  document.getElementById('claim-code').value = '';
+  document.getElementById('claim-msg').className = 'msg';
+}
+
+async function doGuest(e) {
+  e.preventDefault();
+  const name = (document.getElementById('guest-name').value || '').trim();
+  const code = (document.getElementById('guest-code').value || '').trim().toUpperCase();
+  const btn  = document.getElementById('guest-btn');
+  if (name.length < 2) { showMsg('guest-msg', 'Enter your full name (≥2 characters).', 'error'); return; }
+  if (!code) { showMsg('guest-msg', 'Enter today’s invite code.', 'error'); return; }
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    const r = await fetch('/api/guest/claim', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, code }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      showMsg('guest-msg', data.error || `Activation failed (HTTP ${r.status}).`, 'error');
+      btn.disabled = false; btn.textContent = 'Start surveying';
+      return;
+    }
+    // Persist the guest session for the field-app. sessionStorage clears on
+    // tab close — appropriate for "one device, one day" surveyor sessions.
+    sessionStorage.setItem('keystone_guest_session', JSON.stringify({
+      session_id: data.session_id,
+      name:       data.name,
+      expires_at: data.expires_at,
+      claimed_at: Date.now(),
+    }));
+    // Field surveyors always go to the mobile field UI, regardless of viewport.
+    window.location.replace('/field/');
+  } catch (err) {
+    showMsg('guest-msg', err.message || 'Network error.', 'error');
+    btn.disabled = false; btn.textContent = 'Start surveying';
   }
 }
 </script>

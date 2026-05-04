@@ -8,9 +8,9 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from _lib import (
     supabase_admin, supabase_anon, json_response,
-    require_auth, check_upload_size,
+    require_admin, check_upload_size,
 )
-from _processing import parse_multipart_file
+from _processing import parse_multipart_file, PII_COLS
 
 try:
     import pandas as pd
@@ -31,8 +31,9 @@ class handler(BaseHTTPRequestHandler):
             })
 
     def _handle(self):
-        if require_auth(self) is None:
-            return  # 401 already written
+        # Admin-only.
+        if require_admin(self) is None:
+            return  # 401/403 already written
         ct     = self.headers.get('Content-Type', '')
         length = check_upload_size(self)
         if length is None:
@@ -55,10 +56,17 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             return json_response(self, 400, {'detail': f'Could not parse file: {e}'})
 
+        # Strip PII columns before persisting — same set used by _processing.py
+        # for IAQ ingest. Otherwise raw rows can carry RecipientEmail / IP / etc.
+        pii = [c for c in PII_COLS if c in df.columns]
+        if pii:
+            df = df.drop(columns=pii)
+
         payload = {
-            'columns': list(df.columns),
-            'rows':    df.fillna('').to_dict('records'),
-            'count':   len(df),
+            'columns':       list(df.columns),
+            'rows':          df.fillna('').to_dict('records'),
+            'count':         len(df),
+            'dropped_pii':   pii,
         }
 
         sb = supabase_admin() or supabase_anon()

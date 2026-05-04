@@ -1115,6 +1115,26 @@ let offlineQueue = [];
 let lastStatus = localStorage.getItem('ks-last-status') || 'No Answer';
 let counts = {};
 let totalPts = 0, todayPts = 0;
+
+// ── Guest mode (one-day surveyor, no Supabase auth) ─────────────────────
+// Set on boot from sessionStorage; never mutated thereafter. Guest devices
+// skip Supabase auth, skip Realtime, and route all writes through the
+// service-role-backed /api/guest/* proxy.
+let IS_GUEST = false;
+let GUEST = null;  // {session_id, name, expires_at}
+let _guestExpiresAt = null;  // Date — refreshed on heartbeat / save
+function loadGuestSession() {
+  try {
+    const raw = sessionStorage.getItem('keystone_guest_session');
+    if (!raw) return null;
+    const g = JSON.parse(raw);
+    if (!g || !g.session_id || !g.name) return null;
+    return g;
+  } catch { return null; }
+}
+function clearGuestSession() {
+  try { sessionStorage.removeItem('keystone_guest_session'); } catch {}
+}
 // Cached raw rows from field_survey_points — used by CSV export + status breakdown
 // so we don't re-query Supabase for every export click.
 let _allFieldPoints = [];
@@ -1129,6 +1149,26 @@ const isMobile = () => window.innerWidth < 768;
 document.addEventListener('DOMContentLoaded', async () => {
   loadQueueFromStorage();
   await loadSupabaseConfig();
+
+  // Guest path: ephemeral session in sessionStorage, no Supabase auth.
+  const guest = loadGuestSession();
+  if (guest) {
+    IS_GUEST = true;
+    GUEST    = guest;
+    _guestExpiresAt = guest.expires_at ? new Date(guest.expires_at) : null;
+    const initials = guest.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    currentUser = { name: guest.name, initials, id: null, isGuest: true };
+    updateUserUI();
+    showGuestBanner();
+    // Still try to instantiate the Supabase JS client only for shared
+    // utilities that don't require auth (none in this code path); guests
+    // use proxy endpoints exclusively.
+    sb = null;
+    initMap([]);
+    if (navigator.onLine) loadGuestPoints();
+    startGuestHeartbeat();
+    return;
+  }
 
   if (!SUPABASE_URL) {
     currentUser = { name: 'Demo User', initials: 'DU', id: 'demo' };
@@ -1148,6 +1188,72 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMap([]);
   startPresenceHeartbeat();
 });
+
+/* ── GUEST: heartbeat + banner + load own points ── */
+function showGuestBanner() {
+  // Reuse the topbar — append a small chip indicating guest status.
+  // We don't add new DOM if the topbar isn't around (e.g. if a future
+  // refactor removes it); stay defensive.
+  try {
+    const av = document.getElementById('user-av');
+    if (av) av.style.outline = '2px solid #f59e0b';
+    const sbName = document.getElementById('sb-name');
+    if (sbName && _guestExpiresAt) {
+      sbName.textContent = `${GUEST.name} (Guest)`;
+    }
+  } catch {}
+}
+async function loadGuestPoints() {
+  try {
+    const r = await fetch('/api/guest/my-points', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ session_id: GUEST.session_id }),
+    });
+    if (r.status === 401) { handleGuestExpired(); return; }
+    const data = await r.json().catch(() => ({}));
+    if (!data.ok) return;
+    _allFieldPoints = (data.points || []).map(p => ({
+      ...p,
+      collector_id:   null,
+      collector_name: GUEST.name,
+    }));
+    if (data.expires_at) _guestExpiresAt = new Date(data.expires_at);
+    updateAfterDataLoad();
+  } catch (e) {
+    console.error('[guest] loadGuestPoints failed:', e);
+  }
+}
+function handleGuestExpired() {
+  alert('Your guest session has ended. Sign in again with today’s code to continue.');
+  clearGuestSession();
+  window.location.replace('login.html');
+}
+function startGuestHeartbeat() {
+  // Best-effort: every 4 minutes while the tab is visible.
+  setInterval(async () => {
+    if (!IS_GUEST || document.hidden || !navigator.onLine) return;
+    try {
+      const r = await fetch('/api/guest/heartbeat', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ session_id: GUEST.session_id }),
+      });
+      if (r.status === 401) { handleGuestExpired(); return; }
+      const d = await r.json().catch(() => ({}));
+      if (d?.expires_at) _guestExpiresAt = new Date(d.expires_at);
+    } catch {}
+  }, 240_000);
+}
+function updateAfterDataLoad() {
+  // Mirrors the post-loadSupabaseData refresh path so the map / counts /
+  // sidebar reflect the freshly-fetched _allFieldPoints. Defensive in
+  // case some helpers don't exist on this version.
+  try {
+    if (typeof rebuildPointsFromCache === 'function') rebuildPointsFromCache();
+    if (typeof refreshCounts === 'function') refreshCounts();
+  } catch {}
+}
 
 /* ── PRESENCE HEARTBEAT ── */
 async function beatPresence() {
@@ -1675,12 +1781,20 @@ async function confirmDeletePoint(id) {
 function _handlePopupEdit(id) {
   const resolvedId = id || _activePopupPointId;
   if (!resolvedId) return;
+  if (IS_GUEST) {
+    showToast('Guests can only add new points (no editing)', '#f59e0b');
+    return;
+  }
   document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
   openEditSheet(resolvedId);
 }
 function _handlePopupDelete(id) {
   const resolvedId = id || _activePopupPointId;
   if (!resolvedId) return;
+  if (IS_GUEST) {
+    showToast('Guests cannot delete points', '#f59e0b');
+    return;
+  }
   document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
   confirmDeletePoint(resolvedId);
 }
@@ -1767,6 +1881,52 @@ async function savePoint(coords) {
   };
 
   const collectorId = currentUser?.id || null;
+
+  // ── GUEST PATH ───────────────────────────────────────────────────────
+  // Guests have no Supabase session; they hit /api/guest/add-point
+  // (service-role insert) and tag the row with their guest_session_id.
+  if (IS_GUEST) {
+    let insertedId = null;
+    let queued = false;
+    if (!navigator.onLine) {
+      queuePush({ ...newPt, coords, _guest: true });
+      queued = true;
+      showToast(status + ' — queued', color, true);
+    } else {
+      try {
+        const r = await fetch('/api/guest/add-point', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            session_id: GUEST.session_id,
+            lat: newPt.lat, lon: newPt.lon,
+            status, notes,
+          }),
+        });
+        if (r.status === 401) { handleGuestExpired(); return; }
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        insertedId = data.id;
+        showToast(status, color, false);
+      } catch (err) {
+        console.warn('[guest] insert failed, queuing:', err);
+        queuePush({ ...newPt, coords, _guest: true });
+        queued = true;
+        showToast(status + ' — queued', color, true);
+      }
+    }
+    const finalId = insertedId || ((queued ? 'q' : 'l') + Date.now());
+    _allFieldPoints.unshift({ ...newPt, id: finalId, collector_id: null });
+    appendPointToMap({ ...newPt, id: finalId, collector_id: null });
+    bsCoords = null;
+    if (btn) { btn.classList.remove('saving'); btn.classList.add('saved'); btn.textContent = '✓  Saved!'; btn.disabled = false; }
+    setTimeout(() => closeBottomSheet(), 750);
+    pulsePoint(coords, color);
+    updateCountUI(status);
+    return;
+  }
+  // ── END GUEST PATH ───────────────────────────────────────────────────
+
   if (!navigator.onLine || !sb) {
     // Stamp the queued point with the user who is signed in NOW so a later
     // sync flushes it under their identity even if they sign out before
@@ -1779,6 +1939,7 @@ async function savePoint(coords) {
     showToast(status + (navigator.onLine ? '' : ' — queued'), color, !navigator.onLine);
   } else {
     let insertedId = null;
+    let insertFailed = false;
     try {
       const { data } = await sb.from('field_survey_points').insert({
         lat: newPt.lat, lon: newPt.lon, status, notes,
@@ -1791,16 +1952,14 @@ async function savePoint(coords) {
       }
     } catch (err) {
       console.warn('Insert failed, queuing:', err);
-      // Stamp the queued point with the user who is signed in NOW so a later
-    // sync flushes it under their identity even if they sign out before
-    // network returns. Without this, the queued point would be attributed
-    // to whoever happens to be signed in at sync time.
-    queuePush({ ...newPt, coords, collector_id: collectorId });
+      insertFailed = true;
+      queuePush({ ...newPt, coords, collector_id: collectorId });
     }
     const finalId = insertedId || ('l' + Date.now());
     _allFieldPoints.unshift({ ...newPt, id: finalId, collector_id: collectorId });
     appendPointToMap({ ...newPt, id: finalId, collector_id: collectorId });
-    showToast(status, color, false);
+    // Honest toast: tell the user the truth about whether it was saved or queued.
+    showToast(insertFailed ? (status + ' — queued') : status, color, insertFailed);
   }
 
   // Null bsCoords immediately so a rapid second tap cannot re-enter savePoint()
@@ -2123,9 +2282,12 @@ function showToast(msg, color, queued = false) {
 }
 
 /* ── OFFLINE QUEUE ── */
-// Key is scoped by user ID so one browser shared by multiple surveyors never
-// shows a previous user's pending-count badge on a fresh login.
-function _qKey() { return 'ks-queue-' + (currentUser?.id || 'anon'); }
+// Key is scoped by user ID (or guest session id) so one browser shared by
+// multiple surveyors never shows a previous user's pending-count badge.
+function _qKey() {
+  if (IS_GUEST && GUEST?.session_id) return 'ks-queue-guest-' + GUEST.session_id;
+  return 'ks-queue-' + (currentUser?.id || 'anon');
+}
 
 function loadQueueFromStorage() {
   try { offlineQueue = JSON.parse(localStorage.getItem(_qKey()) || '[]'); } catch { offlineQueue = []; }
@@ -2133,7 +2295,14 @@ function loadQueueFromStorage() {
 }
 function queuePush(pt) {
   offlineQueue.push(pt);
-  localStorage.setItem(_qKey(), JSON.stringify(offlineQueue));
+  // Wrap in try/catch — localStorage throws QuotaExceededError when full
+  // and would otherwise drop the row silently. Tell the user instead.
+  try {
+    localStorage.setItem(_qKey(), JSON.stringify(offlineQueue));
+  } catch (e) {
+    console.error('[queue] persist FAIL', e);
+    showToast('Storage full — sync now or some points may be lost', '#ef4444', false);
+  }
   updateQueueBadge();
 }
 function queueClear() {
@@ -2149,8 +2318,67 @@ function updateQueueBadge() {
   document.getElementById('offline-ct').textContent = n + ' queued';
 }
 let _syncing = false;
+async function syncQueueGuest() {
+  if (!IS_GUEST || !GUEST?.session_id || !offlineQueue.length) {
+    if (!offlineQueue.length) queueClear();
+    return;
+  }
+  _syncing = true;
+  const remaining = [];
+  let okCount = 0;
+  for (const p of offlineQueue) {
+    let attempt = 0, success = false;
+    while (attempt < 3 && !success) {
+      try {
+        const r = await fetch('/api/guest/add-point', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            session_id: GUEST.session_id,
+            lat: p.lat, lon: p.lon, status: p.status, notes: p.notes,
+            is_offline: true,
+          }),
+        });
+        if (r.status === 401) {
+          // Session expired mid-replay — bail and prompt re-claim. Keep
+          // unsynced rows in the queue under the same key.
+          remaining.push(...offlineQueue.slice(offlineQueue.indexOf(p)));
+          handleGuestExpired();
+          break;
+        }
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        okCount++;
+        success = true;
+        if (data.id) {
+          const qi = _allFieldPoints.findIndex(x => x.id === p.id);
+          if (qi >= 0) _allFieldPoints[qi] = { ..._allFieldPoints[qi], id: data.id };
+          const src = map && map.getSource('survey');
+          if (src) src.setData(pointsToGeoJSON(_allFieldPoints));
+        }
+      } catch (e) {
+        attempt++;
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 400 * Math.pow(2, attempt)));
+        } else {
+          console.warn('[guest] sync failed after retries, keeping in queue:', e);
+          remaining.push(p);
+        }
+      }
+    }
+  }
+  offlineQueue = remaining;
+  try { localStorage.setItem(_qKey(), JSON.stringify(offlineQueue)); } catch {}
+  updateQueueBadge();
+  recalcCounts(_allFieldPoints);
+  _syncing = false;
+  if (okCount) showToast(`Synced ${okCount}${remaining.length ? ` (${remaining.length} still queued)` : ''}`, '#34d399');
+  else if (remaining.length) showToast(`${remaining.length} point(s) could not sync — will retry`, '#f59e0b', true);
+}
+
 async function syncQueue() {
   if (_syncing) return;
+  if (IS_GUEST) return syncQueueGuest();
   if (!sb || !offlineQueue.length) { if (!offlineQueue.length) queueClear(); return; }
   _syncing = true;
   const remaining = [];
@@ -2640,13 +2868,20 @@ async function downloadCSV(table) {
 /* ── SIGN OUT ── */
 async function signOut() {
   // Warn before discarding any queued offline writes — they belong to the
-  // outgoing user and will be filtered out at sync if a different user signs in.
+  // outgoing user/guest and will be filtered out at sync if a different
+  // user signs in.
   if (offlineQueue && offlineQueue.length > 0) {
     const ok = confirm(
       `You have ${offlineQueue.length} unsynced point(s) queued. ` +
-      `Sign out anyway? They'll only sync when you sign back in as the same user.`
+      `Sign out anyway? They'll only sync when you sign back in with the same identity.`
     );
     if (!ok) return;
+  }
+  if (IS_GUEST) {
+    // Ephemeral session — just clear and bounce back to login.
+    clearGuestSession();
+    window.location.replace('login.html');
+    return;
   }
   if (sb) await sb.auth.signOut();
   window.location.replace('login.html');

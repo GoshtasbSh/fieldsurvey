@@ -15,7 +15,7 @@ import traceback
 sys.path.append(str(Path(__file__).parent.parent))
 from _lib import (
     supabase_admin, supabase_anon, load_cached, json_response,
-    require_auth, check_upload_size,
+    require_admin, check_upload_size,
 )
 from _processing import (
     parse_multipart_file, load_parcel_index,
@@ -42,9 +42,10 @@ class handler(BaseHTTPRequestHandler):
             })
 
     def _handle(self):
-        # Authenticate first — only signed-in surveyors may overwrite production data.
-        if require_auth(self) is None:
-            return  # 401 already written
+        # Auth-gate: only admins may overwrite production data. require_admin
+        # enforces both JWT validity AND team_members.role='admin'.
+        if require_admin(self) is None:
+            return  # 401/403 already written
         ct = self.headers.get('Content-Type', '')
         length = check_upload_size(self)
         if length is None:

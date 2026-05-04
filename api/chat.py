@@ -17,7 +17,7 @@ import urllib.error
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import load_cached, json_response
+from _lib import load_cached, json_response, require_team_member
 
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -300,6 +300,10 @@ def _call_groq(messages: list, api_key: str) -> str:
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # Auth-gate: chat is team-member-only. Anonymous callers cannot
+        # drain Groq budget or probe dataset shape.
+        if require_team_member(self) is None:
+            return
         length = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
@@ -354,11 +358,16 @@ class handler(BaseHTTPRequestHandler):
         try:
             raw_text = _call_groq(msgs, groq_key)
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="ignore")[:400]
-            json_response(self, 502, {"error": f"Groq API {e.code}: {detail}"})
+            try:
+                detail = e.read().decode("utf-8", errors="ignore")[:400]
+                print(f"[chat] Groq HTTPError {e.code}: {detail}")
+            except Exception:
+                pass
+            json_response(self, 502, {"error": "Chat service unavailable. Try again in a moment."})
             return
         except Exception as e:
-            json_response(self, 500, {"error": f"{type(e).__name__}: {e}"})
+            print(f"[chat] {type(e).__name__}: {e}")
+            json_response(self, 500, {"error": "Chat service unavailable. Try again in a moment."})
             return
 
         # Extract json_actions block; strip it from the visible text

@@ -2211,7 +2211,19 @@ async function runDailyRefresh() {
   btn.disabled = true;
   btn.textContent = 'Running...';
   try {
-    const res = await fetch('/api/daily-refresh', { method: 'POST' });
+    // Send the user's Supabase JWT — daily-refresh accepts admin role as
+    // an alternative to the cron secret so PIs can trigger a refresh from
+    // the dashboard.
+    const session = (sbClient && sbClient.auth)
+      ? (await sbClient.auth.getSession()).data?.session
+      : null;
+    const headers = session?.access_token
+      ? { 'Authorization': `Bearer ${session.access_token}` }
+      : {};
+    const res = await fetch('/api/daily-refresh', { method: 'POST', headers });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Admin role required to run daily refresh.');
+    }
     const data = await res.json();
     if (data.refreshed) {
       // Reload contact points with merged field data

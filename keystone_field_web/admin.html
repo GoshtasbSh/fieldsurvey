@@ -153,6 +153,58 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
 
 /* Danger zone */
 .danger-row{display:flex;gap:10px;flex-wrap:wrap;}
+
+/* Access-denied / not-a-team-member overlay */
+.access-deny{
+  max-width:520px;margin:60px auto 0;padding:36px 28px;text-align:center;
+  background:var(--card);border:1px solid var(--border);border-radius:14px;
+}
+.access-deny h2{
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:800;
+  color:var(--danger);margin-bottom:8px;
+}
+.access-deny p{font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:18px;}
+
+/* Team section */
+.team-tools{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+  padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--border);
+}
+.code-display{
+  font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:700;
+  letter-spacing:.18em;padding:8px 14px;border-radius:8px;
+  background:var(--accent-l);border:1px solid var(--accent-b);color:var(--accent);
+  min-width:120px;text-align:center;
+}
+.code-display.empty{color:var(--muted);background:transparent;border:1px dashed var(--border);}
+.code-meta{font-size:11px;color:var(--muted);}
+
+.team-list{
+  display:flex;flex-direction:column;gap:8px;
+}
+.team-row{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 12px;border-radius:9px;border:1px solid var(--border);
+  background:var(--bg);
+}
+.team-email{flex:1;font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.team-role{
+  font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;
+  font-family:'IBM Plex Mono',monospace;letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.team-role.admin{background:rgba(56,189,248,.15);color:var(--accent);border:1px solid var(--accent-b);}
+.team-role.member{background:rgba(139,148,158,.15);color:var(--muted);border:1px solid var(--border);}
+.team-actions{display:flex;gap:6px;}
+.team-btn{
+  padding:5px 11px;border-radius:7px;font-size:11px;font-weight:700;
+  border:1px solid var(--border);color:var(--text);background:var(--card);
+  transition:all .15s;
+}
+.team-btn:hover{border-color:var(--accent);color:var(--accent);}
+.team-btn:disabled{opacity:.5;cursor:not-allowed;}
+.team-btn.danger{color:var(--danger);}
+.team-btn.danger:hover{border-color:var(--danger);}
 </style>
 </head>
 <body>
@@ -165,7 +217,18 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
   <a href="index.html" class="topbar-back">← Map</a>
 </header>
 
-<div class="main">
+<!-- Access-denied screen for non-admin team members -->
+<div class="access-deny" id="access-deny" style="display:none;">
+  <h2>Admin role required</h2>
+  <p>
+    You are signed in but you don’t have the <b>admin</b> role on this project.
+    Ask one of the project admins to promote you, or return to the dashboard.
+  </p>
+  <a href="index.html" class="btn btn-primary" style="text-decoration:none;">← Back to Map</a>
+  <button class="btn btn-outline" id="deny-signout" style="margin-left:6px;">Sign out</button>
+</div>
+
+<div class="main" id="main-admin" style="display:none;">
   <div class="page-title">Data Management</div>
   <div class="page-sub">Upload survey data, configure reports, and export results. All processing runs in your browser — no external server required.</div>
 
@@ -270,6 +333,61 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
     </div>
   </div>
 
+  <!-- Team membership -->
+  <div class="section">
+    <div class="section-head">
+      <span class="section-icon">👥</span>
+      <div class="section-info">
+        <div class="section-title">Team & Invite Code</div>
+        <div class="section-sub">
+          Generate today's invite code and share it with new surveyors so they can
+          activate their accounts. Promote teammates to admin or demote them back.
+          The invite code rotates daily (UTC).
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="team-tools">
+        <button class="btn btn-primary" id="btn-today-code">Get today's code</button>
+        <span class="code-display empty" id="today-code">—</span>
+        <span class="code-meta" id="today-code-meta"></span>
+      </div>
+      <div class="team-list" id="team-list">
+        <div class="code-meta">Loading team…</div>
+      </div>
+      <div class="result" id="result-team"></div>
+    </div>
+  </div>
+
+  <!-- Guest Sessions -->
+  <div class="section">
+    <div class="section-head">
+      <span class="section-icon">🎫</span>
+      <div class="section-info">
+        <div class="section-title">Guest Surveyor Sessions</div>
+        <div class="section-sub">
+          Ephemeral one-day surveyors who claimed today's invite code with a name
+          (no Supabase account). Their pins live in <code style="font-family:'IBM Plex Mono',monospace;font-size:10px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px;">field_survey_points</code>
+          attributed to the name they entered. Revoke a session to immediately
+          disable further inserts from that device.
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="team-tools">
+        <div class="config-field" style="max-width:180px;">
+          <label>Date (UTC)</label>
+          <input type="date" id="guest-date">
+        </div>
+        <button class="btn btn-outline" id="btn-load-guests">Refresh</button>
+        <span class="code-meta" id="guest-meta"></span>
+      </div>
+      <div class="team-list" id="guest-list">
+        <div class="code-meta">Pick a date and click Refresh.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Danger zone -->
   <div class="section">
     <div class="section-head">
@@ -310,6 +428,26 @@ async function loadSupabaseConfig() {
 ═══════════════════════════════════════════════════════════════ */
 let sb = null;
 
+let MY_ROLE = null;
+let MY_UID  = null;
+
+async function fetchMyRole() {
+  try {
+    const { data, error } = await sb.rpc('my_team_role');
+    if (error) return null;
+    return (data && data.role) || null;
+  } catch { return null; }
+}
+
+function showAccessDenied() {
+  document.getElementById('access-deny').style.display = '';
+  document.getElementById('main-admin').style.display  = 'none';
+  document.getElementById('deny-signout').addEventListener('click', async () => {
+    try { await sb.auth.signOut(); } catch {}
+    window.location.replace('login.html');
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════════
    BOOT
 ═══════════════════════════════════════════════════════════════ */
@@ -323,6 +461,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSupabaseConfig();
   if (!SUPABASE_URL || !SUPABASE_ANON) {
     document.getElementById('no-config-warn').style.display = 'block';
+    document.getElementById('main-admin').style.display = '';
     return;
   }
 
@@ -330,9 +469,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { window.location.replace('login.html'); return; }
+  MY_UID  = session.user?.id || null;
+  MY_ROLE = await fetchMyRole();
+  if (!MY_ROLE) {
+    // signed in but never claimed — send them back to claim flow
+    window.location.replace('login.html');
+    return;
+  }
+  if (MY_ROLE !== 'admin') {
+    showAccessDenied();
+    return;
+  }
 
+  document.getElementById('main-admin').style.display = '';
   loadCounts();
   loadEmailConfig();
+  loadTeam();
   bindEvents();
 });
 
@@ -364,7 +516,185 @@ function bindEvents() {
     clearTable('community_contacts', 'Community Contacts'));
   document.getElementById('btn-clear-iaq').addEventListener('click', () =>
     clearTable('iaq_surveys', 'IAQ Surveys'));
+  document.getElementById('btn-today-code').addEventListener('click', getTodayCode);
+  // Guest Sessions panel — default the date input to today (UTC).
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const dateEl = document.getElementById('guest-date');
+  if (dateEl) dateEl.value = todayUTC;
+  document.getElementById('btn-load-guests').addEventListener('click', loadGuestSessions);
+  // Auto-load today's guests when the admin lands.
+  loadGuestSessions();
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   GUEST SESSIONS — admin-only
+═══════════════════════════════════════════════════════════════ */
+function _fmtDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+function _guestStatus(g) {
+  if (g.revoked_at) return ['revoked', '#ef4444'];
+  if (g.expires_at && new Date(g.expires_at) < new Date()) return ['expired', '#9ca3af'];
+  return ['active', '#34d399'];
+}
+
+async function loadGuestSessions() {
+  const list = document.getElementById('guest-list');
+  const meta = document.getElementById('guest-meta');
+  const date = (document.getElementById('guest-date').value || '').trim();
+  list.innerHTML = '<div class="code-meta">Loading…</div>';
+  if (!sb) { list.innerHTML = '<div class="code-meta">Supabase not configured.</div>'; return; }
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const r = await fetch(`/api/team/guest-history?date=${encodeURIComponent(date)}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    const sessions = data.sessions || [];
+    meta.textContent = `${sessions.length} session(s) on ${data.date}`;
+    if (!sessions.length) {
+      list.innerHTML = '<div class="code-meta">No guest sessions on this date.</div>';
+      return;
+    }
+    list.innerHTML = sessions.map(g => {
+      const [statusLabel, statusColor] = _guestStatus(g);
+      const isLive = statusLabel === 'active';
+      const revokeBtn = isLive
+        ? `<button class="team-btn danger" onclick="revokeGuest('${_esc(g.id)}')">Revoke</button>`
+        : '';
+      return `
+        <div class="team-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="team-email" style="flex:1;">${_esc(g.name)}</div>
+            <span class="team-role" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44;">${statusLabel}</span>
+            <span class="code-meta">${g.point_count ?? 0} pin${(g.point_count ?? 0) === 1 ? '' : 's'}</span>
+            ${revokeBtn}
+          </div>
+          <div class="code-meta" style="font-size:10.5px;line-height:1.5;">
+            Started ${_esc(_fmtDate(g.created_at))} · Expires ${_esc(_fmtDate(g.expires_at))} ·
+            Last seen ${_esc(_fmtDate(g.last_seen_at))}
+            ${g.revoked_at ? ` · Revoked ${_esc(_fmtDate(g.revoked_at))}` : ''}
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="code-meta">Failed to load: ${_esc(e.message || e)}</div>`;
+  }
+}
+
+async function revokeGuest(sessionId) {
+  if (!confirm('Revoke this guest session? Their next save attempt will fail. Pins they already collected stay attributed to their name.')) return;
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const r = await fetch('/api/team/revoke-guest', {
+      method:  'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    await loadGuestSessions();
+  } catch (e) {
+    alert('Revoke failed: ' + (e.message || e));
+  }
+}
+window.revokeGuest = revokeGuest;
+
+/* ═══════════════════════════════════════════════════════════════
+   TEAM MEMBERSHIP — admin-only UI
+═══════════════════════════════════════════════════════════════ */
+function _esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+async function loadTeam() {
+  const list = document.getElementById('team-list');
+  if (!sb) { list.innerHTML = '<div class="code-meta">Supabase not configured.</div>'; return; }
+  try {
+    const { data, error } = await sb.rpc('list_team');
+    if (error) throw error;
+    const members = data || [];
+    if (!members.length) {
+      list.innerHTML = '<div class="code-meta">No team members yet.</div>';
+      return;
+    }
+    list.innerHTML = members.map(m => {
+      const isMe        = m.id === MY_UID;
+      const isAdmin     = m.role === 'admin';
+      const promoteBtn  = isAdmin ? '' :
+        `<button class="team-btn" onclick="promoteUser('${_esc(m.id)}')">Promote → admin</button>`;
+      const demoteBtn   = (!isAdmin || isMe) ? '' :
+        `<button class="team-btn danger" onclick="demoteUser('${_esc(m.id)}')">Demote → member</button>`;
+      const youTag      = isMe ? ' <span class="code-meta">(you)</span>' : '';
+      return `
+        <div class="team-row">
+          <div class="team-email">${_esc(m.email)}${youTag}</div>
+          <span class="team-role ${isAdmin ? 'admin' : 'member'}">${_esc(m.role)}</span>
+          <div class="team-actions">${promoteBtn}${demoteBtn}</div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="code-meta">Failed to load team: ${_esc(e.message || e)}</div>`;
+  }
+}
+
+async function promoteUser(uid) {
+  if (!sb || !confirm('Promote this user to admin? They will gain full upload + delete + team-management privileges.')) return;
+  try {
+    const { data, error } = await sb.rpc('promote_member', { p_target: uid });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Promote failed');
+    showResult('team', 'ok', '✓ User promoted to admin');
+    await loadTeam();
+  } catch (e) {
+    showResult('team', 'err', '✗ ' + (e.message || 'Promote failed'));
+  }
+}
+
+async function demoteUser(uid) {
+  if (!sb || !confirm('Demote this admin to member? They will lose admin privileges.')) return;
+  try {
+    const { data, error } = await sb.rpc('demote_member', { p_target: uid });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Demote failed');
+    showResult('team', 'ok', '✓ User demoted to member');
+    await loadTeam();
+  } catch (e) {
+    showResult('team', 'err', '✗ ' + (e.message || 'Demote failed'));
+  }
+}
+
+async function getTodayCode() {
+  const btn  = document.getElementById('btn-today-code');
+  const out  = document.getElementById('today-code');
+  const meta = document.getElementById('today-code-meta');
+  if (!sb) return;
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {
+    const { data, error } = await sb.rpc('get_or_create_today_code');
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Code request failed');
+    out.textContent = data.code;
+    out.classList.remove('empty');
+    meta.textContent = `for ${data.date} (UTC) · share verbally`;
+  } catch (e) {
+    showResult('team', 'err', '✗ ' + (e.message || 'Failed to get code'));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Get today\'s code';
+  }
+}
+
+// Expose handlers used in inline onclick.
+window.promoteUser = promoteUser;
+window.demoteUser  = demoteUser;
 
 function setupDropZone(zoneId, inputId, type) {
   const zone = document.getElementById(zoneId);

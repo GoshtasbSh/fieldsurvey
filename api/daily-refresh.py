@@ -13,7 +13,11 @@ import os
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import supabase_admin, load_cached, json_response, empty_geojson, haversine_m
+from _lib import (
+    supabase_admin, load_cached, json_response, empty_geojson, haversine_m,
+    _bearer_jwt, supabase_anon,
+)
+import hmac as _hmac
 
 # Status colours — mirrors _processing.STATUS so the analysis blob is consistent
 # with what IAQ and survey uploads produce. Kept inline to avoid pulling pandas.
@@ -196,28 +200,52 @@ def _run_refresh() -> dict:
             "cap_reached": cap_reached}
 
 
-def _authorized(headers) -> bool:
-    """Bearer-token check against CRON_SECRET. Fails closed in production:
-    if the env var is missing on Vercel the cron is rejected, preventing
-    drive-by anonymous writes against the service-role key.
-
-    Local-dev override: set CRON_SECRET="dev" (or anything) to allow curl.
-    """
+def _cron_authorized(handler_obj) -> bool:
+    """Bearer CRON_SECRET check. Constant-time. Fails closed in production
+    if CRON_SECRET is unset."""
     secret = os.environ.get("CRON_SECRET", "")
     if not secret:
-        # Production deployments MUST configure CRON_SECRET. Refuse otherwise.
         if os.environ.get("VERCEL_ENV") == "production":
             return False
-        # Outside Vercel production, allow local dev only when
-        # explicitly opted in via KEYSTONE_ALLOW_UNAUTH_CRON=1.
         return os.environ.get("KEYSTONE_ALLOW_UNAUTH_CRON") == "1"
-    got = headers.get("authorization", "")
-    return got == f"Bearer {secret}"
+    got = handler_obj.headers.get("authorization", "") or handler_obj.headers.get("Authorization", "")
+    expected = f"Bearer {secret}"
+    return _hmac.compare_digest(got or "", expected)
+
+
+def _admin_authorized(handler_obj) -> bool:
+    """Admin user-JWT check — used by the dashboard's "Run Daily Refresh
+    Now" button. Validates the JWT and checks team_members.role='admin'."""
+    jwt = _bearer_jwt(handler_obj)
+    if jwt is None:
+        return False
+    sb_anon = supabase_anon()
+    sb_adm  = supabase_admin()
+    if sb_anon is None or sb_adm is None:
+        return False
+    try:
+        resp = sb_anon.auth.get_user(jwt)
+        user = getattr(resp, "user", None)
+        uid = getattr(user, "id", None) if user else None
+    except Exception:
+        return False
+    if not uid:
+        return False
+    try:
+        r = sb_adm.table("team_members").select("role").eq("id", uid).limit(1).execute()
+        rows = r.data or []
+    except Exception:
+        rows = []
+    return bool(rows) and (rows[0].get("role") == "admin")
+
+
+def _authorized(handler_obj) -> bool:
+    return _cron_authorized(handler_obj) or _admin_authorized(handler_obj)
 
 
 class handler(BaseHTTPRequestHandler):
     def _handle(self):
-        if not _authorized(self.headers):
+        if not _authorized(self):
             json_response(self, 401, {"error": "unauthorized"})
             return
         try:

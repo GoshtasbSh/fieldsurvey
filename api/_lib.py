@@ -130,6 +130,14 @@ def strip_survey_answers(geojson):
     return {**geojson, 'features': feats_out}
 
 
+def _bearer_jwt(handler) -> str | None:
+    auth_header = handler.headers.get("Authorization", "") or ""
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    jwt = auth_header.split(" ", 1)[1].strip()
+    return jwt or None
+
+
 def require_auth(handler) -> str | None:
     """Verify the caller's Supabase JWT. Returns the user id on success, else None
     (and writes a 401 response). Use at the top of any mutating endpoint.
@@ -137,17 +145,12 @@ def require_auth(handler) -> str | None:
         user_id = require_auth(self)
         if user_id is None: return  # response already written
     """
-    auth_header = handler.headers.get("Authorization", "") or ""
-    if not auth_header.lower().startswith("bearer "):
+    jwt = _bearer_jwt(handler)
+    if jwt is None:
         json_response(handler, 401, {"detail": "Missing Bearer token."})
-        return None
-    jwt = auth_header.split(" ", 1)[1].strip()
-    if not jwt:
-        json_response(handler, 401, {"detail": "Empty Bearer token."})
         return None
     sb = supabase_anon()
     if not sb:
-        # Fail closed: if we can't verify, we can't trust.
         json_response(handler, 503, {"detail": "Auth service unavailable."})
         return None
     try:
@@ -160,6 +163,61 @@ def require_auth(handler) -> str | None:
         json_response(handler, 401, {"detail": "Invalid or expired token."})
         return None
     return uid
+
+
+def require_team_member(handler) -> tuple[str, str] | None:
+    """Verify JWT + confirm the user is in `team_members`. Returns
+    `(user_id, role)` on success, else None (and writes 401/403). Used
+    by every read/write endpoint that should be team-only.
+    """
+    uid = require_auth(handler)
+    if uid is None:
+        return None
+    sb = supabase_admin() or supabase_anon()
+    if not sb:
+        json_response(handler, 503, {"detail": "Auth service unavailable."})
+        return None
+    try:
+        r = sb.table("team_members").select("role").eq("id", uid).limit(1).execute()
+        rows = r.data or []
+    except Exception:
+        rows = []
+    if not rows:
+        json_response(handler, 403, {"detail": "Team membership required. Redeem your invite code."})
+        return None
+    role = (rows[0] or {}).get("role") or "member"
+    return uid, role
+
+
+def require_admin(handler) -> str | None:
+    """Verify JWT + admin role. Returns user_id on success, else None
+    (and writes 401/403)."""
+    res = require_team_member(handler)
+    if res is None:
+        return None
+    uid, role = res
+    if role != "admin":
+        json_response(handler, 403, {"detail": "Admin role required."})
+        return None
+    return uid
+
+
+def authed_supabase(handler):
+    """Return a Supabase client whose PostgREST requests carry the caller's
+    JWT — used for SECURITY DEFINER RPCs that read `auth.uid()`. Caller is
+    responsible for having already validated the JWT (e.g. via
+    require_team_member). Returns None and writes 503 if env is missing."""
+    jwt = _bearer_jwt(handler)
+    if jwt is None:
+        return None
+    sb = supabase_anon()
+    if not sb:
+        return None
+    try:
+        sb.postgrest.auth(jwt)
+    except Exception:
+        return None
+    return sb
 
 
 def check_upload_size(handler, max_bytes: int = MAX_UPLOAD_BYTES) -> int | None:

@@ -1,5 +1,27 @@
 """KeyStone Field API — Admin upload backend.
 
+⚠️ DEAD CODE — DO NOT DEPLOY ANYWHERE ⚠️
+────────────────────────────────────────────────────────────────────────
+This module is the legacy Render.com upload backend. It is NOT deployed
+in the current architecture (production runs on Vercel; the upload
+endpoints live in api/upload/*.py and require Bearer JWT auth).
+
+Why this is dangerous if accidentally redeployed:
+  * Uses the SUPABASE_SERVICE_ROLE_KEY (bypasses RLS).
+  * No `require_auth` on any route — anonymous callers reach service-role.
+  * CORS allow_origins=["*"] — any web origin can call it.
+  * `POST /api/upload/community` and `/api/upload/iaq` execute
+    `sb.table('…').delete().neq('id', -1).execute()` first, wiping the
+    entire table before re-inserting.
+
+Status: kept in the repo only as historical reference. Listed in
+`.vercelignore` so it cannot reach the Vercel surface. Slated for
+deletion. If you ever revive a Render or other host, do NOT reuse this
+file as-is — port to the api/upload/*.py auth-gated pattern.
+
+Original docstring follows.
+────────────────────────────────────────────────────────────────────────
+
 Handles XLSX/CSV uploads, geocoding, and Supabase inserts.
 Separate service from the existing app.py dashboard.
 
@@ -8,6 +30,11 @@ Deploy to Render.com with:
   SUPABASE_SERVICE_ROLE_KEY=...
   PORT=8051
 """
+
+raise RuntimeError(
+    "keystone_field_api/main.py is DEAD CODE — do not import or run. "
+    "Use api/upload/*.py on Vercel instead. See banner above."
+)
 
 import asyncio
 import io

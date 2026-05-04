@@ -8,16 +8,16 @@ from urllib.parse import urlparse, parse_qs
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
-from _lib import supabase_admin, json_response, require_auth
+from _lib import supabase_admin, json_response, require_admin
 from _processing import compute_contact_analysis
 
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Restoring a historical snapshot rewrites production data via the
-        # service-role key — must require an authenticated caller.
-        if require_auth(self) is None:
-            return  # 401 already written
+        # service-role key — admin role required.
+        if require_admin(self) is None:
+            return  # 401/403 already written
         qs  = parse_qs(urlparse(self.path).query)
         raw = qs.get('id', [''])[0]
         if not raw or not raw.isdigit():
