@@ -6,6 +6,8 @@ Actions:
   claim       — name + today's invite code → returns session_id, expires_at
   heartbeat   — session_id → keep-alive (sliding TTL)
   add-point   — session_id + lat/lon/status/notes → insert field_survey_points
+  edit-point  — session_id + point_id + status/notes → update OWN pin only
+  delete-point— session_id + point_id → delete OWN pin only
   my-points   — session_id → guest's own pins
   points-all  — session_id → all team field_survey_points (for the map)
   team-list   — session_id → recent points + presence (for renderTeam)
@@ -169,6 +171,10 @@ class handler(BaseHTTPRequestHandler):
 
         if action == "add-point":
             return self._add_point(body, sb, sess)
+        if action == "edit-point":
+            return self._edit_point(body, sb, sess)
+        if action == "delete-point":
+            return self._delete_point(body, sb, sess)
         if action == "my-points":
             return self._my_points(sb, sess)
         if action == "heartbeat":
@@ -266,6 +272,86 @@ class handler(BaseHTTPRequestHandler):
             "id":  row.get("id"),
             "expires_at_at_save": sess["expires_at"],
         })
+
+    # ── action: edit-point ────────────────────────────────────────────
+    # Guest may only edit a pin THEY collected (matched on guest_session_id).
+    # Service-role bypasses RLS, so we must enforce ownership ourselves.
+    def _edit_point(self, body: dict, sb, sess: dict):
+        point_id = (body.get("point_id") or "").strip()
+        if not point_id:
+            json_response(self, 400, {"ok": False, "error": "point_id required."})
+            return
+        # Ownership check: load the row, refuse if guest_session_id mismatch.
+        try:
+            r = (sb.table("field_survey_points")
+                   .select("id,guest_session_id")
+                   .eq("id", point_id).limit(1).execute())
+            rows = r.data or []
+        except Exception as e:
+            print(f"[guest/edit-point] read FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not read point."})
+            return
+        if not rows:
+            json_response(self, 404, {"ok": False, "error": "Point not found."})
+            return
+        if rows[0].get("guest_session_id") != sess["id"]:
+            json_response(self, 403, {"ok": False, "error": "You can only edit pins you collected."})
+            return
+        # Build the update patch — only touch fields the guest is allowed to change.
+        patch: dict = {}
+        if "status" in body:
+            status = (body.get("status") or "Unknown").strip()
+            if status not in ALLOWED_STATUS:
+                json_response(self, 400, {"ok": False, "error": "Invalid status."})
+                return
+            patch["status"] = status
+        if "notes" in body:
+            notes = (body.get("notes") or "").strip()
+            if len(notes) > 1000:
+                notes = notes[:1000]
+            patch["notes"] = notes or None
+        if not patch:
+            json_response(self, 400, {"ok": False, "error": "Nothing to update."})
+            return
+        try:
+            sb.table("field_survey_points").update(patch).eq("id", point_id).execute()
+        except Exception as e:
+            print(f"[guest/edit-point] update FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not update point."})
+            return
+        _touch_session(sb, sess["id"])
+        json_response(self, 200, {"ok": True, "id": point_id})
+
+    # ── action: delete-point ──────────────────────────────────────────
+    def _delete_point(self, body: dict, sb, sess: dict):
+        point_id = (body.get("point_id") or "").strip()
+        if not point_id:
+            json_response(self, 400, {"ok": False, "error": "point_id required."})
+            return
+        try:
+            r = (sb.table("field_survey_points")
+                   .select("id,guest_session_id")
+                   .eq("id", point_id).limit(1).execute())
+            rows = r.data or []
+        except Exception as e:
+            print(f"[guest/delete-point] read FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not read point."})
+            return
+        if not rows:
+            # Idempotent: missing row is treated as already-deleted.
+            json_response(self, 200, {"ok": True, "id": point_id, "missing": True})
+            return
+        if rows[0].get("guest_session_id") != sess["id"]:
+            json_response(self, 403, {"ok": False, "error": "You can only delete pins you collected."})
+            return
+        try:
+            sb.table("field_survey_points").delete().eq("id", point_id).execute()
+        except Exception as e:
+            print(f"[guest/delete-point] delete FAIL {type(e).__name__}: {e}")
+            json_response(self, 500, {"ok": False, "error": "Could not delete point."})
+            return
+        _touch_session(sb, sess["id"])
+        json_response(self, 200, {"ok": True, "id": point_id})
 
     # ── action: my-points ─────────────────────────────────────────────
     def _my_points(self, sb, sess: dict):

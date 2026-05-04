@@ -1501,7 +1501,7 @@ function addSurveyLayers(pts) {
         <div class="pp-meta">👤 ${_esc(p.collector)}</div>
         <div class="pp-meta">🕐 ${_esc(p.time)}</div>
         ${p.notes ? `<div class="pp-notes">"${_esc(p.notes)}"</div>` : ''}
-        ${isMine ? `<div class="pp-actions">
+        ${(isMine || _myRoleMobile === 'admin') ? `<div class="pp-actions">
           <button class="pp-btn pp-btn-edit"   onclick="_handlePopupEdit('${idAttr}')">✎ Edit</button>
           <button class="pp-btn pp-btn-delete" onclick="_handlePopupDelete('${idAttr}')">✕ Delete</button>
         </div>` : ''}
@@ -1889,11 +1889,29 @@ async function confirmDeletePoint(id) {
 
   if (!navigator.onLine) { showToast('Delete requires internet', '#f59e0b'); return; }
   try {
-    const { error } = await sb.from('field_survey_points')
-      .delete()
-      .eq('id', id)
-      .eq('collector_id', currentUser.id);
-    if (error) throw error;
+    if (IS_GUEST) {
+      // Guest delete goes through /api/guest action=delete-point so the
+      // server can verify the pin's guest_session_id matches the active
+      // session. Members + admins use Supabase direct (RLS gates them).
+      const r = await fetch('/api/guest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          action: 'delete-point', session_id: GUEST.session_id, point_id: id,
+        }),
+      });
+      if (r.status === 401) { handleGuestExpired(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    } else {
+      // RLS gate: members can only delete their own pins; admins can
+      // delete any pin (migration 16 widens the DELETE policy with
+      // is_admin). Don't filter by collector_id — let RLS decide.
+      const { error } = await sb.from('field_survey_points')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+    }
     _allFieldPoints = _allFieldPoints.filter(x => x.id !== id);
     removePointFromMap(id);
     recalcCounts(_allFieldPoints);
@@ -1907,8 +1925,17 @@ async function confirmDeletePoint(id) {
 function _handlePopupEdit(id) {
   const resolvedId = id || _activePopupPointId;
   if (!resolvedId) return;
-  if (IS_GUEST) {
-    showToast('Guests can only add new points (no editing)', '#f59e0b');
+  // Permission check: anyone can attempt to edit, but only the pin's
+  // owner OR an admin actually goes through. RLS / /api/guest server
+  // ownership check is the real boundary; this is just UX.
+  const pt = _allFieldPoints.find(x => x.id === resolvedId);
+  if (!pt) { showToast('Point not found', '#ef4444'); return; }
+  const isMine = (
+    (currentUser?.id && pt.collector_id === currentUser.id) ||
+    (IS_GUEST && GUEST?.session_id && pt.guest_session_id === GUEST.session_id)
+  );
+  if (!isMine && _myRoleMobile !== 'admin') {
+    showToast('You can only edit pins you collected', '#f59e0b');
     return;
   }
   document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
@@ -1917,8 +1944,14 @@ function _handlePopupEdit(id) {
 function _handlePopupDelete(id) {
   const resolvedId = id || _activePopupPointId;
   if (!resolvedId) return;
-  if (IS_GUEST) {
-    showToast('Guests cannot delete points', '#f59e0b');
+  const pt = _allFieldPoints.find(x => x.id === resolvedId);
+  if (!pt) { showToast('Point not found', '#ef4444'); return; }
+  const isMine = (
+    (currentUser?.id && pt.collector_id === currentUser.id) ||
+    (IS_GUEST && GUEST?.session_id && pt.guest_session_id === GUEST.session_id)
+  );
+  if (!isMine && _myRoleMobile !== 'admin') {
+    showToast('You can only delete pins you collected', '#f59e0b');
     return;
   }
   document.querySelectorAll('.maplibregl-popup').forEach(el => el.remove());
@@ -1972,17 +2005,40 @@ async function savePoint(coords) {
       }
       return;
     }
-    if (!navigator.onLine || !sb) {
+    if (!navigator.onLine) {
       showToast('Edit requires internet', '#f59e0b');
       if (btn) { btn.classList.remove('saving'); btn.disabled = false; btn.textContent = '✓  Update Point'; }
       return;
     }
     try {
-      const { error } = await sb.from('field_survey_points')
-        .update({ status, notes })
-        .eq('id', _editPointId)
-        .eq('collector_id', currentUser.id);
-      if (error) throw error;
+      // Guests use /api/guest action=edit-point so the server can
+      // verify the pin's guest_session_id matches the active session.
+      if (IS_GUEST) {
+        const r = await fetch('/api/guest', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            action: 'edit-point', session_id: GUEST.session_id,
+            point_id: _editPointId, status, notes,
+          }),
+        });
+        if (r.status === 401) { handleGuestExpired(); return; }
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      } else {
+        if (!sb) {
+          showToast('Edit requires internet', '#f59e0b');
+          if (btn) { btn.classList.remove('saving'); btn.disabled = false; btn.textContent = '✓  Update Point'; }
+          return;
+        }
+        // Members hit RLS limits to their own pin; admins can edit any
+        // pin (migration 16 broadens the UPDATE policy with is_admin).
+        // Don't constrain by collector_id — let RLS make the call.
+        const { error } = await sb.from('field_survey_points')
+          .update({ status, notes })
+          .eq('id', _editPointId);
+        if (error) throw error;
+      }
       const i = _allFieldPoints.findIndex(x => x.id === _editPointId);
       if (i >= 0) { _allFieldPoints[i].status = status; _allFieldPoints[i].notes = notes; }
       if (i >= 0) replacePointOnMap({ ..._allFieldPoints[i], status, notes, color });
