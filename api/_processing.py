@@ -783,6 +783,103 @@ def tag_contact_match_status(contact_features: list) -> dict:
     return counts
 
 
+# Status priority for parcel-level dedup. Higher rank = more
+# informative outcome that should win the visible dot. The order
+# follows the field team's ground-truth hierarchy: a successful
+# contact (Completed → Follow Up → Left Info) outranks any
+# can't-reach (No Answer → Inaccessible → Vacant), which in turn
+# outrank an explicit refusal (Not Interested) and unknown buckets.
+_CONTACT_STATUS_PRIORITY = [
+    "Completed", "Follow Up", "Left Info",
+    "No Answer", "Inaccessible", "Vacant",
+    "Not Interested", "Other", "Unknown",
+]
+
+
+def _contact_status_rank(s) -> int:
+    try:
+        return _CONTACT_STATUS_PRIORITY.index(s or "Unknown")
+    except ValueError:
+        return len(_CONTACT_STATUS_PRIORITY)
+
+
+def dedup_contacts_at_parcel(features: list, cell_deg: float = 1e-5) -> list:
+    """Collapse community-contact features that share the same parcel
+    rep-point into a single feature, keeping the highest-priority
+    status. Dropped rows are stamped onto the survivor's
+    `coincident_contacts` property so the popup can still surface
+    their status / notes / collected_at.
+
+    Why this exists:
+
+    A parcel can appear in the CSV multiple times (two visits, repeat
+    callbacks, multiple field-app pins for the same household). Before
+    dedup, every row renders as its own dot at the same lat/lon. The
+    Completed dot's wider G2 yellow stroke (2.8 px) pokes out around
+    a stacked Left Info dot's narrower translucent rim (2.0 px),
+    creating the visual artefact "Left Info has a yellow rim" that
+    confused us into thinking the paint expression was wrong. Deduping
+    here removes the stack entirely — only one dot per parcel, with
+    the most informative status — so the rim seen on the map always
+    matches the dot it's attached to.
+
+    `cell_deg = 1e-5` ≈ 1.1 m at our latitude, which is tight enough
+    that genuinely separate parcels are never collapsed. Two contacts
+    that share an exact parcel-rep snap are guaranteed to land in the
+    same cell; two that geocoded slightly off won't collide.
+
+    Idempotent — survivor's geometry is preserved verbatim, so calling
+    twice produces the same result.
+    """
+    if not features:
+        return list(features) if features is not None else []
+
+    buckets: dict = {}
+    order: list = []
+    for f in features:
+        try:
+            lon, lat = f["geometry"]["coordinates"][:2]
+        except (KeyError, IndexError, TypeError):
+            order.append(f)  # malformed geometry — pass through unchanged
+            continue
+        if lon is None or lat is None:
+            order.append(f)
+            continue
+        key = (round(lat / cell_deg), round(lon / cell_deg))
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(f)
+
+    out: list = []
+    for item in order:
+        if not isinstance(item, tuple):
+            out.append(item)  # malformed-geometry passthrough
+            continue
+        group = buckets[item]
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        group.sort(key=lambda f: _contact_status_rank(
+            (f.get("properties") or {}).get("status")))
+        winner = group[0]
+        losers = group[1:]
+        wp = winner.setdefault("properties", {})
+        existing = wp.get("coincident_contacts") or []
+        wp["coincident_contacts"] = existing + [
+            {
+                "status":       (l.get("properties") or {}).get("status"),
+                "street_name":  (l.get("properties") or {}).get("street_name"),
+                "notes":        (l.get("properties") or {}).get("notes"),
+                "collected_at": (l.get("properties") or {}).get("collected_at"),
+                "source":       (l.get("properties") or {}).get("source"),
+            }
+            for l in losers
+        ]
+        out.append(winner)
+    return out
+
+
 def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
                                 matches: dict) -> int:
     upgraded = 0

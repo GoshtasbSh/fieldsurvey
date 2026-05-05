@@ -764,6 +764,78 @@ def tag_contact_match_status(contact_features: list) -> dict:
     return counts
 
 
+# Status priority for parcel-level dedup. Mirror of
+# api/_processing.py:_CONTACT_STATUS_PRIORITY.
+_CONTACT_STATUS_PRIORITY = [
+    "Completed", "Follow Up", "Left Info",
+    "No Answer", "Inaccessible", "Vacant",
+    "Not Interested", "Other", "Unknown",
+]
+
+
+def _contact_status_rank(s) -> int:
+    try:
+        return _CONTACT_STATUS_PRIORITY.index(s or "Unknown")
+    except ValueError:
+        return len(_CONTACT_STATUS_PRIORITY)
+
+
+def dedup_contacts_at_parcel(features: list, cell_deg: float = 1e-5) -> list:
+    """Collapse community-contact features that share the same parcel
+    rep-point. Mirror of api/_processing.py:dedup_contacts_at_parcel —
+    see that file for the rationale and tolerance reasoning. Lives
+    here so the local-dev `app.py` upload paths produce a blob with
+    the same shape (and same dedup) as the Vercel function path.
+    """
+    if not features:
+        return list(features) if features is not None else []
+
+    buckets: dict = {}
+    order: list = []
+    for f in features:
+        try:
+            lon, lat = f["geometry"]["coordinates"][:2]
+        except (KeyError, IndexError, TypeError):
+            order.append(f)
+            continue
+        if lon is None or lat is None:
+            order.append(f)
+            continue
+        key = (round(lat / cell_deg), round(lon / cell_deg))
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(f)
+
+    out: list = []
+    for item in order:
+        if not isinstance(item, tuple):
+            out.append(item)
+            continue
+        group = buckets[item]
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        group.sort(key=lambda f: _contact_status_rank(
+            (f.get("properties") or {}).get("status")))
+        winner = group[0]
+        losers = group[1:]
+        wp = winner.setdefault("properties", {})
+        existing = wp.get("coincident_contacts") or []
+        wp["coincident_contacts"] = existing + [
+            {
+                "status":       (l.get("properties") or {}).get("status"),
+                "street_name":  (l.get("properties") or {}).get("street_name"),
+                "notes":        (l.get("properties") or {}).get("notes"),
+                "collected_at": (l.get("properties") or {}).get("collected_at"),
+                "source":       (l.get("properties") or {}).get("source"),
+            }
+            for l in losers
+        ]
+        out.append(winner)
+    return out
+
+
 def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
                                   fallback_m: float = 30) -> int:
     """
@@ -2126,7 +2198,13 @@ async def lifespan(application):
         # Tag match_status so the desktop dashboard's stroke encoding
         # works from first load — Completed contacts start as G2
         # (contact_only) until an IAQ upload promotes them to G1.
-        tag_contact_match_status(survey_data.get('features', []))
+        # Then dedup at parcel rep-point so multiple CSV rows for the
+        # same household collapse to a single dot.
+        feats = survey_data.get('features', [])
+        tag_contact_match_status(feats)
+        feats = dedup_contacts_at_parcel(feats)
+        survey_data['features'] = feats
+        n = len(feats)
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
         log.info(f"Auto-processed and saved {n} contact points to Supabase as '{label}'")
@@ -2435,8 +2513,14 @@ async def daily_refresh():
     survey_data = merged
     # Daily-refresh appends new field-as-features to the blob. Re-tag
     # the entire merged feature list so newly-added points pick up
-    # G1 / G2 strokes consistently with the rest.
-    tag_contact_match_status(survey_data.get('features', []))
+    # G1 / G2 strokes consistently with the rest, then dedup at the
+    # parcel rep-point so a fresh field point at the same parcel as
+    # an existing CSV contact doesn't render as two stacked dots.
+    feats = survey_data.get('features', [])
+    tag_contact_match_status(feats)
+    feats = dedup_contacts_at_parcel(feats)
+    survey_data['features'] = feats
+    n_total = len(feats)
     analysis    = compute_analysis(survey_data, parcels_data)
     await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
     await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n_total)
@@ -2533,8 +2617,13 @@ async def upload_iaq(file: UploadFile = File(...)):
         n_upgraded = _upgrade_contacts_from_iaq(contact_feats, iaq_data['features'], matches)
         # Always retag — even if nothing upgraded, an existing contact
         # might have flipped from G2 → G1 and we want the stroke fresh.
+        # Then dedup at parcel rep-point so co-located contacts collapse
+        # to a single dot regardless of how many CSV rows they came from.
         tag_contact_match_status(contact_feats)
-        if n_upgraded:
+        pre_dedup_n = len(contact_feats)
+        contact_feats = dedup_contacts_at_parcel(contact_feats)
+        dedup_dropped = pre_dedup_n - len(contact_feats)
+        if n_upgraded or dedup_dropped:
             survey_data['features'] = contact_feats
             analysis = compute_analysis(survey_data, parcels_data)
             contact_label = (f"IAQ-merged {_datetime.now(_tz.utc).date().isoformat()} — "
@@ -3106,8 +3195,15 @@ async def upload_survey(file: UploadFile = File(...)):
         # can display it — ignored by everything else.
         try: survey_data['source_filename'] = file.filename
         except Exception: pass
+        # Tag match_status (G2 by default until IAQ promotes them) and
+        # dedup at parcel rep-point so multiple CSV rows for the same
+        # household collapse to a single dot.
+        feats = survey_data.get('features', [])
+        tag_contact_match_status(feats)
+        feats = dedup_contacts_at_parcel(feats)
+        survey_data['features'] = feats
         analysis = compute_analysis(survey_data, parcels_data)
-        n = len(survey_data.get("features", []))
+        n = len(feats)
         label = f"Upload {_datetime.now(_tz.utc).date().isoformat()} — {n} contacts · {file.filename}"
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)

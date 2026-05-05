@@ -182,12 +182,16 @@ def _run_refresh() -> dict:
 
     # Tag every Completed contact / field-as-feature with match_status
     # (G1 = matched, G2 = contact_only) so the desktop map's stroke
-    # encoding stays correct after the daily-refresh append.
+    # encoding stays correct after the daily-refresh append. Then dedup
+    # at the parcel rep-point so a freshly-appended field point at the
+    # same parcel as an existing CSV contact collapses to a single dot.
     try:
-        from _processing import tag_contact_match_status
+        from _processing import tag_contact_match_status, dedup_contacts_at_parcel
         tag_contact_match_status(features)
+        features = dedup_contacts_at_parcel(features)
+        merged = {"type": "FeatureCollection", "features": features}
     except Exception as e:
-        print(f"[daily-refresh] tag_contact_match_status failed: {e}")
+        print(f"[daily-refresh] tag/dedup failed: {e}")
 
     label = f"Daily Update {datetime.now(timezone.utc).date().isoformat()} — {len(new_rows)} new field visits ({len(features)} total)"
 

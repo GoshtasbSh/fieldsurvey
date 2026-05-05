@@ -30,7 +30,8 @@ from _lib import (
 from _processing import (
     parse_multipart_file, load_parcel_index,
     process_iaq_bytes, process_survey_bytes, compute_contact_analysis,
-    _apply_iaq_to_field_features, tag_contact_match_status, PII_COLS,
+    _apply_iaq_to_field_features, tag_contact_match_status,
+    dedup_contacts_at_parcel, PII_COLS,
 )
 
 try:
@@ -190,9 +191,18 @@ class handler(BaseHTTPRequestHandler):
         # on the desktop map). Run regardless of whether n_upgraded > 0
         # — the IAQ upload could have *downgraded* nothing but still
         # toggled a contact from G2 to G1, and we want the tag fresh.
+        # Then dedup at parcel rep-point so multiple CSV rows sharing a
+        # parcel collapse to a single dot (the highest-priority status
+        # wins; the rest move to coincident_contacts on the survivor).
+        # Without this pass, a Completed dot's wider yellow rim pokes
+        # out around a stacked Left Info dot at the same parcel.
+        dedup_dropped = 0
         if contact_feats:
             tag_contact_match_status(contact_feats)
-        if n_upgraded and contact_feats:
+            pre_dedup_n = len(contact_feats)
+            contact_feats = dedup_contacts_at_parcel(contact_feats)
+            dedup_dropped = pre_dedup_n - len(contact_feats)
+        if (n_upgraded or dedup_dropped) and contact_feats:
             updated_contact = {**contact_blob, 'features': contact_feats}
             sb.table('keystone_dashboard_data').upsert(
                 {'data_type': 'community_contact', 'payload': updated_contact},
@@ -330,7 +340,15 @@ class handler(BaseHTTPRequestHandler):
         # Fresh CSV upload starts with no IAQ tags. Mark every Completed
         # contact as 'contact_only' so the desktop map shows them with
         # the amber G2 stroke until the next IAQ upload promotes them.
-        tag_contact_match_status(survey_data.get('features', []))
+        # Then dedup at the parcel rep-point so multiple CSV rows
+        # sharing a parcel collapse to a single dot (highest-priority
+        # status wins; the rest move to coincident_contacts on the
+        # survivor). See dedup_contacts_at_parcel() docstring for why.
+        feats = survey_data.get('features', [])
+        tag_contact_match_status(feats)
+        feats = dedup_contacts_at_parcel(feats)
+        survey_data['features'] = feats
+        n = len(feats)
 
         sb.table('keystone_dashboard_data').upsert(
             {'data_type': 'community_contact', 'payload': survey_data},

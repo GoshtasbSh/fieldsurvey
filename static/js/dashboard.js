@@ -1257,6 +1257,17 @@ function buildSurveyTab(p) {
         <span>IAQ&nbsp;<strong>${iaqScore}</strong></span>
         <span>Struct&nbsp;<strong>${structScore}</strong></span>
       </div>` : ''}
+      ${(Array.isArray(p.coincident_contacts) && p.coincident_contacts.length) ? `
+      <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
+        <div class="popup-label" style="margin-bottom:4px">Other visits at this parcel</div>
+        ${p.coincident_contacts.map(cc => `
+          <div style="font-size:11px;color:var(--muted);line-height:1.45">
+            <span class="popup-badge" style="background:rgba(255,255,255,.06);color:var(--text2);border:1px solid rgba(255,255,255,.1);padding:1px 6px;border-radius:4px">${escapeHtml(cc.status || 'Unknown')}</span>
+            ${cc.collected_at ? `<span style="margin-left:6px">${escapeHtml(String(cc.collected_at).slice(0,10))}</span>` : ''}
+            ${cc.notes ? `<div style="margin-top:2px;color:var(--text2)">${escapeHtml(cc.notes)}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>` : ''}
     </div>`;
 }
 
