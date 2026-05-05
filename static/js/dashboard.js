@@ -4463,8 +4463,22 @@ async function sendChatMessage() {
       },
       body: JSON.stringify({ message, history: chatHistory.slice(-8), map_state: getCurrentMapState() }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     removeTyping(typingId);
+    // Surface the real server error instead of a generic toast so the
+    // PI can tell whether it was 401 (missing auth / not a team
+    // member), 502 (Groq itself failing — usually GROQ_API_KEY missing
+    // or wrong), 413 (message too long), etc.
+    if (!res.ok) {
+      const detail = data?.error || data?.detail || `HTTP ${res.status}`;
+      const hint = res.status === 401
+        ? ' — sign in as a team member.'
+        : res.status === 502
+          ? ' — check GROQ_API_KEY in Vercel project settings.'
+          : '';
+      appendChatBubble('assistant', `AI chat failed: ${String(detail)}${hint}`);
+      return;
+    }
 
     const { text, map_actions, model_used } = data;
 
@@ -4490,7 +4504,9 @@ async function sendChatMessage() {
     if (chatHistory.length > 20) chatHistory = chatHistory.slice(-16);
   } catch (e) {
     removeTyping(typingId);
-    appendChatBubble('assistant', 'Sorry, I encountered an error. Please try again.');
+    // Network-level failure (server unreachable, CORS, etc.). Show the
+    // raw error so production debugging works without DevTools.
+    appendChatBubble('assistant', `AI chat network error: ${escapeHtml(e?.message || String(e))}`);
   } finally {
     chatInFlight = false;
     sendBtn.disabled = false;
