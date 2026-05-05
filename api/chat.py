@@ -398,16 +398,37 @@ class handler(BaseHTTPRequestHandler):
         try:
             raw_text = _call_groq(msgs, groq_key)
         except urllib.error.HTTPError as e:
+            # Surface Groq's actual error message so we can tell whether
+            # the cause is a wrong API key (401 invalid_api_key), a
+            # decommissioned model (400 model_not_found), rate limit
+            # (429), quota (402/403), or a context-too-long (400).
+            detail = ""
             try:
-                detail = e.read().decode("utf-8", errors="ignore")[:400]
-                print(f"[chat] Groq HTTPError {e.code}: {detail}")
+                detail = e.read().decode("utf-8", errors="ignore")[:600]
             except Exception:
                 pass
-            json_response(self, 502, {"error": "Chat service unavailable. Try again in a moment."})
+            print(f"[chat] Groq HTTPError {e.code}: {detail}")
+            # Try to extract the human-readable Groq message; fall back
+            # to the raw body or just the HTTP code.
+            err_msg = f"Groq HTTP {e.code}"
+            try:
+                j = json.loads(detail) if detail else {}
+                inner = (j.get("error") or {}) if isinstance(j, dict) else {}
+                if isinstance(inner, dict) and inner.get("message"):
+                    err_msg = f"Groq HTTP {e.code}: {inner['message']}"
+                    code = inner.get("code")
+                    if code:
+                        err_msg += f" [{code}]"
+                elif detail:
+                    err_msg = f"Groq HTTP {e.code}: {detail[:200]}"
+            except Exception:
+                if detail:
+                    err_msg = f"Groq HTTP {e.code}: {detail[:200]}"
+            json_response(self, 502, {"error": err_msg})
             return
         except Exception as e:
             print(f"[chat] {type(e).__name__}: {e}")
-            json_response(self, 500, {"error": "Chat service unavailable. Try again in a moment."})
+            json_response(self, 500, {"error": f"{type(e).__name__}: {e}"[:300]})
             return
 
         # Extract json_actions block; strip it from the visible text
