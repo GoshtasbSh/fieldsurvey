@@ -2418,7 +2418,19 @@ async function runDailyRefresh() {
       const live = (typeof computeUnifiedStatusCounts === 'function')
         ? Object.values(computeUnifiedStatusCounts()).reduce((s,n)=>s+n,0)
         : data.total_points;
-      alert(`Refresh complete: ${data.new_field_points} new field visit${data.new_field_points === 1 ? '' : 's'} merged.\nTotal community contacts: ${live}.\n\n"${data.label}"`);
+      // Pull the date out of the server label and drop the parenthetical
+      // "(N total)" the server appends — that N is the cached-blob feature
+      // count which can differ from `live` (the deduped panel count) by
+      // the number of field points that exist in BOTH the cached blob
+      // AND /api/field-points. Showing both in one alert reads as a
+      // contradiction; the panel and the unified `live` are the user-
+      // facing truth, so we surface those and quote the date only.
+      const labelDate = (data.label || '').match(/(\d{4}-\d{2}-\d{2})/)?.[1] || '';
+      alert(
+        `Refresh complete: ${data.new_field_points} new field visit${data.new_field_points === 1 ? '' : 's'} merged.\n` +
+        `Total community contacts: ${live}.\n\n` +
+        `Snapshot saved as Daily Update ${labelDate}.`
+      );
     } else {
       alert(`No new field data found since last analysis.\n\n${data.reason}`);
     }
