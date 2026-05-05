@@ -69,56 +69,62 @@ EXPECTED_IAQ_COLUMNS = {
 # with a literal single-space header). We pin them by ORIGINAL CSV column
 # index so renames or PII drops cannot shift the mapping. Question text is
 # pulled from the CSV's descriptor row (row 1) for use in chart subtitles.
+# Field -> (fallback_csv_idx, primary_qid, canonical_text). The QID
+# (Qualtrics ImportId) is the PRIMARY identifier — extracted at runtime
+# from the CSV's ImportId metadata row so column-position drift between
+# survey versions never causes a wrong-column read. The numeric idx is
+# kept as a fallback when the CSV is a legacy export without ImportId
+# metadata (or when a question's QID isn't in the qid_to_col_idx map).
 SURVEY_QUESTIONS = {
     # ── Residency & Housing (R1–R8) ───────────────────────────────────────────
-    'years_in_hre':       (27, 'How long have you lived in High Ridge Estates? (years)'),
-    'reloc_factor_emp':   (29, 'Relocation factor — Employment opportunities nearby'),
-    'reloc_factor_aff':   (30, 'Relocation factor — Affordable housing'),
-    'reloc_factor_qol':   (31, 'Relocation factor — Quality of Life'),
-    'reloc_factor_fam':   (32, 'Relocation factor — Proximity to family and friends'),
-    'reloc_factor_ret':   (33, 'Relocation factor — Retirement'),
-    'reloc_factor_env':   (34, 'Relocation factor — Environmental quality and access to nature'),
-    'reloc_factor_inh':   (35, 'Relocation factor — Inherited property'),
-    'reloc_factor_oth':   (36, 'Relocation factor — Other'),
-    'mh_skirting':        (42, 'If you live in a mobile home, does your home have its skirting intact?'),
-    'anticipated_stay':   (44, 'How long do you anticipate continuing to live in your current house?'),
-    'safety_env':         (56, 'Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?'),
-    'safety_social':      (57, 'Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?'),
-    'afford_urgency':     (58, 'How would you rate the urgency of having affordable housing in High Ridge Estates?'),
-    'afford_strategy':    (59, 'In your opinion, what is the most effective strategy to improve housing affordability in HRE?'),
+    'years_in_hre':       (27,  'QID12_TEXT', 'How long have you lived in High Ridge Estates? (years)'),
+    'reloc_factor_emp':   (29,  'QID181_1',   'Relocation factor — Employment opportunities nearby'),
+    'reloc_factor_aff':   (30,  'QID181_2',   'Relocation factor — Affordable housing'),
+    'reloc_factor_qol':   (31,  'QID181_3',   'Relocation factor — Quality of Life'),
+    'reloc_factor_fam':   (32,  'QID181_4',   'Relocation factor — Proximity to family and friends'),
+    'reloc_factor_ret':   (33,  'QID181_5',   'Relocation factor — Retirement'),
+    'reloc_factor_env':   (34,  'QID181_6',   'Relocation factor — Environmental quality and access to nature'),
+    'reloc_factor_inh':   (35,  'QID181_7',   'Relocation factor — Inherited property'),
+    'reloc_factor_oth':   (36,  'QID181_8',   'Relocation factor — Other'),
+    'mh_skirting':        (42,  'QID100',     'If you live in a mobile home, does your home have its skirting intact?'),
+    'anticipated_stay':   (44,  'QID47',      'How long do you anticipate continuing to live in your current house?'),
+    'safety_env':         (56,  'QID21',      'Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?'),
+    'safety_social':      (57,  'QID194',     'Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?'),
+    'afford_urgency':     (58,  'QID17',      'How would you rate the urgency of having affordable housing in High Ridge Estates?'),
+    'afford_strategy':    (59,  'QID19',      'In your opinion, what is the most effective strategy to improve housing affordability in HRE?'),
 
     # ── Community Living: home-resilience interventions matrix (C1, 11 items) ─
-    'intv_roof_walls':    (67, 'Intervention — Strengthen the roof and walls against severe weather'),
-    'intv_windows_doors': (68, 'Intervention — Upgrade windows and doors to be more energy-efficient'),
-    'intv_rain_gardens':  (69, 'Intervention — Install rain gardens to manage stormwater on my property'),
-    'intv_hvac':          (70, 'Intervention — Improve heating/cooling system(s)'),
-    'intv_plumbing_elec': (71, 'Intervention — Improve plumbing or electrical systems for reliability'),
-    'intv_well_septic':   (72, 'Intervention — Replace well/septic'),
-    'intv_ccua_water':    (73, 'Intervention — Connect to city water through CCUA'),
-    'intv_fence':         (74, 'Intervention — Add a fence for safety'),
-    'intv_trees_shade':   (75, 'Intervention — Plant more trees around my home for shade and cooling'),
-    'intv_trim_trees':    (76, 'Intervention — Trim trees'),
-    'intv_drainage':      (77, 'Intervention — Improved drainage'),
+    'intv_roof_walls':    (67,  'QID195_1',   'Intervention — Strengthen the roof and walls against severe weather'),
+    'intv_windows_doors': (68,  'QID195_2',   'Intervention — Upgrade windows and doors to be more energy-efficient'),
+    'intv_rain_gardens':  (69,  'QID195_3',   'Intervention — Install rain gardens to manage stormwater on my property'),
+    'intv_hvac':          (70,  'QID195_4',   'Intervention — Improve heating/cooling system(s)'),
+    'intv_plumbing_elec': (71,  'QID195_5',   'Intervention — Improve plumbing or electrical systems for reliability'),
+    'intv_well_septic':   (72,  'QID195_6',   'Intervention — Replace well/septic'),
+    'intv_ccua_water':    (73,  'QID195_7',   'Intervention — Connect to city water through CCUA'),
+    'intv_fence':         (74,  'QID195_8',   'Intervention — Add a fence for safety'),
+    'intv_trees_shade':   (75,  'QID195_9',   'Intervention — Plant more trees around my home for shade and cooling'),
+    'intv_trim_trees':    (76,  'QID195_10',  'Intervention — Trim trees'),
+    'intv_drainage':      (77,  'QID195_11',  'Intervention — Improved drainage'),
 
     # ── Community Living: experiences in HRE matrix (C2, 10 items) ────────────
-    'exp_flooding':        (84, 'Experience — Flooding of house due to any disaster (e.g., hurricane)'),
-    'exp_flood_help':      (85, 'Experience — In case of flooding, received help for cleaning'),
-    'exp_extreme_heat':    (86, 'Experience — Extreme heat in recent years'),
-    'exp_school_change':   (87, "Experience — Changing your kids' school due to moving"),
-    'exp_law_enf':         (88, 'Experience — Calling law enforcement because of problem with neighbors'),
-    'exp_insurance_loss':  (89, 'Experience — Losing home owners insurance due to age of home'),
-    'exp_well_dry':        (90, 'Experience — Well drying up'),
-    'exp_pests':           (91, 'Experience — A problem with pests in your home'),
-    'exp_water_leaks':     (92, 'Experience — A problem with water leaks'),
-    'exp_loose_animals':   (93, 'Experience — A problem with loose animals'),
+    'exp_flooding':        (84, 'QID124_1',   'Experience — Flooding of house due to any disaster (e.g., hurricane)'),
+    'exp_flood_help':      (85, 'QID124_2',   'Experience — In case of flooding, received help for cleaning'),
+    'exp_extreme_heat':    (86, 'QID124_3',   'Experience — Extreme heat in recent years'),
+    'exp_school_change':   (87, 'QID124_4',   "Experience — Changing your kids' school due to moving"),
+    'exp_law_enf':         (88, 'QID124_5',   'Experience — Calling law enforcement because of problem with neighbors'),
+    'exp_insurance_loss':  (89, 'QID124_6',   'Experience — Losing home owners insurance due to age of home'),
+    'exp_well_dry':        (90, 'QID124_7',   'Experience — Well drying up'),
+    'exp_pests':           (91, 'QID124_8',   'Experience — A problem with pests in your home'),
+    'exp_water_leaks':     (92, 'QID124_9',   'Experience — A problem with water leaks'),
+    'exp_loose_animals':   (93, 'QID124_10',  'Experience — A problem with loose animals'),
 
     # ── Well-being & Mobility (W1, W2) ────────────────────────────────────────
-    'car_access':          (133, 'Do you (or your household) own or have regular access to a car?'),
-    'hurricane_transport': (134, 'During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?'),
+    'car_access':          (133, 'QID211',    'Do you (or your household) own or have regular access to a car?'),
+    'hurricane_transport': (134, 'QID219',    'During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?'),
 
     # ── Demographics+ (D1, D2) ────────────────────────────────────────────────
-    'education':           (142, 'What is the highest level of education you have completed?'),
-    'employment':          (143, 'Which best describes your employment status?'),
+    'education':           (142, 'QID178',    'What is the highest level of education you have completed?'),
+    'employment':          (143, 'QID176',    'Which best describes your employment status?'),
 }
 
 # Highlights rendered in accent color in the dashboard's matrix charts.
@@ -520,11 +526,37 @@ def _parse_years_numeric(v):
         return None
 
 
-def _extract_survey_extras(full_row) -> dict:
-    """Extract every SURVEY_QUESTIONS field from the pre-PII row by index.
-    Also derives years_in_hre_num for histogram aggregation."""
-    out = {field: _val_at_orig_idx(full_row, idx)
-           for field, (idx, _) in SURVEY_QUESTIONS.items()}
+def _extract_survey_extras(full_row, qid_to_col_idx: dict | None = None) -> dict:
+    """Extract every SURVEY_QUESTIONS field from the pre-PII row.
+
+    Lookup priority for each field:
+      1. QID (from CSV's ImportId metadata row) — robust to column
+         shuffling between Qualtrics survey versions.
+      2. Hardcoded CSV column index — fallback for legacy exports
+         without ImportId metadata.
+
+    Also derives years_in_hre_num for histogram aggregation.
+    """
+    qmap = qid_to_col_idx or {}
+    out: dict = {}
+    for field, meta in SURVEY_QUESTIONS.items():
+        # Tuple may be (idx, qid, text) [new] or (idx, text) [legacy
+        # call-site tolerance — should never happen, but defensive].
+        if len(meta) == 3:
+            idx, qid, _text = meta
+        else:
+            idx, _text = meta
+            qid = None
+        # Prefer QID lookup; fall back to the hardcoded column index.
+        col = qmap.get(qid) if qid else None
+        if col is None and qid:
+            # Try the QID's base form (strip "_TEXT" suffix Qualtrics
+            # adds for free-text variants of an otherwise-numeric Q).
+            base = qid[:-5] if qid.endswith('_TEXT') else qid
+            col = qmap.get(base)
+        if col is None:
+            col = idx
+        out[field] = _val_at_orig_idx(full_row, col)
     out['years_in_hre_num'] = _parse_years_numeric(out.get('years_in_hre'))
     return out
 
@@ -1290,7 +1322,7 @@ def _compute_iaq_analysis(features: list) -> dict:
         },
 
         # ── Question-text + chart-source provenance for the dashboard ────────
-        'survey_questions': {f: q for f, (_, q) in SURVEY_QUESTIONS.items()},
+        'survey_questions': {f: meta[-1] for f, meta in SURVEY_QUESTIONS.items()},
         'chart_sources':    dict(CHART_SOURCES),
     }
 
@@ -1387,13 +1419,18 @@ def categorize(text) -> str:
 
 # ── Main processing functions ──────────────────────────────────────────────────
 
-def _read_qualtric_csv(file_bytes: bytes) -> pd.DataFrame:
+def _read_qualtric_csv(file_bytes: bytes):
     """
     Read a Qualtric CSV with encoding auto-detection and tolerant header handling.
 
     Qualtric standard exports include two extra rows under the header
     (question-text row + JSON metadata row containing 'ImportId').
     Some "legacy CSV" exports omit them. Detect rather than assume.
+
+    Returns (raw_dataframe, qid_to_col_idx) where qid_to_col_idx maps
+    Qualtrics ImportId (e.g. "QID195_1", "QID47") to the 0-indexed
+    column position in the raw DataFrame. Empty dict if the CSV is a
+    legacy export without the ImportId metadata row.
     """
     if not file_bytes:
         raise ValueError("Empty CSV body — no bytes received.")
@@ -1442,9 +1479,36 @@ def _read_qualtric_csv(file_bytes: bytes) -> pd.DataFrame:
     raw = pd.read_csv(io.BytesIO(file_bytes), encoding=used_enc,
                       skiprows=skip, low_memory=False) if skip else \
           pd.read_csv(io.BytesIO(file_bytes), encoding=used_enc, low_memory=False)
-    logging.info("[iaq] csv decoded enc=%s skip=%s rows=%d cols=%d",
-                 used_enc, skip, len(raw), len(raw.columns))
-    return raw
+
+    # Build qid -> column-index map from row 2 (ImportId metadata) so
+    # downstream code can extract by QID even if Qualtrics shuffles
+    # column positions between exports. Each cell looks like
+    # `{"ImportId":"QID195_1"}`. We normalise to the bare QID string
+    # (drop the "_TEXT" suffix Qualtrics adds for free-text variants
+    # of an otherwise-numeric question, since the same question shares
+    # the same QID across both forms).
+    qid_to_col_idx: dict = {}
+    if row2_has_importid:
+        meta_row = head.iloc[2].tolist()
+        for col_idx, cell in enumerate(meta_row):
+            if not isinstance(cell, str) or 'ImportId' not in cell:
+                continue
+            try:
+                m = json.loads(cell)
+                qid = m.get('ImportId') if isinstance(m, dict) else None
+            except (json.JSONDecodeError, ValueError):
+                _re_match = re.search(r'"ImportId"\s*:\s*"([^"]+)"', cell)
+                qid = _re_match.group(1) if _re_match else None
+            if not qid:
+                continue
+            # Map the full QID and a normalised "_TEXT"-stripped variant.
+            qid_to_col_idx.setdefault(qid, col_idx)
+            base = qid[:-5] if qid.endswith('_TEXT') else qid
+            qid_to_col_idx.setdefault(base, col_idx)
+
+    logging.info("[iaq] csv decoded enc=%s skip=%s rows=%d cols=%d qids=%d",
+                 used_enc, skip, len(raw), len(raw.columns), len(qid_to_col_idx))
+    return raw, qid_to_col_idx
 
 
 def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
@@ -1457,7 +1521,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     contact_features is mutated in-place (statuses upgraded to Completed).
     raw_address is NOT included in the returned geojson (stripped before return).
     """
-    raw = _read_qualtric_csv(csv_bytes)
+    raw, qid_to_col_idx = _read_qualtric_csv(csv_bytes)
 
     if 'Finished' not in raw.columns:
         raise ValueError(
@@ -1496,7 +1560,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     for i, (_, row) in enumerate(df.iterrows()):
         # Extract survey-question fields by ORIGINAL CSV column index from
         # the pre-PII-drop row; matches indices in SURVEY_QUESTIONS.
-        survey_extras = _extract_survey_extras(df_full.iloc[i])
+        survey_extras = _extract_survey_extras(df_full.iloc[i], qid_to_col_idx)
         health = _compute_health_score(row)
         iaq    = _compute_iaq_score(row)
         struct = _compute_struct_score(row)
