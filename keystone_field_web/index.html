@@ -1822,7 +1822,9 @@ function closeBottomSheet() {
 }
 
 function openEditSheet(id) {
-  if (!navigator.onLine) { showToast('Edit requires internet', '#f59e0b'); return; }
+  // Offline edit IS supported now — savePoint() detects navigator.onLine
+  // and queues the patch when offline. No early return; just open the
+  // sheet and let the save handler decide whether to queue or sync.
   const pt = _allFieldPoints.find(x => x.id === id);
   if (!pt) { showToast('Point not found', '#ef4444'); return; }
 
