@@ -2462,6 +2462,13 @@ function startFieldDataPolling() {
   if (_ccPollTimer) clearInterval(_ccPollTimer);
   _ccPollTimer = setInterval(async () => {
     if (document.hidden) return;
+    // Hard rule: never overwrite _allFieldPoints while there are queued
+    // ops. The poll fetch returns the SERVER state, which doesn't yet
+    // reflect the user's offline edits/deletes. If we let the poll
+    // clobber the local cache, the queued change visually reverts even
+    // though it's still safely in localStorage waiting to sync. We also
+    // skip while the sync is actively in flight.
+    if (_syncing || (offlineQueue && offlineQueue.length > 0)) return;
     await loadCommunityContacts();
     // Guests must use /api/guest action=points-all (it includes their
     // guest_session_id and validates the session). loadFieldPointsFromServer
@@ -2986,7 +2993,21 @@ function initOffline() {
       bar.classList.add('visible','syncing');
       document.getElementById('offline-msg').textContent = '↑ Syncing queued points…';
       _autoRestoreBasemapOnline();
-      syncQueue().then(() => bar.classList.remove('visible','syncing'));
+      syncQueue().then(async () => {
+        bar.classList.remove('visible','syncing');
+        // Refresh from server ONLY when the queue is fully drained.
+        // If sync left some items behind (transient failure / 403 from
+        // mismatched guest session), the local _allFieldPoints still
+        // contains those queued edits; reloading from server would
+        // clobber them visually even though they're still safely in
+        // localStorage waiting to retry.
+        if (offlineQueue.length === 0) {
+          try {
+            if (IS_GUEST) await loadGuestPoints();
+            else          await loadFieldPointsFromServer();
+          } catch {}
+        }
+      });
     } else {
       bar.classList.remove('visible','syncing');
       _autoRestoreBasemapOnline();
