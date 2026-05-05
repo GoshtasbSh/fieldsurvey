@@ -2892,6 +2892,18 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
   // Unmatched breakdown
   const unmatchedDetails = (v.match_details || []).filter(d => !d.matched);
   const unmatchedByReason = {
+    // v3 reason buckets — under parcel-rep-point matching, "unmatched"
+    // means the IAQ's parcel either has no community contact (flyer
+    // respondent) or the IAQ failed to snap to any parcel at all.
+    // We re-label the buckets accordingly:
+    //   neighborParcel: nearest contact <300m → IAQ landed in a
+    //                   different parcel from any contact (often a
+    //                   neighbour, or a contact whose parcel record
+    //                   we don't have).
+    //   notInList:      nearest contact 300m–1km → respondent address
+    //                   not in the canvas list (we never went there).
+    //   noContact:      nearest contact ≥1km or unknown → respondent
+    //                   outside the contact database (flyer / QR).
     gpsOffset:   unmatchedDetails.filter(d => d.nearest_contact_m != null && d.nearest_contact_m < 300).length,
     notInList:   unmatchedDetails.filter(d => d.nearest_contact_m != null && d.nearest_contact_m >= 300 && d.nearest_contact_m < 1000).length,
     noContact:   unmatchedDetails.filter(d => d.nearest_contact_m == null || d.nearest_contact_m >= 1000).length,
@@ -2901,9 +2913,9 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
   unmatchedDetails.forEach(d => {
     if (!unmatchedByStreet[d.street_name]) unmatchedByStreet[d.street_name] = { count: 0, reasons: [] };
     unmatchedByStreet[d.street_name].count++;
-    const r = (d.nearest_contact_m != null && d.nearest_contact_m < 300) ? 'GPS/geocode offset'
+    const r = (d.nearest_contact_m != null && d.nearest_contact_m < 300) ? 'Different parcel'
             : (d.nearest_contact_m != null && d.nearest_contact_m < 1000) ? 'Not in canvassing list'
-            : 'No contact found';
+            : 'Flyer / QR respondent';
     if (!unmatchedByStreet[d.street_name].reasons.includes(r))
       unmatchedByStreet[d.street_name].reasons.push(r);
   });
@@ -2952,7 +2964,7 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
           <div style="flex:1;min-width:90px;text-align:center">
             <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)">${v.matched_iaq_responses}</div>
             <div style="font-size:11px;color:var(--text2)">Survey → Contact Confirmed</div>
-            <div style="font-size:10px;color:var(--muted);margin-top:2px">geo-proximity ≤150 m</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">same parcel</div>
           </div>
           <div style="flex:1;min-width:90px;text-align:center">
             <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${v.match_rate_pct>60?'var(--green)':v.match_rate_pct>30?'var(--orange)':'var(--red)'}">${v.match_rate_pct}%</div>
@@ -2975,11 +2987,11 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
       <!-- Reason chips -->
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
         ${unmatchedByReason.gpsOffset ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.3);color:#ca8a04;font-size:10px;font-weight:600">
-          GPS/geocode offset: ${unmatchedByReason.gpsOffset} — nearest contact 150–300m (precision gap)</span>` : ''}
+          Different parcel: ${unmatchedByReason.gpsOffset} — IAQ resolved to a parcel without a community contact</span>` : ''}
         ${unmatchedByReason.notInList ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.3);color:#ea580c;font-size:10px;font-weight:600">
           Not in canvassing list: ${unmatchedByReason.notInList} — respondent address not canvassed</span>` : ''}
         ${unmatchedByReason.noContact ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:var(--red);font-size:10px;font-weight:600">
-          No contact found: ${unmatchedByReason.noContact} — respondent outside contact database</span>` : ''}
+          Flyer / QR respondent: ${unmatchedByReason.noContact} — outside contact database</span>` : ''}
         ${unmatchedByReason.geocoded ? `<span style="padding:3px 10px;border-radius:10px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);color:#818cf8;font-size:10px;font-weight:600">
           Address-geocoded: ${unmatchedByReason.geocoded} — lower positional accuracy</span>` : ''}
       </div>
@@ -3522,7 +3534,7 @@ function buildSurveyResultsTab(data) {
       <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:8px">
         <div class="stat-card"><div class="label">IAQ Mapped</div><div class="value" style="font-size:18px">${v.total_iaq_responses||totalMapped}</div></div>
         <div class="stat-card"><div class="label">Contact Completed</div><div class="value" style="font-size:18px">${v.total_completed_contacts||'—'}</div></div>
-        <div class="stat-card"><div class="label">Confirmed</div><div class="value" style="font-size:18px;color:var(--green)">${v.matched_iaq_responses||'—'}</div><div class="sub">≤150m match</div></div>
+        <div class="stat-card"><div class="label">Confirmed</div><div class="value" style="font-size:18px;color:var(--green)">${v.matched_iaq_responses||'—'}</div><div class="sub">same parcel</div></div>
         <div class="stat-card"><div class="label">Match Rate</div>
           <div class="value" style="font-size:18px;color:${(v.match_rate_pct||0)>60?'var(--green)':(v.match_rate_pct||0)>30?'var(--orange)':'var(--red)'}">${v.match_rate_pct||'—'}%</div>
           <div class="sub">${v.unmatched_iaq||0} not confirmed</div></div>
@@ -3536,7 +3548,7 @@ function buildSurveyResultsTab(data) {
               `<span style="padding:2px 8px;border-radius:6px;font-size:11px;font-family:var(--mono);background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)">${escapeHtml(street)} <b>${Number(cnt) || 0}</b></span>`
             ).join('')}
           </div>
-          <p style="font-size:10px;color:var(--muted);margin-top:8px">Not confirmed = nearest completed contact &gt;150 m away or not in canvassing list</p>
+          <p style="font-size:10px;color:var(--muted);margin-top:8px">Not confirmed = IAQ resolved to a parcel without a community contact (flyer / QR respondent or address not canvassed)</p>
         </div>` : ''}
       </div>
     </div>
