@@ -400,16 +400,29 @@ function addLayers() {
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 5, 16, 9, 19, 14],
       'circle-color': ['get', 'color'],
+      // Defence-in-depth: require BOTH status='Completed' AND
+      // match_status to apply the G1/G2 stroke. Belt-and-suspenders
+      // against a stale match_status persisting on a contact whose
+      // status has since changed (rare but possible during a partial
+      // re-upload).
       'circle-stroke-width': [
-        'match', ['get', 'match_status'],
-        'contact_only', 2.8,
-        'matched',      1.5,
+        'case',
+        ['all',
+          ['==', ['get', 'status'], 'Completed'],
+          ['==', ['get', 'match_status'], 'contact_only']],   2.8,
+        ['all',
+          ['==', ['get', 'status'], 'Completed'],
+          ['==', ['get', 'match_status'], 'matched']],        1.5,
         2,
       ],
       'circle-stroke-color': [
-        'match', ['get', 'match_status'],
-        'contact_only', '#f59e0b',
-        'matched',      '#ffffff',
+        'case',
+        ['all',
+          ['==', ['get', 'status'], 'Completed'],
+          ['==', ['get', 'match_status'], 'contact_only']],   '#f59e0b',
+        ['all',
+          ['==', ['get', 'status'], 'Completed'],
+          ['==', ['get', 'match_status'], 'matched']],        '#ffffff',
         'rgba(255,255,255,0.5)',
       ],
       'circle-opacity': 0.9,
@@ -1850,6 +1863,26 @@ function updateMatchStatusPanel() {
   });
 }
 
+// Remember the user's manual layer toggles before we auto-flip them on
+// behalf of a Match Status filter, so clearing the filter restores
+// exactly what the user had visible.
+let _msLayerSnapshot = null;
+
+function _setLayerVisibility(layerId, visible) {
+  if (!map?.getLayer(layerId)) return;
+  map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+  // Mirror the change in the corresponding sidebar toggle if present.
+  const toggleId = ({
+    'survey-points':    'layer-points',
+    'iaq-points':       'layer-iaq',
+    'survey-iaq-risk':  'layer-iaq-risk',
+  })[layerId];
+  if (toggleId) {
+    const cb = document.getElementById(toggleId);
+    if (cb) cb.checked = visible;
+  }
+}
+
 function applyMatchStatusFilter() {
   // Translate activeMatchFilter into MapLibre filter expressions on the
   // three relevant layers. When the filter is cleared (null), defer to
@@ -1862,8 +1895,29 @@ function applyMatchStatusFilter() {
     if (typeof applyFilters === 'function') applyFilters();
     const ip = map?.getLayer('iaq-points');
     if (ip) map.setFilter('iaq-points', null);
+    // Restore the layer-visibility snapshot we captured when the filter
+    // was first activated.
+    if (_msLayerSnapshot) {
+      _setLayerVisibility('survey-points',   _msLayerSnapshot['survey-points']);
+      _setLayerVisibility('iaq-points',      _msLayerSnapshot['iaq-points']);
+      _setLayerVisibility('survey-iaq-risk', _msLayerSnapshot['survey-iaq-risk']);
+      _msLayerSnapshot = null;
+    }
     updateMatchStatusPanel();
     return;
+  }
+
+  // First-time activation: snapshot current visibility so a later
+  // "clear filter" can put it back exactly the way the user had it.
+  if (_msLayerSnapshot === null) {
+    const vis = (id) => map?.getLayer(id)
+      ? map.getLayoutProperty(id, 'visibility') !== 'none'
+      : false;
+    _msLayerSnapshot = {
+      'survey-points':    vis('survey-points'),
+      'iaq-points':       vis('iaq-points'),
+      'survey-iaq-risk':  vis('survey-iaq-risk'),
+    };
   }
 
   // survey-points layer: G1 + G2 sit here. Filter to the picked group,
@@ -1873,6 +1927,8 @@ function applyMatchStatusFilter() {
       (want === 'matched' || want === 'contact_only')
         ? ['==', ['get', 'match_status'], want]
         : ['==', ['get', 'match_status'], '__none__']);
+    // Auto-show survey-points for G1/G2; hide for G3 to avoid clutter.
+    _setLayerVisibility('survey-points', want !== 'iaq_only');
   }
   // survey-iaq-risk: G1 only. Hide for non-G1 picks.
   if (map?.getLayer('survey-iaq-risk')) {
@@ -1881,12 +1937,15 @@ function applyMatchStatusFilter() {
         ? ['==', ['get', 'has_iaq_survey'], true]
         : ['==', ['get', 'match_status'], '__none__']);
   }
-  // iaq-points: G3 only. Hide for non-G3 picks.
+  // iaq-points: G3 only. Auto-show for G3 (the layer is often off by
+  // default — without this the user sees an empty map after clicking
+  // "Qualtric only" and reasonably concludes the filter is broken).
   if (map?.getLayer('iaq-points')) {
     map.setFilter('iaq-points',
       (want === 'iaq_only')
         ? null
         : ['==', ['get', 'match_status'], '__none__']);
+    _setLayerVisibility('iaq-points', want === 'iaq_only');
   }
   updateMatchStatusPanel();
 }
