@@ -301,6 +301,13 @@ def _call_groq(messages: list, api_key: str) -> str:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # Cloudflare's bot rules in front of api.groq.com block requests
+            # with the default `Python-urllib/3.x` User-Agent (CF error
+            # code 1010 — "browser signature banned"). Setting a real
+            # identifier gets us through. Using the OpenAI Python SDK's
+            # UA string would be ideal but we want zero deps.
+            "User-Agent": "KeyStoneSurvey/1.0 (+https://keystone-project-survey-blue.vercel.app)",
+            "Accept": "application/json",
         },
     )
     with urllib.request.urlopen(req, timeout=40) as r:
