@@ -1426,6 +1426,16 @@ function onPointClick(e) {
   const f = e.features[0];
   const sp = f.properties;
   const coords = f.geometry.coordinates.slice();
+  // Diagnostic log so the user can verify exactly what's under any
+  // pin they click. Open DevTools → Console → click the dot → see
+  // status, match_status, has_iaq_survey, and which layer fired.
+  console.log('[click] survey-points', {
+    address:       sp.address,
+    status:        sp.status,
+    match_status:  sp.match_status,
+    has_iaq_survey: sp.has_iaq_survey,
+    coords,
+  });
 
   // Query parcel underneath this point
   const parcelFeats = map.queryRenderedFeatures(e.point, { layers: ['parcels-fill'] });
@@ -3467,16 +3477,18 @@ function addIAQLayers() {
 
   // Main IAQ points (colored by risk tier).
   //
-  // Stroke encodes group G3 (Qualtrics-only / flyer-respondent
-  // households): purple ring + +1 px radius at zoom ≥ 14 so a flyer
-  // dot is visually distinct from a matched contact even when the
-  // risk-on-contacts overlay is on. See
+  // G3 (Qualtrics-only / flyer respondent) gets a purple stroke. The
+  // dot is sized SMALLER than survey-points so when a G3 IAQ resolves
+  // to coordinates close to a community contact (different parcels but
+  // nearby), the contact dot still wins the visual stack — preventing
+  // the "purple ring on Not Interested contact" optical illusion the
+  // user reported. See
   // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
   map.addLayer({
     id: 'iaq-points', type: 'circle', source: 'iaq-source',
     layout: { visibility: 'none' },
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 14, 9, 16, 11, 19, 15],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 16, 8, 19, 11],
       'circle-color': ['get', 'color'],
       'circle-stroke-width': 2.5,
       'circle-stroke-color': '#8b5cf6',
@@ -3505,6 +3517,16 @@ function addIAQLayers() {
   map.on('click', 'iaq-highlighted', onIAQPointClick);
   map.on('mouseenter', 'iaq-highlighted', () => map.getCanvas().style.cursor = 'pointer');
   map.on('mouseleave', 'iaq-highlighted', () => map.getCanvas().style.cursor = '');
+
+  // Move contact layers ABOVE the IAQ layers so a contact dot is never
+  // visually obscured by a G3 IAQ dot stacked on top. The user
+  // reported "purple ring on Not Interested" which turned out to be
+  // a G3 IAQ at an adjacent parcel rendering on top — flipping the
+  // z-order makes the contact dot's own stroke control its appearance.
+  try {
+    if (map.getLayer('survey-points'))    map.moveLayer('survey-points');
+    if (map.getLayer('survey-iaq-risk'))  map.moveLayer('survey-iaq-risk');
+  } catch (e) { /* layer ordering best-effort */ }
 
   // Street line source (updated by highlightStreets)
   map.addSource('iaq-street-line-source', {
@@ -3558,6 +3580,15 @@ function onIAQPointClick(e) {
   const f = e.features[0];
   const p = f.properties;
   const coords = f.geometry.coordinates.slice();
+  // Diagnostic log — open DevTools → Console → click any G3 dot.
+  console.log('[click] iaq-points (G3 / Qualtric-only)', {
+    street_name:    p.street_name,
+    risk_tier:      p.risk_tier,
+    overall_risk:   p.overall_risk,
+    match_status:   p.match_status,
+    iaq_matched:    p.iaq_matched,
+    coords,
+  });
 
   // Query the parcel underneath so the Parcel Data tab can attach to
   // this same popup (matches the matched-contact UX).
