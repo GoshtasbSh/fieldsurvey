@@ -3475,6 +3475,37 @@ async function uploadFile(zone, endpoint, file) {
 }
 
 // ── IAQ layers ──────────────────────────────────────────────────────────────
+
+// Generate a solid-white diamond glyph at runtime (32 px). Used as an
+// SDF icon so MapLibre can recolour it via 'icon-color' (risk tier)
+// and draw a coloured halo via 'icon-halo-color' (G3 cyan marker).
+//
+// Why a diamond and not a circle: community-contact pins are circles
+// and the IAQ risk-tier palette overlaps with the contact-status
+// palette (high-risk #ef4444 IS Inaccessible #ef4444; medium-risk
+// #f59e0b is visually close to No-Answer #f97316). When both use the
+// same shape, a colour collision in the fill makes the dot ambiguous
+// no matter what stroke we add. Switching IAQ to a structurally
+// different shape (diamond) means "shape" carries data-source
+// information independent of fill colour — so the map is unambiguous
+// even if a future palette change introduces another collision.
+function _makeDiamondIcon(px = 32) {
+  const c = document.createElement('canvas');
+  c.width = c.height = px;
+  const ctx = c.getContext('2d');
+  const m = px / 2;
+  const pad = 3;
+  ctx.beginPath();
+  ctx.moveTo(m, pad);
+  ctx.lineTo(px - pad, m);
+  ctx.lineTo(m, px - pad);
+  ctx.lineTo(pad, m);
+  ctx.closePath();
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  return ctx.getImageData(0, 0, px, px);
+}
+
 function addIAQLayers() {
   // Exclude IAQ features already merged into the contact layer (iaq_matched=true).
   // Those addresses show as green Completed dots in survey-points / survey-iaq-risk.
@@ -3483,45 +3514,69 @@ function addIAQLayers() {
     data: iaqUnmatched(iaqData) || { type: 'FeatureCollection', features: [] },
   });
 
-  // Main IAQ points (colored by risk tier).
-  //
-  // G3 (Qualtrics-only / flyer respondent) gets a cyan stroke. The
-  // dot is sized SMALLER than survey-points so when a G3 IAQ resolves
-  // to coordinates close to a community contact (different parcels but
-  // nearby), the contact dot still wins the visual stack — preventing
-  // the "ring on Not Interested contact" optical illusion the user
-  // reported. See
-  // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
+  // Register the diamond icon once. addImage with sdf:true makes the
+  // glyph tintable via 'icon-color' and gives it an SDF halo channel
+  // for 'icon-halo-color'. hasImage() guards against re-registration
+  // if addIAQLayers is ever called twice (e.g. style reload).
+  if (!map.hasImage('iaq-diamond')) {
+    map.addImage('iaq-diamond', _makeDiamondIcon(32), { sdf: true });
+  }
+
+  // Main IAQ markers — DIAMOND symbols, tinted by risk tier
+  // (icon-color = ['get','color']). G3 (Qualtrics-only / flyer
+  // respondent) gets a cyan halo (icon-halo-color = #22d3ee) so it
+  // reads as "IAQ-only" regardless of the underlying tint. Matched
+  // (G1) IAQs render with no halo — the community contact circle
+  // already encodes "matched" via its white rim, and the diamond's
+  // corners poking out from behind the circle is the "IAQ data also
+  // exists here" cue.
+  // See docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
   map.addLayer({
-    id: 'iaq-points', type: 'circle', source: 'iaq-source',
-    layout: { visibility: 'none' },
+    id: 'iaq-points',
+    type: 'symbol',
+    source: 'iaq-source',
+    layout: {
+      'icon-image': 'iaq-diamond',
+      'icon-size': ['interpolate', ['linear'], ['zoom'],
+                    12, 0.45, 14, 0.65, 16, 0.9, 19, 1.3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      visibility: 'none',
+    },
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 16, 8, 19, 11],
-      'circle-color': ['get', 'color'],
-      'circle-stroke-width': 2.5,
-      // G3 stroke = #22d3ee (bright cyan). The earlier purple #8b5cf6
-      // collided with the "Not Interested" status fill (also #8b5cf6),
-      // making purple-stroked IAQ dots indistinguishable from a
-      // contact pin. Cyan is not in the contact-status palette so the
-      // ring always reads as "IAQ-only" regardless of the dot's risk
-      // colour underneath. See
-      // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
-      'circle-stroke-color': '#22d3ee',
-      'circle-opacity': 0.92,
+      'icon-color': ['get', 'color'],
+      'icon-halo-color': '#22d3ee',
+      'icon-halo-width': [
+        'case',
+        ['==', ['get', 'match_status'], 'iaq_only'], 2,
+        0,
+      ],
+      'icon-opacity': 0.95,
     },
   });
 
-  // Highlighted streets layer — bright yellow overlay on top of risk points
+  // Highlighted-streets overlay — same diamond glyph, scaled up and
+  // tinted yellow so highlighted IAQ markers stand out without
+  // breaking the "diamond = IAQ" visual rule. Renders ON TOP of the
+  // base iaq-points layer (added later in the layer stack).
   map.addLayer({
-    id: 'iaq-highlighted', type: 'circle', source: 'iaq-source',
+    id: 'iaq-highlighted',
+    type: 'symbol',
+    source: 'iaq-source',
     filter: ['==', ['get', 'street_name'], '__none__'],
-    layout: { visibility: 'none' },
+    layout: {
+      'icon-image': 'iaq-diamond',
+      'icon-size': ['interpolate', ['linear'], ['zoom'],
+                    12, 0.85, 16, 1.4, 19, 1.9],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      visibility: 'none',
+    },
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 11, 16, 16, 19, 20],
-      'circle-color': '#facc15',
-      'circle-stroke-width': 3,
-      'circle-stroke-color': 'rgba(0,0,0,0.45)',
-      'circle-opacity': 1,
+      'icon-color': '#facc15',
+      'icon-halo-color': 'rgba(0,0,0,0.55)',
+      'icon-halo-width': 1.2,
+      'icon-opacity': 1,
     },
   });
 
@@ -4246,7 +4301,7 @@ function clearMapForChatbot() {
   Object.keys(LAYER_DEFS).forEach(name => setLayerVisibility(name, false));
   if (map.getLayer('iaq-points')) {
     map.setFilter('iaq-points', null);
-    map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+    map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
   }
   if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
   if (map.getLayer('iaq-highlighted'))
@@ -4327,7 +4382,7 @@ async function executeMapActions(actions) {
         const valid = ['overall_risk', 'iaq_score', 'health_score', 'struct_score'];
         const f = valid.includes(params.field) ? params.field : 'overall_risk';
         if (map.getLayer('iaq-points')) {
-          map.setPaintProperty('iaq-points', 'circle-color',
+          map.setPaintProperty('iaq-points', 'icon-color',
             ['interpolate', ['linear'], ['get', f],
               0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444']);
           setLayerVisibility('iaq_points', true);
@@ -4338,7 +4393,7 @@ async function executeMapActions(actions) {
       case 'clear_filters':
         if (map.getLayer('iaq-points')) {
           map.setFilter('iaq-points', null);
-          map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+          map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
         }
         if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
         if (map.getLayer('iaq-highlighted'))
@@ -4401,7 +4456,7 @@ function showIAQLayer(layer) {
   if (map.getLayer('iaq-points')) {
     map.setLayoutProperty('iaq-points', 'visibility', 'visible');
     map.setFilter('iaq-points', null);
-    map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+    map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
   }
   // Hide contact survey points so only the IAQ filter layer shows
   _hideContactLayers();
@@ -4602,8 +4657,12 @@ async function highlightStreets(streets, color) {
       map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
     } else {
       map.setFilter('iaq-highlighted', haloFilter);
-      map.setPaintProperty('iaq-highlighted', 'circle-color', lineColor);
-      map.setPaintProperty('iaq-highlighted', 'circle-stroke-color', '#ffffff');
+      // iaq-highlighted is a symbol (diamond) layer — tint via
+      // icon-color, and use icon-halo-color for the white outline
+      // that previously came from circle-stroke-color.
+      map.setPaintProperty('iaq-highlighted', 'icon-color', lineColor);
+      map.setPaintProperty('iaq-highlighted', 'icon-halo-color', '#ffffff');
+      map.setPaintProperty('iaq-highlighted', 'icon-halo-width', 1.5);
       map.setLayoutProperty('iaq-highlighted', 'visibility', 'visible');
       console.warn(`[highlightStreets] OSM returned no geometry for ${names.join(', ')}; highlighting IAQ points on that street instead`);
       showToast(`Street line not available from map data — showing survey points on ${names.join(', ')} instead`, 5000);
@@ -4682,7 +4741,7 @@ function showStreetChoropleth(field) {
   const rampExpr = (f) => ['interpolate', ['linear'], ['get', f],
     0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444'];
   const valid = ['overall_risk', 'health_score', 'iaq_score', 'struct_score'];
-  map.setPaintProperty('iaq-points', 'circle-color',
+  map.setPaintProperty('iaq-points', 'icon-color',
     valid.includes(field) ? rampExpr(field) : ['get', 'color']);
   map.setLayoutProperty('iaq-points', 'visibility', 'visible');
 }
@@ -4690,7 +4749,7 @@ function showStreetChoropleth(field) {
 function clearIAQHighlights() {
   if (map.getLayer('iaq-points')) {
     map.setFilter('iaq-points', null);
-    map.setPaintProperty('iaq-points', 'circle-color', ['get', 'color']);
+    map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
   }
   if (map.getLayer('iaq-highlighted'))
     map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);

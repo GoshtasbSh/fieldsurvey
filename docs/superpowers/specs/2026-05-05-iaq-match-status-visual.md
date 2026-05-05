@@ -59,21 +59,26 @@ and `…['iaq_survey'].geojson.features[].properties`).
 Strokes only — fill colour stays as today (status for contacts, risk-tier
 for IAQ).
 
-| Group | Layer | Stroke colour | Stroke width | Radius modifier |
+| Group | Layer | Shape | Fill / tint | Outline / halo |
 |---|---|---|---|---|
-| G1 | `survey-points` | `#ffffff` (white) | 1.5 | — |
-| G2 | `survey-points` | `#fde047` (bright yellow) | 2.8 | — |
-| G3 | `iaq-points` | `#22d3ee` (bright cyan) | 2.5 | +1 px at zoom ≥ 14 |
+| G1 | `survey-points` | **circle** | status colour (e.g. `#10b981`) | white rim 1.5 px |
+| G2 | `survey-points` | **circle** | status colour (`#10b981`) | yellow `#fde047` rim 2.8 px |
+| G3 | `iaq-points` | **diamond** (symbol layer, SDF icon) | risk-tier colour (`#10b981` low / `#f59e0b` mid / `#ef4444` high) | cyan `#22d3ee` halo 2 px |
+| matched IAQ companion | `iaq-points` | **diamond** behind contact circle | risk-tier colour | no halo (circle's white rim is the matched indicator) |
 
-**Why these specific stroke colours:** the contact-status palette already
-uses `#f97316` (No Answer orange) and `#8b5cf6` (Not Interested purple),
-and the IAQ risk-tier palette already uses `#f59e0b` (medium-risk
-amber). An earlier draft used amber for G2 and purple for G3; under
-real usage the rings collided visually with status / risk fills (a
-purple-stroked medium-risk IAQ dot looked identical to a Not Interested
-contact pin). The current pair (yellow `#fde047` + cyan `#22d3ee`) is
-chosen so the rim never matches any status or risk-tier fill, regardless
-of what's underneath.
+**Why a different shape for IAQ (not just a different stroke colour):**
+the IAQ risk-tier palette overlaps with the contact-status palette
+(high-risk `#ef4444` is identical to Inaccessible `#ef4444`; medium-risk
+`#f59e0b` is visually close to No-Answer `#f97316`). When both data
+sources rendered as circles, a colour collision in the fill made the
+dot ambiguous regardless of the rim. An earlier draft used a cyan rim
+on circles to fix this; under real usage the rim was too thin to
+override the dominant fill colour. Switching IAQ to a structurally
+different shape (diamond via a `symbol` layer with an SDF icon
+generated at runtime) means the user reads "shape" before "colour" —
+so the data source is unambiguous even when fills collide. The cyan
+halo on G3 stays as a secondary cue for "no community contact at this
+parcel".
 
 Other contact statuses (No Answer / Inaccessible / etc.) keep current
 strokes unchanged. The G1/G2 distinction only applies to the green
@@ -140,7 +145,7 @@ just makes the underlying state visible at a glance without clicking.
 | `api/_processing.py` | Add `_tag_match_status(contacts, iaq_features)` helper. Call after `_upgrade_contacts_from_iaq` in `process_iaq_bytes`. |
 | `app.py` | Mirror the same helper + call site (local source-of-truth). |
 | `api/daily-refresh.py` | Set `match_status` on appended field-as-features. |
-| `static/js/dashboard.js` | (a) update `survey-points` paint expression to switch stroke by `match_status` (yellow `#fde047` for G2); (b) update `iaq-points` paint to use cyan `#22d3ee` stroke + smaller radius so contact pins win the visual stack when stacked; (c) add "Match Status" sidebar block + filter handlers; (d) recompute counts on data refresh. |
+| `static/js/dashboard.js` | (a) update `survey-points` paint expression to switch stroke by `match_status` (yellow `#fde047` for G2); (b) replace `iaq-points` and `iaq-highlighted` from `circle` layers to `symbol` layers using a runtime-generated SDF diamond icon — risk tier via `icon-color`, G3 cyan halo via `icon-halo-color`/`icon-halo-width`; (c) add "Match Status" sidebar block + filter handlers; (d) recompute counts on data refresh. |
 | `static/index.html` | Add the sidebar Match Status section (placeholder div + header). |
 
 ## Edge cases
@@ -158,18 +163,20 @@ just makes the underlying state visible at a glance without clicking.
 
 ## Testing
 
-1. **Re-upload IAQ** → confirm G1 dots (white stroke), G2 dots (yellow
-   stroke), G3 dots (cyan ring).
-2. **Click a yellow dot** → popup shows `Completed` + no Survey Answers
-   tab. Confirms G2 is what we think it is.
-3. **Click a cyan-ringed dot** → popup shows IAQ data only. Confirms G3.
-4. **Sidebar toggle** "Completed, no Qualtrics" → only yellow-ringed
-   dots remain.
-5. **Visual collision check**: a medium-risk IAQ-only dot has an orange
-   fill (`#f59e0b`) — confirm its cyan rim is unambiguously different
-   from a No-Answer contact (orange fill `#f97316`, translucent rim).
-   And a Not Interested contact (purple fill `#8b5cf6`) must never
-   render with a cyan rim — only G3 dots get the cyan rim.
+1. **Re-upload IAQ** → confirm G1 contacts (green circle, white rim,
+   diamond peeks out behind), G2 contacts (green circle, yellow rim,
+   no diamond), G3 (diamond + cyan halo, no circle).
+2. **Click a yellow-rimmed circle** → popup shows `Completed` + no
+   Survey Answers tab. Confirms G2.
+3. **Click a cyan-haloed diamond** → popup shows IAQ data only.
+   Confirms G3.
+4. **Sidebar toggle** "Completed, no Qualtrics" → only yellow-rimmed
+   circles remain.
+5. **Visual collision check**: a high-risk IAQ-only dot has a red fill
+   (`#ef4444`, identical to Inaccessible status fill) — confirm it
+   still reads as IAQ because it's a DIAMOND, not a circle. And an
+   Inaccessible community contact must never render as a diamond.
+   Shape carries the data-source signal; colour cannot override it.
 5. **Cross-check with `verify_iaq_matches.py`**: G1 count matches script
    output; G3 count matches the script's "flyer" count.
 
