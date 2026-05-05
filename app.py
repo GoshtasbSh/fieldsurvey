@@ -816,11 +816,35 @@ def dedup_contacts_at_parcel(features: list, cell_deg: float = 1e-5) -> list:
         if len(group) == 1:
             out.append(group[0])
             continue
-        group.sort(key=lambda f: _contact_status_rank(
-            (f.get("properties") or {}).get("status")))
+        # Tie-break on has_iaq_survey so a Completed contact WITH a
+        # Qualtric match always wins over a Completed contact without.
+        # Mirror of api/_processing.py:dedup_contacts_at_parcel — see
+        # that file for the rationale.
+        group.sort(key=lambda f: (
+            _contact_status_rank((f.get("properties") or {}).get("status")),
+            0 if (f.get("properties") or {}).get("has_iaq_survey") else 1,
+        ))
         winner = group[0]
         losers = group[1:]
         wp = winner.setdefault("properties", {})
+        # Carry IAQ-match info from any matched loser onto the winner
+        # so the popup's "Qualtric matched" badge + Survey Answers tab
+        # still resolve at this parcel.
+        if not wp.get("has_iaq_survey"):
+            for l in losers:
+                lp = l.get("properties") or {}
+                if lp.get("has_iaq_survey"):
+                    wp["has_iaq_survey"] = True
+                    if lp.get("iaq_match_lon") is not None:
+                        wp["iaq_match_lon"] = lp["iaq_match_lon"]
+                    if lp.get("iaq_match_lat") is not None:
+                        wp["iaq_match_lat"] = lp["iaq_match_lat"]
+                    for k in ("iaq_overall_risk", "iaq_health_score",
+                              "iaq_iaq_score", "iaq_struct_score",
+                              "iaq_risk_tier"):
+                        if lp.get(k) is not None and wp.get(k) is None:
+                            wp[k] = lp[k]
+                    break
         existing = wp.get("coincident_contacts") or []
         wp["coincident_contacts"] = existing + [
             {
@@ -829,6 +853,7 @@ def dedup_contacts_at_parcel(features: list, cell_deg: float = 1e-5) -> list:
                 "notes":        (l.get("properties") or {}).get("notes"),
                 "collected_at": (l.get("properties") or {}).get("collected_at"),
                 "source":       (l.get("properties") or {}).get("source"),
+                "has_iaq_survey": bool((l.get("properties") or {}).get("has_iaq_survey")),
             }
             for l in losers
         ]
@@ -1020,34 +1045,52 @@ RELOC_FIELDS = (
 )
 
 CHART_SOURCES = {
-    # Overview
-    'mean_risk':        'composite of Health, IAQ, and Structural sub-scores',
-    'mean_health':      'composite of RespIll, asthma, wheeze, Headache, Tired, Hospital Respiratory',
-    'mean_iaq':         'composite of Mold, Leakage 2_1–4, Cooling System _1–4, Cooking',
-    'mean_struct':      'composite of QID192 (year built), QID128 (housing type), QID141 (condition)',
-    'risk_tiers':       'derived: 0.35·Health + 0.35·IAQ + 0.30·Structural — tiered Low/Medium/High',
-    'ownership':        'Ownership — "What is your current housing ownership status?"',
-    # Health
-    'symptoms':         'RespIll, asthma, wheeze, Mold, Hospital Respiratory — symptom prevalence',
-    'respiratory_pct':  'RespIll — "How often does anyone in your home have respiratory illness symptoms?"',
-    'asthma_pct':       'asthma — "How often does anyone in your home have asthma symptoms?"',
-    'wheeze_pct':       'wheeze — "How often does anyone in your home wheeze?"',
-    'mold_pct':         'Mold — "Evidence of mold in any area of the home?"',
-    'hospital_pct':     'Hospital Respiratory — "Has anyone in your home visited a hospital for respiratory issues?"',
-    # IAQ
+    # ── Overview ─────────────────────────────────────────────────────────────
+    'mean_risk':        'derived: 0.35·Health + 0.35·IAQ + 0.30·Structural — Mean Risk composite',
+    'mean_health':      'composite Health: Headache + RespIll + asthma + wheeze + Tired (×weights) + Hospital Respiratory (+20)',
+    'mean_iaq':         'composite IAQ: Mold + Leakage 2_1..4 + Cooling System _1..4 + Cooking',
+    'mean_struct':      'composite Structural: QID192 (year built) + QID128 (housing type) + QID141 (condition)',
+    'risk_tiers':       'derived from mean_risk — Low <34 / Medium 34–66 / High ≥67',
+    'ownership':        'Ownership (CSV col) — "What is your current housing ownership status?"',
+    # ── Health ───────────────────────────────────────────────────────────────
+    'symptoms':         'symptom prevalence: RespIll + asthma + wheeze + Mold + Hospital Respiratory',
+    'respiratory_pct':  'RespIll — "How often does anyone in your home have respiratory illness symptoms?" (Health input)',
+    'asthma_pct':       'asthma — "How often does anyone in your home have asthma symptoms?" (Health input)',
+    'wheeze_pct':       'wheeze — "How often does anyone in your home wheeze?" (Health input)',
+    'mold_pct':         'Mold — "Evidence of mold in any area of the home?" (IAQ input, +30 pts)',
+    'hospital_pct':     'Hospital Respiratory — "Has anyone in your home visited a hospital for respiratory issues?" (Health +20)',
+    # ── IAQ ──────────────────────────────────────────────────────────────────
     'mold_by_street':   'Mold — aggregated per street (≥3 responses)',
-    'year_built':       'QID192 — "When was your house built?"',
-    # Structural
-    'housing_types':    'QID128 — "What type of house do you live in?"',
-    'conditions':       'QID141 — "How would you describe the condition of your current house in terms of maintenance and repair?"',
-    'struct_by_street': 'composite QID192 + QID128 + QID141 — aggregated per street (≥3 responses)',
-    # Streets
-    'risk_by_street':   'composite Overall risk — aggregated per street (≥3 responses)',
+    'year_built':       'QID192 — "When was your house built?" (Structural input)',
+    # ── Structural ───────────────────────────────────────────────────────────
+    'housing_types':    'QID128 — "What type of house do you live in?" (Structural input)',
+    'conditions':       'QID141 — "How would you describe the condition of your current house in terms of maintenance and repair?" (Structural input)',
+    'struct_by_street': 'composite QID192 + QID128 + QID141 — Structural score per street (≥3 responses)',
+    # ── Streets ──────────────────────────────────────────────────────────────
+    'risk_by_street':   'composite overall_risk — aggregated per street (≥3 responses)',
     'compare_street':   'mean Health, IAQ, Structural — aggregated per street (≥3 responses)',
-    # Validation (no source survey question — these are data-quality metrics)
-    'coord_source':     '— (data-quality metric, no survey question)',
-    'unmatched':        '— (data-quality metric, no survey question)',
-    'match_rate':       '— (data-quality metric, no survey question)',
+    # ── Validation (data-quality metrics, not survey questions) ──────────────
+    'coord_source':     'derived from geocoding tier (Q212 → parcel match / fuzzy / Census) — data-quality metric',
+    'unmatched':        'derived: IAQ rows with no community-contact match — data-quality metric',
+    'match_rate':       'derived: % of community contacts upgraded by IAQ — data-quality metric',
+    # ── Residency & Housing ──────────────────────────────────────────────────
+    'years_in_hre':       'CSV col 27 (Q27) — "How long have you lived in High Ridge Estates? (years)"',
+    'anticipated_stay':   'CSV col 44 (Q44) — "How long do you anticipate continuing to live in your current house?"',
+    'mh_skirting':        'CSV col 42 (Q42) — "If you live in a mobile home, does your home have its skirting intact?"',
+    'safety_env':         'CSV col 56 (Q56) — "Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?"',
+    'safety_social':      'CSV col 57 (Q57) — "Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?"',
+    'afford_urgency':     'CSV col 58 (Q58) — "How would you rate the urgency of having affordable housing in HRE?"',
+    'afford_strategy':    'CSV col 59 (Q59) — "What is the most effective strategy to improve housing affordability in HRE?"',
+    'reloc_factors':      'CSV cols 29–36 (Q29–Q36) matrix — relocation-factor importance (Employment / Affordability / Quality of Life / Family / Retirement / Environment / Inheritance / Other)',
+    # ── Community living matrix charts ───────────────────────────────────────
+    'interventions_pct':  'CSV cols 67–77 (Q67–Q77) matrix — % wanting each home-resilience intervention (roof/walls, windows/doors, rain gardens, HVAC, plumbing/elec, well/septic, CCUA water, fence, trees-shade, trim trees, drainage)',
+    'experiences_pct':    'CSV cols 84–93 (Q84–Q93) matrix — % reporting each HRE experience (flooding, flood help, extreme heat, school change, law enforcement, insurance loss, well drying, pests, water leaks, loose animals)',
+    # ── Well-being & Mobility ────────────────────────────────────────────────
+    'car_access':         'CSV col 133 (Q133) — "Do you (or your household) own or have regular access to a car?"',
+    'hurricane_transport':'CSV col 134 (Q134) — "During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?"',
+    # ── Demographics+ ────────────────────────────────────────────────────────
+    'education':          'CSV col 142 (Q142) — "What is the highest level of education you have completed?"',
+    'employment':         'CSV col 143 (Q143) — "Which best describes your employment status?"',
 }
 
 
@@ -1400,11 +1443,42 @@ def _compute_iaq_analysis(features):
                 out['other'] += 1
         return out
 
+    # Mirror of api/_processing.py token sets — see that file for the
+    # rationale (must recognise yes/no, frequency words, and Likert
+    # positives or every Community / Experiences chart renders 0%).
+    _NEGATIVE_TOKENS = (
+        'not ', "don't", 'do not', 'never', 'no - ', 'no, ',
+        'strongly disagree', 'somewhat disagree', 'disagree',
+    )
+    _AFFIRM_TOKENS = ('yes', 'agree', 'true')
+    _POSITIVE_WANT_TOKENS = (
+        'want', 'like', 'agree', 'strongly', 'somewhat', 'definitely',
+        'yes', 'true', 'interested',
+    )
+    _FREQUENCY_TOKENS = (
+        'daily', 'weekly', 'biweekly', 'bi-weekly', 'monthly',
+        'quarterly', 'yearly', 'annually', 'often', 'sometimes',
+        'occasionally', 'every',
+    )
+
+    def _is_negative(v: str) -> bool:
+        return any(t in v for t in _NEGATIVE_TOKENS)
+
     def _pct_yes(field):
         if not n:
             return 0.0
-        hits = sum(1 for p in props
-                   if 'yes' in str(p.get(field, '') or '').lower())
+        hits = 0
+        for p in props:
+            v = str(p.get(field, '') or '').lower().strip()
+            if not v:
+                continue
+            if _is_negative(v):
+                continue
+            if any(t in v for t in _AFFIRM_TOKENS):
+                hits += 1
+                continue
+            if any(t in v for t in _FREQUENCY_TOKENS):
+                hits += 1
         return round(hits / n * 100, 1)
 
     def _pct_want(field):
@@ -1412,12 +1486,12 @@ def _compute_iaq_analysis(features):
             return 0.0
         hits = 0
         for p in props:
-            v = str(p.get(field, '') or '').lower()
+            v = str(p.get(field, '') or '').lower().strip()
             if not v:
                 continue
-            if 'not' in v or "don't" in v or 'do not' in v:
+            if _is_negative(v):
                 continue
-            if 'want' in v or 'like' in v or 'yes' in v:
+            if any(t in v for t in _POSITIVE_WANT_TOKENS):
                 hits += 1
         return round(hits / n * 100, 1)
 
@@ -2257,6 +2331,18 @@ async def lifespan(application):
             _matches = _match_iaq_to_contacts(iaq_data['features'], _contact_feats)
             _n_up = _upgrade_contacts_from_iaq(_contact_feats, iaq_data['features'], _matches)
             if _n_up:
+                # Re-tag match_status on every contact (B1 fix): without
+                # this, contacts that just got has_iaq_survey=true keep
+                # their stale match_status='contact_only', so the cached
+                # blob renders as G2 yellow rim despite the popup showing
+                # "Qualtric matched". Same for the IAQ side — flag the
+                # newly-matched IAQ features as 'matched'.
+                tag_contact_match_status(_contact_feats)
+                _contact_feats = dedup_contacts_at_parcel(_contact_feats)
+                for _f in iaq_data.get('features', []):
+                    _f['properties']['match_status'] = (
+                        'matched' if _f['properties'].get('iaq_matched') else 'iaq_only'
+                    )
                 survey_data['features'] = _contact_feats
                 # Re-save IAQ data with iaq_matched flags set
                 _iaq_payload_updated = {
