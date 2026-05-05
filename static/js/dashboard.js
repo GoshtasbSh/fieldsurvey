@@ -3548,20 +3548,59 @@ function updateIAQOnMap() {
 }
 
 function onIAQPointClick(e) {
+  // Mark the underlying DOM event so the parcels-fill click handler
+  // doesn't ALSO fire and open a second popup. Same pattern
+  // onPointClick uses for the contact + parcel double-fire case.
+  if (e.originalEvent && e.originalEvent._ksPopupHandled) return;
+  if (e.originalEvent) e.originalEvent._ksPopupHandled = true;
+
+  e.preventDefault && e.preventDefault();
   const f = e.features[0];
   const p = f.properties;
   const coords = f.geometry.coordinates.slice();
-  const rc = p.color || '#9ca3af';
 
-  const html = `<div class="popup-card" style="min-width:260px">
-    <div class="popup-header">
-      <h3>${escapeHtml(p.street_name || 'Survey Response')}</h3>
-      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
-        <span class="popup-badge" style="background:${escapeHtml(rc)}22;color:${escapeHtml(rc)};border:1px solid ${escapeHtml(rc)}44">${escapeHtml(p.risk_tier || '—')} Risk</span>
+  // Query the parcel underneath so the Parcel Data tab can attach to
+  // this same popup (matches the matched-contact UX).
+  const parcelFeats = map.queryRenderedFeatures(e.point, { layers: ['parcels-fill'] });
+  const pp = parcelFeats.length ? parcelFeats[0].properties : null;
+
+  // Build a tabbed popup like onPointClick. There's no Survey Contact
+  // tab here because — by definition — G3 has no contact in the canvas
+  // list. Instead the lead tab is "Survey Summary" (scores) followed
+  // by per-question Survey Answers (members + admins only) and the
+  // parcel tab when a parcel underlies the click.
+  const tabs = [
+    { label: 'Survey Summary', content: _buildIaqSummaryTab(p) },
+  ];
+  const isTeamMember = (typeof _myRole !== 'undefined') &&
+                       (_myRole === 'admin' || _myRole === 'member');
+  if (isTeamMember) {
+    tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(p) });
+  }
+  if (pp) {
+    tabs.push({ label: 'Parcel Data (FL DOR)', content: buildParcelTab(pp) });
+  }
+
+  const headerLabel = p.street_name || 'Qualtric respondent';
+  const html = buildTabbedPopup(headerLabel, tabs, 0);
+  const popup = new maplibregl.Popup({ offset: 15, maxWidth: '400px' })
+    .setLngLat(coords)
+    .setHTML(html)
+    .addTo(map);
+  attachPopupTabEvents(popup);
+}
+
+// Pulled out so the IAQ summary content can live alongside the
+// per-question answers and parcel tabs in a single tabbed popup.
+function _buildIaqSummaryTab(p) {
+  const rc = p.color || '#9ca3af';
+  const colorSafe = /^#[0-9a-fA-F]{3,8}$/.test(String(rc)) ? rc : '#9ca3af';
+  return `
+    <div class="popup-body">
+      <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+        <span class="popup-badge" style="background:${colorSafe}22;color:${colorSafe};border:1px solid ${colorSafe}44">${escapeHtml(p.risk_tier || '—')} Risk</span>
         <span class="popup-badge" style="background:rgba(255,255,255,.05);color:var(--text2);border:1px solid var(--border)">Overall: ${Number(p.overall_risk) || 0}/100</span>
       </div>
-    </div>
-    <div class="popup-body">
       <div class="popup-row"><span class="popup-label">Health Score</span><span class="popup-value">${Number(p.health_score) || 0}/100</span></div>
       <div class="popup-row"><span class="popup-label">IAQ Score</span><span class="popup-value">${Number(p.iaq_score) || 0}/100</span></div>
       <div class="popup-row"><span class="popup-label">Structural Score</span><span class="popup-value">${Number(p.struct_score) || 0}/100</span></div>
@@ -3570,13 +3609,7 @@ function onIAQPointClick(e) {
       <div class="popup-row"><span class="popup-label">Year Built</span><span class="popup-value">${escapeHtml(p.year_built || '—')}</span></div>
       <div class="popup-row"><span class="popup-label">Mold Present</span><span class="popup-value">${p.has_mold ? '<span style="color:var(--orange)">Yes</span>' : 'No'}</span></div>
       <div class="popup-row"><span class="popup-label">Hospital Visit</span><span class="popup-value">${p.hospital_visit === 'yes' ? '<span style="color:var(--red)">Yes</span>' : 'No'}</span></div>
-    </div>
-  </div>`;
-
-  new maplibregl.Popup({ offset: 15, maxWidth: '320px' })
-    .setLngLat(coords)
-    .setHTML(html)
-    .addTo(map);
+    </div>`;
 }
 
 // ── Survey Results tab ──────────────────────────────────────────────────────
