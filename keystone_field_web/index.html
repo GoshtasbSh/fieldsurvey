@@ -3226,8 +3226,13 @@ function _esc(s) {
 }
 // Drop any non-http(s) URL — blocks javascript:/data: payloads in href/src.
 function _safeUrl(u) {
+  // Guard against empty input: `new URL('', origin)` is technically
+  // valid and resolves to the origin root, which renders as a fake
+  // "View attachment" link for messages with no attachment.
+  const s = String(u || '').trim();
+  if (!s) return '';
   try {
-    const url = new URL(String(u || ''), window.location.origin);
+    const url = new URL(s, window.location.origin);
     return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
   } catch { return ''; }
 }

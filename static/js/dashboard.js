@@ -1011,10 +1011,15 @@ function escapeHtml(s) {
 }
 
 // Validate a URL is http(s); otherwise return '' so a javascript:/data:
-// payload can never reach an href / src attribute.
+// payload can never reach an href / src attribute. CRITICAL: returns
+// empty for empty input — `new URL('', origin)` is technically valid
+// and resolves to the origin's root, which used to render as a fake
+// "📄 View attachment" link in chat for messages that had no attachment.
 function safeUrl(u) {
+  const s = String(u || '').trim();
+  if (!s) return '';
   try {
-    const url = new URL(String(u || ''), window.location.origin);
+    const url = new URL(s, window.location.origin);
     return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
   } catch { return ''; }
 }
