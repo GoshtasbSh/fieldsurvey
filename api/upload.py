@@ -25,7 +25,7 @@ import traceback
 sys.path.append(str(Path(__file__).parent))
 from _lib import (
     supabase_admin, supabase_anon, load_cached, json_response,
-    require_admin, check_upload_size,
+    require_admin, check_upload_size, merge_preserve_analysis,
 )
 from _processing import (
     parse_multipart_file, load_parcel_index,
@@ -199,6 +199,11 @@ class handler(BaseHTTPRequestHandler):
                 'n_points':  len(contact_feats),
             }).execute()
             contact_analysis = compute_contact_analysis(contact_feats)
+            # compute_contact_analysis returns parcel_stats: {} (Vercel
+            # can't run geopandas to recompute it). Merge with the
+            # existing analysis blob so the Parcels tab stays populated
+            # after every IAQ-triggered re-merge.
+            contact_analysis = merge_preserve_analysis(contact_analysis)
             sb.table('keystone_dashboard_data').upsert(
                 {'data_type': 'analysis', 'payload': contact_analysis},
                 on_conflict='data_type',
@@ -322,6 +327,10 @@ class handler(BaseHTTPRequestHandler):
             'n_points':  n,
         }).execute()
         contact_analysis = compute_contact_analysis(survey_data.get('features', []))
+        # Same parcel-preservation merge as the IAQ branch — without
+        # this, every survey CSV upload zeros out the Parcels tab on
+        # the dashboard until scripts/ingest.py is rerun locally.
+        contact_analysis = merge_preserve_analysis(contact_analysis)
         sb.table('keystone_dashboard_data').upsert(
             {'data_type': 'analysis', 'payload': contact_analysis},
             on_conflict='data_type',

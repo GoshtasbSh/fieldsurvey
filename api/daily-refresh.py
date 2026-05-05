@@ -15,7 +15,7 @@ import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
 from _lib import (
     supabase_admin, load_cached, json_response, empty_geojson, haversine_m,
-    _bearer_jwt, supabase_anon,
+    _bearer_jwt, supabase_anon, merge_preserve_analysis,
 )
 import hmac as _hmac
 
@@ -192,17 +192,9 @@ def _run_refresh() -> dict:
     # server-only fields so the Parcels tab stays populated. Without this
     # merge, every daily-refresh tick wipes the parcel analysis.
     try:
-        existing_ana = load_cached("analysis") or {}
-        recomputed = _compute_analysis(features)
-        # Carry forward anything ingest.py added that we don't recompute.
-        for key, val in (existing_ana or {}).items():
-            if key not in recomputed or not recomputed.get(key):
-                recomputed[key] = val
-        # Always preserve parcel_stats verbatim — _compute_analysis produces
-        # {} for it, which would clobber the real value above when both keys
-        # exist.
-        if existing_ana.get("parcel_stats"):
-            recomputed["parcel_stats"] = existing_ana["parcel_stats"]
+        # Single shared helper now lives in _lib so the upload, restore,
+        # and daily-refresh paths all preserve parcel_stats identically.
+        recomputed = merge_preserve_analysis(_compute_analysis(features))
         sb.table("keystone_dashboard_data").upsert({
             "data_type": "analysis",
             "payload": recomputed,

@@ -58,6 +58,29 @@ def load_cached(data_type: str) -> dict | list | None:
         return None
 
 
+def merge_preserve_analysis(recomputed: dict) -> dict:
+    """Merge a freshly-computed contact analysis with the previously-cached
+    one, preserving server-only fields the recompute can't reproduce on
+    Vercel — `parcel_stats` and any value/area/year histograms come from
+    `scripts/ingest.py` which uses geopandas/shapely; that's too heavy
+    for a Vercel function. Without this merge, every survey or IAQ
+    upload (and every daily-refresh tick) would zero out the Parcels
+    tab in the dashboard.
+    """
+    existing = load_cached("analysis") or {}
+    if not isinstance(existing, dict):
+        return recomputed
+    out = dict(recomputed or {})
+    # Preserve parcel_stats verbatim — recompute always returns {} for it.
+    if existing.get("parcel_stats"):
+        out["parcel_stats"] = existing["parcel_stats"]
+    # Carry forward any other fields the recompute didn't populate.
+    for k, v in existing.items():
+        if k not in out or not out.get(k):
+            out[k] = v
+    return out
+
+
 def json_response(handler, status: int, body: Any, *, cache: str = "no-store") -> None:
     """Write a JSON response on a BaseHTTPRequestHandler."""
     payload = json.dumps(body).encode("utf-8")

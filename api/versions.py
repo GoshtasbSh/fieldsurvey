@@ -9,7 +9,10 @@ from urllib.parse import urlparse, parse_qs
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import supabase_admin, supabase_anon, json_response, require_admin
+from _lib import (
+    supabase_admin, supabase_anon, json_response, require_admin,
+    merge_preserve_analysis,
+)
 from _processing import compute_contact_analysis
 
 
@@ -68,6 +71,9 @@ class handler(BaseHTTPRequestHandler):
             ).execute()
             try:
                 contact_analysis = compute_contact_analysis(payload.get("features", []))
+                # Preserve parcel_stats etc. across the restore — same
+                # reason as the upload paths: Vercel can't recompute them.
+                contact_analysis = merge_preserve_analysis(contact_analysis)
                 sb.table("keystone_dashboard_data").upsert(
                     {"data_type": "analysis", "payload": contact_analysis},
                     on_conflict="data_type",
