@@ -1928,10 +1928,10 @@ function _setLayerVisibility(layerId, visible) {
 
 function applyMatchStatusFilter() {
   // Translate activeMatchFilter into per-sub-layer visibility. Sub-layers:
-  //   survey-points        -> G1 + G2 (community contact circles)
-  //   survey-iaq-risk      -> G1 only (community contacts coloured by IAQ risk)
-  //   iaq-points-g1        -> G1 IAQ house (peeks out behind the contact circle)
-  //   iaq-points + ring    -> G3 IAQ wifi + purple ring
+  //   survey-points    -> G1 + G2 (community contact circles)
+  //   survey-iaq-risk  -> G1 only (contacts coloured by IAQ risk)
+  //   iaq-points-g1    -> G1 IAQ plain house (peeks out behind contact)
+  //   iaq-points       -> G3 IAQ house-with-wifi + purple halo
   // When the filter is cleared (null), defer to applyFilters() so the
   // user's existing status / search filter is restored — never bash
   // setFilter(null) blindly or we'd lose context.
@@ -1994,10 +1994,6 @@ function applyMatchStatusFilter() {
   }
   if (map?.getLayer('iaq-points')) {
     map.setLayoutProperty('iaq-points', 'visibility',
-      want === 'iaq_only' ? 'visible' : 'none');
-  }
-  if (map?.getLayer('iaq-points-ring')) {
-    map.setLayoutProperty('iaq-points-ring', 'visibility',
       want === 'iaq_only' ? 'visible' : 'none');
   }
   updateMatchStatusPanel();
@@ -2095,7 +2091,7 @@ function applyFilters() {
 // ── Central layer definition map ─────────────────────────────────────────────
 const LAYER_DEFS = {
   field_points:   { toggle: 'layer-field-points',     mapLayers: ['field-points-glow', 'field-points-dots'] },
-  iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points', 'iaq-points-g1', 'iaq-points-ring'] },
+  iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points', 'iaq-points-g1'] },
   iaq_highlights: { toggle: 'layer-iaq-highlighted',  mapLayers: ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'] },
   iaq_risk:       { toggle: 'layer-iaq-risk',         mapLayers: ['survey-iaq-risk'] },
   contact_survey: { toggle: 'layer-points',           mapLayers: ['survey-points'] },
@@ -2149,7 +2145,7 @@ function setupLayerToggles() {
     'layer-heatmap': ['heatmap'],
     'layer-clusters': ['cluster-circles', 'cluster-count'],
     'layer-labels': ['survey-labels'],
-    'layer-iaq': ['iaq-points', 'iaq-points-g1', 'iaq-points-ring'],
+    'layer-iaq': ['iaq-points', 'iaq-points-g1'],
     'layer-iaq-highlighted': ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'],
     'layer-iaq-risk': ['survey-iaq-risk'],
     'layer-field-points': ['field-points-glow', 'field-points-dots'],
@@ -3511,23 +3507,25 @@ async function uploadFile(zone, endpoint, file) {
 
 // ── IAQ layers ──────────────────────────────────────────────────────────────
 //
-// Two distinct shapes for the Qualtric IAQ Survey layer:
-//   • HOUSE (iaq-points-g1) — for matched (G1) IAQ. Renders BEHIND the
+// Two related shapes for the Qualtric IAQ Survey layer — same house
+// silhouette, with G3 carrying extra "online signal" lines:
+//   • HOUSE (iaq-points-g1) — matched (G1) IAQ. Renders BEHIND the
 //     community-contact circle so its roof + corners peek out as the
 //     "this contact also has IAQ data" cue.
-//   • WIFI + purple RING (iaq-points + iaq-points-ring) — for G3
-//     (Qualtric only — flyer / QR / online; no community contact at
-//     this parcel). The wifi shape encodes "wireless / online", and
-//     the purple ring restates "Qualtric only" the way the v3 design
-//     intended.
+//   • HOUSE-WITH-WIFI + purple SDF halo (iaq-points) — G3 (Qualtric
+//     only — flyer / QR / online; no community contact at this parcel).
+//     Same house silhouette plus two small wifi-style arcs above the
+//     roof, painting "respondent submitted from this house, online".
+//     The purple icon-halo wraps the entire shape so "Qualtric only"
+//     is unmistakable regardless of risk-tier tint underneath.
 //
-// Why distinct shapes (not one shape for everything): even after the
-// rim-color fixes, an IAQ dot tinted by risk tier (e.g. orange #f59e0b)
-// could still be confused with a No-Answer community contact (orange
-// #f97316) at small zooms. Different SHAPES make the data-source
-// distinction independent of fill color, and house-vs-wifi makes the
-// G1-vs-G3 distinction structurally obvious. See
-// docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
+// Why a shape (not just a colour) carries the data-source signal:
+// IAQ risk-tier fill colours (orange / red) overlap with community-
+// contact status colours (No-Answer orange / Inaccessible red). A pure
+// rim-colour distinction blurs at small zoom, but a structurally
+// different shape (house vs circle, then house-with-wifi vs plain
+// house) reads at any zoom and is robust to future palette changes.
+// See docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
 
 // House silhouette — peak roof, flat sides, flat bottom. Pentagonal
 // with a clear "I am a house" gestalt at any size ≥ 12 px.
@@ -3548,58 +3546,54 @@ function _makeHouseIcon(px = 32) {
   return ctx.getImageData(0, 0, px, px);
 }
 
-// WiFi waves — two concentric arcs + dot at the bottom. Universal
-// "wireless / online" symbol. Drawn into the bottom 2/3 of the icon
-// box so the ring layer (drawn slightly larger, same anchor) wraps it.
-function _makeWifiIcon(px = 32) {
+// House-with-wifi (G3) — same house silhouette, plus two small concentric
+// "signal" arcs radiating up from above the roof peak (and a small dot
+// at the wifi origin). The whole shape stays in one SDF channel so
+// icon-color tints it as a unit and icon-halo-color paints a purple
+// outline around the entire silhouette including the arcs.
+function _makeHouseWifiIcon(px = 36) {
   const c = document.createElement('canvas');
   c.width = c.height = px;
   const ctx = c.getContext('2d');
-  const s = px / 32;
+  const s = px / 36;
+  ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#ffffff';
-  ctx.fillStyle   = '#ffffff';
   ctx.lineCap = 'round';
-  ctx.lineWidth = 3 * s;
-  // Outer arc
+
+  // Wifi arcs above the roof — two concentric ribs + origin dot
+  ctx.lineWidth = 2.4 * s;
   ctx.beginPath();
-  ctx.moveTo( 8 * s, 22 * s);
-  ctx.quadraticCurveTo(16 * s, 12 * s, 24 * s, 22 * s);
+  ctx.moveTo(10.5 * s, 10 * s);
+  ctx.quadraticCurveTo(18 * s, 2.5 * s, 25.5 * s, 10 * s);
   ctx.stroke();
-  // Inner arc
   ctx.beginPath();
-  ctx.moveTo(11 * s, 24 * s);
-  ctx.quadraticCurveTo(16 * s, 18 * s, 21 * s, 24 * s);
+  ctx.moveTo(13.5 * s, 11.5 * s);
+  ctx.quadraticCurveTo(18 * s, 7 * s, 22.5 * s, 11.5 * s);
   ctx.stroke();
-  // Dot
   ctx.beginPath();
-  ctx.arc(16 * s, 25.5 * s, 2 * s, 0, Math.PI * 2);
+  ctx.arc(18 * s, 12 * s, 1.3 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  // House silhouette — same proportions as iaq-house, shifted down a
+  // touch to leave room for the arcs above.
+  ctx.beginPath();
+  ctx.moveTo(18 * s, 15 * s);   // peak
+  ctx.lineTo(31 * s, 23.5 * s); // right eave
+  ctx.lineTo(31 * s, 33 * s);   // bottom-right
+  ctx.lineTo( 5 * s, 33 * s);   // bottom-left
+  ctx.lineTo( 5 * s, 23.5 * s); // left eave
+  ctx.closePath();
   ctx.fill();
   return ctx.getImageData(0, 0, px, px);
 }
 
-// Empty circle outline — drawn around the wifi to give G3 the purple
-// "this is Qualtric-only" frame. Tinted purple on its own layer so it
-// stays purple regardless of risk-tier on the wifi.
-function _makeRingIcon(px = 36) {
-  const c = document.createElement('canvas');
-  c.width = c.height = px;
-  const ctx = c.getContext('2d');
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3 * (px / 36);
-  ctx.beginPath();
-  ctx.arc(px / 2, px / 2, px / 2 - 4 * (px / 36), 0, Math.PI * 2);
-  ctx.stroke();
-  return ctx.getImageData(0, 0, px, px);
-}
-
-// Apply a filter to all three IAQ symbol sub-layers, combined with
-// each layer's match_status base filter so house always renders only
-// matched, wifi+ring only iaq_only.
+// Apply a filter to both IAQ symbol sub-layers, combined with each
+// layer's match_status base filter so the house renders only matched
+// (G1) and the house-wifi renders only iaq_only (G3).
 function _setIaqFilter(userFilter) {
   const sub = {
-    'iaq-points-g1':   ['==', ['get', 'match_status'], 'matched'],
-    'iaq-points':      ['==', ['get', 'match_status'], 'iaq_only'],
-    'iaq-points-ring': ['==', ['get', 'match_status'], 'iaq_only'],
+    'iaq-points-g1': ['==', ['get', 'match_status'], 'matched'],
+    'iaq-points':    ['==', ['get', 'match_status'], 'iaq_only'],
   };
   Object.entries(sub).forEach(([id, base]) => {
     if (!map.getLayer(id)) return;
@@ -3609,13 +3603,13 @@ function _setIaqFilter(userFilter) {
 
 function _setIaqVisibility(visible) {
   const v = visible ? 'visible' : 'none';
-  ['iaq-points', 'iaq-points-g1', 'iaq-points-ring'].forEach(id => {
+  ['iaq-points', 'iaq-points-g1'].forEach(id => {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', v);
   });
 }
 
-// Apply a tint expression to the house + wifi (NOT the ring, which
-// stays purple). Used by the chatbot's choropleth re-color paths.
+// Apply a tint expression to both house and house-wifi. Used by the
+// chatbot's choropleth re-color paths.
 function _setIaqColor(expr) {
   ['iaq-points', 'iaq-points-g1'].forEach(id => {
     if (map.getLayer(id)) map.setPaintProperty(id, 'icon-color', expr);
@@ -3634,20 +3628,18 @@ function addIAQLayers() {
     data: iaqData || { type: 'FeatureCollection', features: [] },
   });
 
-  // Register all three icons once, sdf:true so MapLibre can tint them
-  // via icon-color. hasImage() guards against double-registration if
-  // addIAQLayers is called twice (e.g. on style reload).
+  // Register both icons once, sdf:true so MapLibre can tint them via
+  // icon-color and draw an SDF halo via icon-halo-color (which the G3
+  // layer uses for the purple outline). hasImage() guards against
+  // double-registration if addIAQLayers is called twice.
   if (!map.hasImage('iaq-house')) {
     map.addImage('iaq-house', _makeHouseIcon(32), { sdf: true });
   }
-  if (!map.hasImage('iaq-wifi')) {
-    map.addImage('iaq-wifi', _makeWifiIcon(32), { sdf: true });
-  }
-  if (!map.hasImage('iaq-ring')) {
-    map.addImage('iaq-ring', _makeRingIcon(36), { sdf: true });
+  if (!map.hasImage('iaq-house-wifi')) {
+    map.addImage('iaq-house-wifi', _makeHouseWifiIcon(36), { sdf: true });
   }
 
-  // ── Layer 1: G1 matched IAQ — HOUSE icon, no purple ring ────────
+  // ── Layer 1: G1 matched IAQ — plain HOUSE ───────────────────────
   // Renders BEHIND the community-contact circle (survey-points is
   // moveLayer-ed to the top below). Roof peak + wall corners peek
   // out as the "this contact also has IAQ data" cue.
@@ -3670,17 +3662,20 @@ function addIAQLayers() {
     },
   });
 
-  // ── Layer 2: G3 Qualtric-only — WIFI icon ───────────────────────
-  // Keeps the layer id 'iaq-points' so existing setFilter /
-  // setLayoutProperty / queryRenderedFeatures call sites keep working.
-  // Risk-tier tinted via icon-color.
+  // ── Layer 2: G3 Qualtric-only — HOUSE-WITH-WIFI + purple halo ───
+  // Same house silhouette as G1 plus signal arcs above the roof
+  // (= "respondent submitted from this house, online"). Purple SDF
+  // halo wraps the entire shape (house + arcs) so the "Qualtric only"
+  // visual cue is unmistakable regardless of the risk-tier tint
+  // underneath. Keeps the layer id 'iaq-points' so existing
+  // setFilter / queryRenderedFeatures call sites work unchanged.
   map.addLayer({
     id: 'iaq-points',
     type: 'symbol',
     source: 'iaq-source',
     filter: ['==', ['get', 'match_status'], 'iaq_only'],
     layout: {
-      'icon-image': 'iaq-wifi',
+      'icon-image': 'iaq-house-wifi',
       'icon-size': ['interpolate', ['linear'], ['zoom'],
                     12, 0.55, 14, 0.78, 16, 1.05, 19, 1.5],
       'icon-allow-overlap': true,
@@ -3689,31 +3684,10 @@ function addIAQLayers() {
     },
     paint: {
       'icon-color': ['get', 'color'],
+      'icon-halo-color': '#8b5cf6',
+      'icon-halo-width': 2,
+      'icon-halo-blur': 0.4,
       'icon-opacity': 0.95,
-    },
-  });
-
-  // ── Layer 3: G3 PURPLE RING ─────────────────────────────────────
-  // Drawn slightly larger than the wifi so it encircles it. Always
-  // purple (#8b5cf6) — restates "Qualtric only" the way the v3 design
-  // originally intended. On its own layer so the ring colour is
-  // independent of the wifi's risk-tier tint.
-  map.addLayer({
-    id: 'iaq-points-ring',
-    type: 'symbol',
-    source: 'iaq-source',
-    filter: ['==', ['get', 'match_status'], 'iaq_only'],
-    layout: {
-      'icon-image': 'iaq-ring',
-      'icon-size': ['interpolate', ['linear'], ['zoom'],
-                    12, 0.65, 14, 0.92, 16, 1.25, 19, 1.78],
-      'icon-allow-overlap': true,
-      'icon-ignore-placement': true,
-      visibility: 'none',
-    },
-    paint: {
-      'icon-color': '#8b5cf6',
-      'icon-opacity': 1,
     },
   });
 
@@ -3739,7 +3713,7 @@ function addIAQLayers() {
   // Click + cursor handlers on every IAQ sub-layer so a click anywhere
   // on the marker (house corners, wifi waves, or purple ring) opens
   // the popup.
-  ['iaq-points-g1', 'iaq-points', 'iaq-points-ring', 'iaq-highlighted'].forEach(id => {
+  ['iaq-points-g1', 'iaq-points', 'iaq-highlighted'].forEach(id => {
     if (!map.getLayer(id)) return;
     map.on('click',      id, onIAQPointClick);
     map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
@@ -3778,9 +3752,9 @@ function updateIAQOnMap() {
   if (!iaqData) return;
   if (map.getSource('iaq-source')) {
     // Push the FULL Qualtric IAQ dataset (matched + unmatched) into the
-    // source. The three sub-layers (iaq-points-g1 house, iaq-points
-    // wifi, iaq-points-ring) each filter by match_status to render the
-    // right shape per feature.
+    // source. The two sub-layers (iaq-points-g1 plain house, iaq-points
+    // house-with-wifi + purple halo) each filter by match_status to
+    // render the right shape per feature.
     map.getSource('iaq-source').setData(iaqData);
     // Do NOT auto-show the layer — the sidebar toggle controls visibility.
     // Only show if the toggle checkbox is already checked (e.g. warm-state reload).
