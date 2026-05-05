@@ -1927,23 +1927,26 @@ function _setLayerVisibility(layerId, visible) {
 }
 
 function applyMatchStatusFilter() {
-  // Translate activeMatchFilter into MapLibre filter expressions on the
-  // three relevant layers. When the filter is cleared (null), defer to
-  // applyFilters() so the user's existing status / search filter is
-  // restored — never bash setFilter(null) blindly or we'd lose context.
+  // Translate activeMatchFilter into per-sub-layer visibility. Sub-layers:
+  //   survey-points        -> G1 + G2 (community contact circles)
+  //   survey-iaq-risk      -> G1 only (community contacts coloured by IAQ risk)
+  //   iaq-points-g1        -> G1 IAQ house (peeks out behind the contact circle)
+  //   iaq-points + ring    -> G3 IAQ wifi + purple ring
+  // When the filter is cleared (null), defer to applyFilters() so the
+  // user's existing status / search filter is restored — never bash
+  // setFilter(null) blindly or we'd lose context.
   const want = activeMatchFilter; // null | 'matched' | 'contact_only' | 'iaq_only'
 
   if (want === null) {
     // Restore via the existing status-filter pipeline.
     if (typeof applyFilters === 'function') applyFilters();
-    const ip = map?.getLayer('iaq-points');
-    if (ip) map.setFilter('iaq-points', null);
+    _setIaqFilter(null); // reset to base match_status filters on each sub-layer
     // Restore the layer-visibility snapshot we captured when the filter
     // was first activated.
     if (_msLayerSnapshot) {
       _setLayerVisibility('survey-points',   _msLayerSnapshot['survey-points']);
-      _setLayerVisibility('iaq-points',      _msLayerSnapshot['iaq-points']);
       _setLayerVisibility('survey-iaq-risk', _msLayerSnapshot['survey-iaq-risk']);
+      _setIaqVisibility(_msLayerSnapshot['iaq-points']);
       _msLayerSnapshot = null;
     }
     updateMatchStatusPanel();
@@ -1952,6 +1955,8 @@ function applyMatchStatusFilter() {
 
   // First-time activation: snapshot current visibility so a later
   // "clear filter" can put it back exactly the way the user had it.
+  // 'iaq-points' (the wifi G3 sub-layer) represents the user-facing
+  // Qualtric IAQ Survey layer state.
   if (_msLayerSnapshot === null) {
     const vis = (id) => map?.getLayer(id)
       ? map.getLayoutProperty(id, 'visibility') !== 'none'
@@ -1963,14 +1968,13 @@ function applyMatchStatusFilter() {
     };
   }
 
-  // survey-points layer: G1 + G2 sit here. Filter to the picked group,
+  // survey-points layer: G1 + G2 live here. Filter to the picked group,
   // or hide entirely if the user picked G3.
   if (map?.getLayer('survey-points')) {
     map.setFilter('survey-points',
       (want === 'matched' || want === 'contact_only')
         ? ['==', ['get', 'match_status'], want]
         : ['==', ['get', 'match_status'], '__none__']);
-    // Auto-show survey-points for G1/G2; hide for G3 to avoid clutter.
     _setLayerVisibility('survey-points', want !== 'iaq_only');
   }
   // survey-iaq-risk: G1 only. Hide for non-G1 picks.
@@ -1980,15 +1984,21 @@ function applyMatchStatusFilter() {
         ? ['==', ['get', 'has_iaq_survey'], true]
         : ['==', ['get', 'match_status'], '__none__']);
   }
-  // iaq-points: G3 only. Auto-show for G3 (the layer is often off by
-  // default — without this the user sees an empty map after clicking
-  // "Qualtric only" and reasonably concludes the filter is broken).
+  // IAQ sub-layers — show only the relevant shape per pick:
+  //   matched      -> show house (peeks behind contact circle)
+  //   contact_only -> hide all IAQ shapes (G2 has no IAQ)
+  //   iaq_only     -> show wifi + ring
+  if (map?.getLayer('iaq-points-g1')) {
+    map.setLayoutProperty('iaq-points-g1', 'visibility',
+      want === 'matched' ? 'visible' : 'none');
+  }
   if (map?.getLayer('iaq-points')) {
-    map.setFilter('iaq-points',
-      (want === 'iaq_only')
-        ? null
-        : ['==', ['get', 'match_status'], '__none__']);
-    _setLayerVisibility('iaq-points', want === 'iaq_only');
+    map.setLayoutProperty('iaq-points', 'visibility',
+      want === 'iaq_only' ? 'visible' : 'none');
+  }
+  if (map?.getLayer('iaq-points-ring')) {
+    map.setLayoutProperty('iaq-points-ring', 'visibility',
+      want === 'iaq_only' ? 'visible' : 'none');
   }
   updateMatchStatusPanel();
 }
@@ -2085,7 +2095,7 @@ function applyFilters() {
 // ── Central layer definition map ─────────────────────────────────────────────
 const LAYER_DEFS = {
   field_points:   { toggle: 'layer-field-points',     mapLayers: ['field-points-glow', 'field-points-dots'] },
-  iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points'] },
+  iaq_points:     { toggle: 'layer-iaq',              mapLayers: ['iaq-points', 'iaq-points-g1', 'iaq-points-ring'] },
   iaq_highlights: { toggle: 'layer-iaq-highlighted',  mapLayers: ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'] },
   iaq_risk:       { toggle: 'layer-iaq-risk',         mapLayers: ['survey-iaq-risk'] },
   contact_survey: { toggle: 'layer-points',           mapLayers: ['survey-points'] },
@@ -2139,7 +2149,7 @@ function setupLayerToggles() {
     'layer-heatmap': ['heatmap'],
     'layer-clusters': ['cluster-circles', 'cluster-count'],
     'layer-labels': ['survey-labels'],
-    'layer-iaq': ['iaq-points'],
+    'layer-iaq': ['iaq-points', 'iaq-points-g1', 'iaq-points-ring'],
     'layer-iaq-highlighted': ['iaq-highlighted', 'iaq-street-line', 'iaq-street-line-core'],
     'layer-iaq-risk': ['survey-iaq-risk'],
     'layer-field-points': ['field-points-glow', 'field-points-dots'],
@@ -3436,7 +3446,7 @@ async function uploadFile(zone, endpoint, file) {
       await refreshAllData();
 
       // Auto-show IAQ points immediately after a fresh upload
-      if (map.getLayer('iaq-points')) map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+      _setIaqVisibility(true);
       const iaqToggle = document.getElementById('layer-iaq');
       if (iaqToggle) iaqToggle.checked = true;
       document.getElementById('chat-btn')?.classList.add('has-data');
@@ -3500,127 +3510,249 @@ async function uploadFile(zone, endpoint, file) {
 }
 
 // ── IAQ layers ──────────────────────────────────────────────────────────────
-
-// Generate a solid-white diamond glyph at runtime (32 px). Used as an
-// SDF icon so MapLibre can recolour it via 'icon-color' (risk tier)
-// and draw a coloured halo via 'icon-halo-color' (G3 cyan marker).
 //
-// Why a diamond and not a circle: community-contact pins are circles
-// and the IAQ risk-tier palette overlaps with the contact-status
-// palette (high-risk #ef4444 IS Inaccessible #ef4444; medium-risk
-// #f59e0b is visually close to No-Answer #f97316). When both use the
-// same shape, a colour collision in the fill makes the dot ambiguous
-// no matter what stroke we add. Switching IAQ to a structurally
-// different shape (diamond) means "shape" carries data-source
-// information independent of fill colour — so the map is unambiguous
-// even if a future palette change introduces another collision.
-function _makeDiamondIcon(px = 32) {
+// Two distinct shapes for the Qualtric IAQ Survey layer:
+//   • HOUSE (iaq-points-g1) — for matched (G1) IAQ. Renders BEHIND the
+//     community-contact circle so its roof + corners peek out as the
+//     "this contact also has IAQ data" cue.
+//   • WIFI + purple RING (iaq-points + iaq-points-ring) — for G3
+//     (Qualtric only — flyer / QR / online; no community contact at
+//     this parcel). The wifi shape encodes "wireless / online", and
+//     the purple ring restates "Qualtric only" the way the v3 design
+//     intended.
+//
+// Why distinct shapes (not one shape for everything): even after the
+// rim-color fixes, an IAQ dot tinted by risk tier (e.g. orange #f59e0b)
+// could still be confused with a No-Answer community contact (orange
+// #f97316) at small zooms. Different SHAPES make the data-source
+// distinction independent of fill color, and house-vs-wifi makes the
+// G1-vs-G3 distinction structurally obvious. See
+// docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
+
+// House silhouette — peak roof, flat sides, flat bottom. Pentagonal
+// with a clear "I am a house" gestalt at any size ≥ 12 px.
+function _makeHouseIcon(px = 32) {
   const c = document.createElement('canvas');
   c.width = c.height = px;
   const ctx = c.getContext('2d');
-  const m = px / 2;
-  const pad = 3;
-  ctx.beginPath();
-  ctx.moveTo(m, pad);
-  ctx.lineTo(px - pad, m);
-  ctx.lineTo(m, px - pad);
-  ctx.lineTo(pad, m);
-  ctx.closePath();
+  const s = px / 32;
   ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(16 * s,  4 * s);   // peak
+  ctx.lineTo(28 * s, 14 * s);   // right eave
+  ctx.lineTo(28 * s, 28 * s);   // bottom-right
+  ctx.lineTo( 4 * s, 28 * s);   // bottom-left
+  ctx.lineTo( 4 * s, 14 * s);   // left eave
+  ctx.closePath();
   ctx.fill();
   return ctx.getImageData(0, 0, px, px);
 }
 
+// WiFi waves — two concentric arcs + dot at the bottom. Universal
+// "wireless / online" symbol. Drawn into the bottom 2/3 of the icon
+// box so the ring layer (drawn slightly larger, same anchor) wraps it.
+function _makeWifiIcon(px = 32) {
+  const c = document.createElement('canvas');
+  c.width = c.height = px;
+  const ctx = c.getContext('2d');
+  const s = px / 32;
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle   = '#ffffff';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 3 * s;
+  // Outer arc
+  ctx.beginPath();
+  ctx.moveTo( 8 * s, 22 * s);
+  ctx.quadraticCurveTo(16 * s, 12 * s, 24 * s, 22 * s);
+  ctx.stroke();
+  // Inner arc
+  ctx.beginPath();
+  ctx.moveTo(11 * s, 24 * s);
+  ctx.quadraticCurveTo(16 * s, 18 * s, 21 * s, 24 * s);
+  ctx.stroke();
+  // Dot
+  ctx.beginPath();
+  ctx.arc(16 * s, 25.5 * s, 2 * s, 0, Math.PI * 2);
+  ctx.fill();
+  return ctx.getImageData(0, 0, px, px);
+}
+
+// Empty circle outline — drawn around the wifi to give G3 the purple
+// "this is Qualtric-only" frame. Tinted purple on its own layer so it
+// stays purple regardless of risk-tier on the wifi.
+function _makeRingIcon(px = 36) {
+  const c = document.createElement('canvas');
+  c.width = c.height = px;
+  const ctx = c.getContext('2d');
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3 * (px / 36);
+  ctx.beginPath();
+  ctx.arc(px / 2, px / 2, px / 2 - 4 * (px / 36), 0, Math.PI * 2);
+  ctx.stroke();
+  return ctx.getImageData(0, 0, px, px);
+}
+
+// Apply a filter to all three IAQ symbol sub-layers, combined with
+// each layer's match_status base filter so house always renders only
+// matched, wifi+ring only iaq_only.
+function _setIaqFilter(userFilter) {
+  const sub = {
+    'iaq-points-g1':   ['==', ['get', 'match_status'], 'matched'],
+    'iaq-points':      ['==', ['get', 'match_status'], 'iaq_only'],
+    'iaq-points-ring': ['==', ['get', 'match_status'], 'iaq_only'],
+  };
+  Object.entries(sub).forEach(([id, base]) => {
+    if (!map.getLayer(id)) return;
+    map.setFilter(id, userFilter == null ? base : ['all', base, userFilter]);
+  });
+}
+
+function _setIaqVisibility(visible) {
+  const v = visible ? 'visible' : 'none';
+  ['iaq-points', 'iaq-points-g1', 'iaq-points-ring'].forEach(id => {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', v);
+  });
+}
+
+// Apply a tint expression to the house + wifi (NOT the ring, which
+// stays purple). Used by the chatbot's choropleth re-color paths.
+function _setIaqColor(expr) {
+  ['iaq-points', 'iaq-points-g1'].forEach(id => {
+    if (map.getLayer(id)) map.setPaintProperty(id, 'icon-color', expr);
+  });
+}
+
 function addIAQLayers() {
-  // Exclude IAQ features already merged into the contact layer (iaq_matched=true).
-  // Those addresses show as green Completed dots in survey-points / survey-iaq-risk.
+  // Source contains the FULL Qualtric IAQ dataset (matched + unmatched).
+  // Earlier versions filtered out matched IAQ via iaqUnmatched(), which
+  // hid G1 markers entirely — toggling the layer only affected G3 dots.
+  // Now G1 renders as a house behind the community-contact circle, so
+  // toggling the layer has an obvious visual effect on every parcel that
+  // has IAQ data, not just standalone G3 ones.
   map.addSource('iaq-source', {
     type: 'geojson',
-    data: iaqUnmatched(iaqData) || { type: 'FeatureCollection', features: [] },
+    data: iaqData || { type: 'FeatureCollection', features: [] },
   });
 
-  // Register the diamond icon once. addImage with sdf:true makes the
-  // glyph tintable via 'icon-color' and gives it an SDF halo channel
-  // for 'icon-halo-color'. hasImage() guards against re-registration
-  // if addIAQLayers is ever called twice (e.g. style reload).
-  if (!map.hasImage('iaq-diamond')) {
-    map.addImage('iaq-diamond', _makeDiamondIcon(32), { sdf: true });
+  // Register all three icons once, sdf:true so MapLibre can tint them
+  // via icon-color. hasImage() guards against double-registration if
+  // addIAQLayers is called twice (e.g. on style reload).
+  if (!map.hasImage('iaq-house')) {
+    map.addImage('iaq-house', _makeHouseIcon(32), { sdf: true });
+  }
+  if (!map.hasImage('iaq-wifi')) {
+    map.addImage('iaq-wifi', _makeWifiIcon(32), { sdf: true });
+  }
+  if (!map.hasImage('iaq-ring')) {
+    map.addImage('iaq-ring', _makeRingIcon(36), { sdf: true });
   }
 
-  // Main IAQ markers — DIAMOND symbols, tinted by risk tier
-  // (icon-color = ['get','color']). G3 (Qualtrics-only / flyer
-  // respondent) gets a cyan halo (icon-halo-color = #22d3ee) so it
-  // reads as "IAQ-only" regardless of the underlying tint. Matched
-  // (G1) IAQs render with no halo — the community contact circle
-  // already encodes "matched" via its white rim, and the diamond's
-  // corners poking out from behind the circle is the "IAQ data also
-  // exists here" cue.
-  // See docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
+  // ── Layer 1: G1 matched IAQ — HOUSE icon, no purple ring ────────
+  // Renders BEHIND the community-contact circle (survey-points is
+  // moveLayer-ed to the top below). Roof peak + wall corners peek
+  // out as the "this contact also has IAQ data" cue.
   map.addLayer({
-    id: 'iaq-points',
+    id: 'iaq-points-g1',
     type: 'symbol',
     source: 'iaq-source',
+    filter: ['==', ['get', 'match_status'], 'matched'],
     layout: {
-      'icon-image': 'iaq-diamond',
+      'icon-image': 'iaq-house',
       'icon-size': ['interpolate', ['linear'], ['zoom'],
-                    12, 0.45, 14, 0.65, 16, 0.9, 19, 1.3],
+                    12, 0.55, 14, 0.78, 16, 1.0, 19, 1.4],
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       visibility: 'none',
     },
     paint: {
       'icon-color': ['get', 'color'],
-      'icon-halo-color': '#22d3ee',
-      'icon-halo-width': [
-        'case',
-        ['==', ['get', 'match_status'], 'iaq_only'], 2,
-        0,
-      ],
-      'icon-opacity': 0.95,
+      'icon-opacity': 0.92,
     },
   });
 
-  // Highlighted-streets overlay — same diamond glyph, scaled up and
-  // tinted yellow so highlighted IAQ markers stand out without
-  // breaking the "diamond = IAQ" visual rule. Renders ON TOP of the
-  // base iaq-points layer (added later in the layer stack).
+  // ── Layer 2: G3 Qualtric-only — WIFI icon ───────────────────────
+  // Keeps the layer id 'iaq-points' so existing setFilter /
+  // setLayoutProperty / queryRenderedFeatures call sites keep working.
+  // Risk-tier tinted via icon-color.
   map.addLayer({
-    id: 'iaq-highlighted',
+    id: 'iaq-points',
     type: 'symbol',
     source: 'iaq-source',
-    filter: ['==', ['get', 'street_name'], '__none__'],
+    filter: ['==', ['get', 'match_status'], 'iaq_only'],
     layout: {
-      'icon-image': 'iaq-diamond',
+      'icon-image': 'iaq-wifi',
       'icon-size': ['interpolate', ['linear'], ['zoom'],
-                    12, 0.85, 16, 1.4, 19, 1.9],
+                    12, 0.55, 14, 0.78, 16, 1.05, 19, 1.5],
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       visibility: 'none',
     },
     paint: {
-      'icon-color': '#facc15',
-      'icon-halo-color': 'rgba(0,0,0,0.55)',
-      'icon-halo-width': 1.2,
+      'icon-color': ['get', 'color'],
+      'icon-opacity': 0.95,
+    },
+  });
+
+  // ── Layer 3: G3 PURPLE RING ─────────────────────────────────────
+  // Drawn slightly larger than the wifi so it encircles it. Always
+  // purple (#8b5cf6) — restates "Qualtric only" the way the v3 design
+  // originally intended. On its own layer so the ring colour is
+  // independent of the wifi's risk-tier tint.
+  map.addLayer({
+    id: 'iaq-points-ring',
+    type: 'symbol',
+    source: 'iaq-source',
+    filter: ['==', ['get', 'match_status'], 'iaq_only'],
+    layout: {
+      'icon-image': 'iaq-ring',
+      'icon-size': ['interpolate', ['linear'], ['zoom'],
+                    12, 0.65, 14, 0.92, 16, 1.25, 19, 1.78],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      visibility: 'none',
+    },
+    paint: {
+      'icon-color': '#8b5cf6',
       'icon-opacity': 1,
     },
   });
 
-  map.on('click', 'iaq-points', onIAQPointClick);
-  map.on('mouseenter', 'iaq-points', () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'iaq-points', () => map.getCanvas().style.cursor = '');
-  // Also handle clicks on highlighted circles (visible when background layer is hidden)
-  map.on('click', 'iaq-highlighted', onIAQPointClick);
-  map.on('mouseenter', 'iaq-highlighted', () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'iaq-highlighted', () => map.getCanvas().style.cursor = '');
+  // Highlighted-streets overlay — yellow circle halo behind/around any
+  // IAQ marker on a highlighted street. Reverted to a circle (was a
+  // diamond symbol in the v3 design) since with house+wifi shapes a
+  // generic circular halo wraps both equally well.
+  map.addLayer({
+    id: 'iaq-highlighted',
+    type: 'circle',
+    source: 'iaq-source',
+    filter: ['==', ['get', 'street_name'], '__none__'],
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 11, 16, 16, 19, 20],
+      'circle-color': '#facc15',
+      'circle-stroke-width': 3,
+      'circle-stroke-color': 'rgba(0,0,0,0.45)',
+      'circle-opacity': 1,
+    },
+  });
 
-  // Move contact layers ABOVE the IAQ layers so a contact dot is never
-  // visually obscured by a G3 IAQ dot stacked on top. The user
-  // reported "purple ring on Not Interested" which turned out to be
-  // a G3 IAQ at an adjacent parcel rendering on top — flipping the
-  // z-order makes the contact dot's own stroke control its appearance.
+  // Click + cursor handlers on every IAQ sub-layer so a click anywhere
+  // on the marker (house corners, wifi waves, or purple ring) opens
+  // the popup.
+  ['iaq-points-g1', 'iaq-points', 'iaq-points-ring', 'iaq-highlighted'].forEach(id => {
+    if (!map.getLayer(id)) return;
+    map.on('click',      id, onIAQPointClick);
+    map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
+  });
+
+  // Move community-contact layers ABOVE the IAQ layers so the contact
+  // circle wins the visual stack at a matched parcel — only the house's
+  // roof peak and corners peek out from behind the circle. survey-points
+  // is moved last so it ends up at the very top of the IAQ-related stack.
   try {
-    if (map.getLayer('survey-points'))    map.moveLayer('survey-points');
     if (map.getLayer('survey-iaq-risk'))  map.moveLayer('survey-iaq-risk');
+    if (map.getLayer('survey-points'))    map.moveLayer('survey-points');
   } catch (e) { /* layer ordering best-effort */ }
 
   // Street line source (updated by highlightStreets)
@@ -3645,12 +3777,16 @@ function addIAQLayers() {
 function updateIAQOnMap() {
   if (!iaqData) return;
   if (map.getSource('iaq-source')) {
-    map.getSource('iaq-source').setData(iaqUnmatched(iaqData));
+    // Push the FULL Qualtric IAQ dataset (matched + unmatched) into the
+    // source. The three sub-layers (iaq-points-g1 house, iaq-points
+    // wifi, iaq-points-ring) each filter by match_status to render the
+    // right shape per feature.
+    map.getSource('iaq-source').setData(iaqData);
     // Do NOT auto-show the layer — the sidebar toggle controls visibility.
     // Only show if the toggle checkbox is already checked (e.g. warm-state reload).
     const toggle = document.getElementById('layer-iaq');
     if (toggle && toggle.checked) {
-      map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+      _setIaqVisibility(true);
     }
   }
   // Show IAQ sidebar section
@@ -4324,10 +4460,10 @@ function _restoreContactLayers() {
 // ── Clear all data layers before each chatbot action ─────────────────────────
 function clearMapForChatbot() {
   Object.keys(LAYER_DEFS).forEach(name => setLayerVisibility(name, false));
-  if (map.getLayer('iaq-points')) {
-    map.setFilter('iaq-points', null);
-    map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
-  }
+  // Reset IAQ sub-layers (house G1, wifi G3, ring G3) to their base
+  // match_status filters and default tinting.
+  _setIaqFilter(null);
+  _setIaqColor(['get', 'color']);
   if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
   if (map.getLayer('iaq-highlighted'))
     map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
@@ -4350,7 +4486,8 @@ async function executeMapActions(actions) {
   if (!actions || !actions.length) return;
   // Preserve the user's IAQ risk overlay state — clearMapForChatbot() would
   // silently wipe it. Restore immediately after the clear so chatbot actions
-  // can still override it if they need to.
+  // can still override it if they need to. (We probe the wifi G3 sub-layer
+  // since that's the user-facing Qualtric IAQ Survey toggle's representative.)
   const iaqRiskWasOn = map.getLayer('iaq-points') &&
     map.getLayoutProperty('iaq-points', 'visibility') !== 'none';
   clearMapForChatbot();
@@ -4398,7 +4535,7 @@ async function executeMapActions(actions) {
           combined = ['all', streetFilter, symptomFilter];
           console.log('[filter_iaq_symptom] intersecting with active street:', activeStreetHighlight);
         }
-        map.setFilter('iaq-points', combined);
+        _setIaqFilter(combined);
         setLayerVisibility('iaq_points', true);
         break;
       }
@@ -4406,19 +4543,16 @@ async function executeMapActions(actions) {
       case 'show_iaq_choropleth': {
         const valid = ['overall_risk', 'iaq_score', 'health_score', 'struct_score'];
         const f = valid.includes(params.field) ? params.field : 'overall_risk';
-        if (map.getLayer('iaq-points')) {
-          map.setPaintProperty('iaq-points', 'icon-color',
-            ['interpolate', ['linear'], ['get', f],
-              0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444']);
-          setLayerVisibility('iaq_points', true);
-        }
+        _setIaqColor(['interpolate', ['linear'], ['get', f],
+          0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444']);
+        setLayerVisibility('iaq_points', true);
         break;
       }
 
       case 'clear_filters':
         if (map.getLayer('iaq-points')) {
-          map.setFilter('iaq-points', null);
-          map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
+          _setIaqFilter(null);
+          _setIaqColor(['get', 'color']);
         }
         if (map.getLayer('survey-points')) map.setFilter('survey-points', null);
         if (map.getLayer('iaq-highlighted'))
@@ -4479,9 +4613,9 @@ function showContactLayer() {
 function showIAQLayer(layer) {
   if (!layer) return;
   if (map.getLayer('iaq-points')) {
-    map.setLayoutProperty('iaq-points', 'visibility', 'visible');
-    map.setFilter('iaq-points', null);
-    map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
+    _setIaqVisibility(true);
+    _setIaqFilter(null);
+    _setIaqColor(['get', 'color']);
   }
   // Hide contact survey points so only the IAQ filter layer shows
   _hideContactLayers();
@@ -4490,10 +4624,10 @@ function showIAQLayer(layer) {
     iaq_points:  () => { /* show all IAQ points — already cleared filter above */ },
     respiratory: () => filterIAQPoints('respiratory_ill', ['weekly', 'month', 'season']),
     asthma:      () => filterIAQPoints('asthma_freq',    ['weekly', 'month', 'season']),
-    mold:        () => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['==', ['get', 'has_mold'], true]); },
-    high_risk:   () => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['>=', ['get', 'overall_risk'], 67]); },
-    owners_only: () => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['==', ['get', 'ownership'], 'Owner']); },
-    renters_only:() => { if (map.getLayer('iaq-points')) map.setFilter('iaq-points', ['==', ['get', 'ownership'], 'Renter']); },
+    mold:        () => _setIaqFilter(['==', ['get', 'has_mold'], true]),
+    high_risk:   () => _setIaqFilter(['>=', ['get', 'overall_risk'], 67]),
+    owners_only: () => _setIaqFilter(['==', ['get', 'ownership'], 'Owner']),
+    renters_only:() => _setIaqFilter(['==', ['get', 'ownership'], 'Renter']),
   };
   (activeLayers[layer] || (() => {}))();
 }
@@ -4637,8 +4771,8 @@ async function highlightStreets(streets, color) {
     const streetFilter = names.length === 1
       ? ['==', ['get', 'street_name'], names[0]]
       : ['any', ...names.map(n => ['==', ['get', 'street_name'], n])];
-    map.setFilter('iaq-points', streetFilter);
-    map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+    _setIaqFilter(streetFilter);
+    _setIaqVisibility(true);
     const el = document.getElementById('layer-iaq');
     if (el) el.checked = true;
 
@@ -4682,12 +4816,11 @@ async function highlightStreets(streets, color) {
       map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
     } else {
       map.setFilter('iaq-highlighted', haloFilter);
-      // iaq-highlighted is a symbol (diamond) layer — tint via
-      // icon-color, and use icon-halo-color for the white outline
-      // that previously came from circle-stroke-color.
-      map.setPaintProperty('iaq-highlighted', 'icon-color', lineColor);
-      map.setPaintProperty('iaq-highlighted', 'icon-halo-color', '#ffffff');
-      map.setPaintProperty('iaq-highlighted', 'icon-halo-width', 1.5);
+      // iaq-highlighted is now a circle layer (was a diamond symbol in
+      // the v3 design; reverted because the new house+wifi shapes are
+      // wrapped equally well by a generic circular halo).
+      map.setPaintProperty('iaq-highlighted', 'circle-color', lineColor);
+      map.setPaintProperty('iaq-highlighted', 'circle-stroke-color', '#ffffff');
       map.setLayoutProperty('iaq-highlighted', 'visibility', 'visible');
       console.warn(`[highlightStreets] OSM returned no geometry for ${names.join(', ')}; highlighting IAQ points on that street instead`);
       showToast(`Street line not available from map data — showing survey points on ${names.join(', ')} instead`, 5000);
@@ -4732,9 +4865,9 @@ function filterIAQPoints(field, values) {
       const streetOnly = activeStreetHighlight.length === 1
         ? ['==', ['get', 'street_name'], activeStreetHighlight[0]]
         : ['any', ...activeStreetHighlight.map(n => ['==', ['get', 'street_name'], n])];
-      map.setFilter('iaq-points', streetOnly);
+      _setIaqFilter(streetOnly);
     } else {
-      map.setFilter('iaq-points', null);
+      _setIaqFilter(null);
     }
     _restoreContactLayers();
     return;
@@ -4754,8 +4887,8 @@ function filterIAQPoints(field, values) {
       : ['any', ...activeStreetHighlight.map(n => ['==', ['get', 'street_name'], n])];
     finalFilter = ['all', streetFilter, symptomFilter];
   }
-  map.setFilter('iaq-points', finalFilter);
-  map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+  _setIaqFilter(finalFilter);
+  _setIaqVisibility(true);
 }
 
 function showStreetChoropleth(field) {
@@ -4766,15 +4899,14 @@ function showStreetChoropleth(field) {
   const rampExpr = (f) => ['interpolate', ['linear'], ['get', f],
     0, '#10b981', 33, '#10b981', 34, '#f97316', 66, '#f97316', 67, '#ef4444', 100, '#ef4444'];
   const valid = ['overall_risk', 'health_score', 'iaq_score', 'struct_score'];
-  map.setPaintProperty('iaq-points', 'icon-color',
-    valid.includes(field) ? rampExpr(field) : ['get', 'color']);
-  map.setLayoutProperty('iaq-points', 'visibility', 'visible');
+  _setIaqColor(valid.includes(field) ? rampExpr(field) : ['get', 'color']);
+  _setIaqVisibility(true);
 }
 
 function clearIAQHighlights() {
   if (map.getLayer('iaq-points')) {
-    map.setFilter('iaq-points', null);
-    map.setPaintProperty('iaq-points', 'icon-color', ['get', 'color']);
+    _setIaqFilter(null);
+    _setIaqColor(['get', 'color']);
   }
   if (map.getLayer('iaq-highlighted'))
     map.setFilter('iaq-highlighted', ['==', ['get', 'street_name'], '__none__']);
