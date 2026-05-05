@@ -1359,11 +1359,23 @@ function onPointClick(e) {
   const tabs = [
     { label: 'Survey Contact', content: buildSurveyTab(sp) },
   ];
-  // Survey Answers — only shown when this contact has a matched IAQ response.
-  // We find the matched IAQ feature by spatial proximity (≤60 m) to handle
-  // the small geocoding offset between contact and IAQ-survey coordinates.
-  if (sp.has_iaq_survey) {
-    const iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 60);
+  // Survey Answers tab: gated to team members + admins (per the access
+  // matrix; anon viewers never see per-respondent answers because
+  // /api/iaq-points strips them server-side anyway, but we hide the
+  // tab to avoid showing an empty pane).
+  //
+  // Was previously gated additionally on `sp.has_iaq_survey`, which is
+  // only set during IAQ upload's spatial join with a 50 m threshold.
+  // That misses real matches where geocoding put the contact on a
+  // street centroid ~70 m from the respondent's phone-GPS, and never
+  // back-fills CSV contacts modified after the IAQ upload. Now we
+  // accept any IAQ feature within 120 m of the clicked contact —
+  // generous enough to cover normal geocoding offset, tight enough
+  // that the popup doesn't surface a wildly unrelated household.
+  const isTeamMember = (typeof _myRole !== 'undefined') &&
+                       (_myRole === 'admin' || _myRole === 'member');
+  if (isTeamMember) {
+    const iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 120);
     if (iaqFeat && iaqFeat.properties) {
       tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(iaqFeat.properties) });
     }
