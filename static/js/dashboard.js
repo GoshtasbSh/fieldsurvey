@@ -1324,10 +1324,9 @@ function findMatchedIaqFeature(lon, lat, maxMeters) {
 // labels. Items without a recorded answer are skipped to keep the popup
 // readable.
 // Internal / non-answer fields stripped from the Survey Answers tab.
-// Anything outside this set is treated as a real survey response and
-// rendered (under "Other" if the categorisation list below doesn't
-// claim it). Keeping it as a denylist (rather than an allowlist) means
-// new Qualtrics questions show up automatically without code changes.
+// Anything outside this set is treated as a real survey response.
+// Denylist (not allowlist) so new Qualtrics questions show up
+// automatically under "Other" without code changes.
 const _IAQ_NON_ANSWER_FIELDS = new Set([
   // Display / geometry
   'street_name', 'address', 'color', 'risk_tier',
@@ -1351,39 +1350,59 @@ const _IAQ_NON_ANSWER_FIELDS = new Set([
   'source', 'field_point_id', 'coincident_contacts',
 ]);
 
-// Question -> category mapping. Keys not listed here fall under "Other"
-// at the bottom of the popup so we never silently drop an answer.
+// Survey-question category structure — mirrors the analysis charts'
+// taxonomy (api/_processing.py:SURVEY_QUESTIONS comments + CHART_SOURCES).
+// Each `keys` array is the canonical list rendered in the popup —
+// EVERY listed question is shown, with "—" for unanswered fields, so
+// the popup is a complete snapshot of the survey-question set rather
+// than a sparse view that only includes answered ones. Categories
+// match the analysis sub-tabs (Health → IAQ → Structural → Residency
+// & Housing → Relocation → Interventions → Experiences → Mobility →
+// Demographics) so a clinician / PI sees the same mental layout in
+// the popup as in the Analysis panel.
 const _IAQ_CATEGORIES = [
   ['Health & Symptoms', [
-    'respiratory_ill','asthma_freq','wheeze_freq','headache_freq',
-    'hospital_visit','has_mold','mold_resp_link',
+    'respiratory_ill', 'asthma_freq', 'wheeze_freq',
+    'headache_freq', 'tired_freq',
+    'hospital_visit', 'mold_resp_link',
   ]],
-  ['Housing & Residency', [
-    'years_in_hre','anticipated_stay','mh_skirting','housing_type',
-    'ownership','year_built','safety_env','safety_social',
-    'afford_urgency','afford_strategy',
+  ['Indoor Air Quality', [
+    'has_mold',
+    'leakage_roof', 'leakage_walls', 'leakage_windows', 'leakage_floor',
+    'cooling_central_ac', 'cooling_window_unit', 'cooling_fan', 'cooling_none',
+    'cooking_method',
+  ]],
+  ['Structural & Housing Type', [
+    'year_built', 'housing_type', 'condition', 'ownership',
+  ]],
+  ['Residency & Affordability', [
+    'years_in_hre', 'anticipated_stay', 'mh_skirting',
+    'safety_env', 'safety_social',
+    'afford_urgency', 'afford_strategy',
   ]],
   ['Relocation Factors', [
-    'reloc_factor_emp','reloc_factor_aff','reloc_factor_qol',
-    'reloc_factor_fam','reloc_factor_ret','reloc_factor_env',
-    'reloc_factor_inh','reloc_factor_oth',
+    'reloc_factor_emp', 'reloc_factor_aff', 'reloc_factor_qol',
+    'reloc_factor_fam', 'reloc_factor_ret', 'reloc_factor_env',
+    'reloc_factor_inh', 'reloc_factor_oth',
   ]],
   ['Resilience Interventions', [
-    'intv_roof_walls','intv_windows_doors','intv_rain_gardens','intv_hvac',
-    'intv_plumbing_elec','intv_well_septic','intv_ccua_water','intv_fence',
-    'intv_trees_shade','intv_trim_trees','intv_drainage',
+    'intv_roof_walls', 'intv_windows_doors', 'intv_rain_gardens',
+    'intv_hvac', 'intv_plumbing_elec', 'intv_well_septic',
+    'intv_ccua_water', 'intv_fence', 'intv_trees_shade',
+    'intv_trim_trees', 'intv_drainage',
   ]],
   ['Experiences in HRE', [
-    'exp_flooding','exp_flood_help','exp_extreme_heat','exp_school_change',
-    'exp_law_enf','exp_insurance_loss','exp_well_dry','exp_pests',
-    'exp_water_leaks','exp_loose_animals',
+    'exp_flooding', 'exp_flood_help', 'exp_extreme_heat',
+    'exp_school_change', 'exp_law_enf', 'exp_insurance_loss',
+    'exp_well_dry', 'exp_pests', 'exp_water_leaks', 'exp_loose_animals',
   ]],
   ['Well-being & Mobility', [
-    'car_access','hurricane_transport',
+    'car_access', 'hurricane_transport',
   ]],
   ['Demographics', [
-    'education','employment','household_size','age','gender','race',
-    'ethnicity','income','marital_status','primary_language',
+    'education', 'employment',
+    'household_size', 'age', 'gender', 'race', 'ethnicity',
+    'income', 'marital_status', 'primary_language',
   ]],
 ];
 
@@ -1394,67 +1413,72 @@ function buildSurveyAnswersTab(iaqProps) {
   // render with a readable label.
   const qtext = (iaqAnalysis?.survey_questions || {});
   const friendly = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const props = iaqProps || {};
 
-  // Build the field -> category index for O(1) lookup
-  const keyCat = new Map();
-  _IAQ_CATEGORIES.forEach(([title, keys]) => keys.forEach(k => keyCat.set(k, title)));
+  // Render the COMPLETE survey-question set per category, including
+  // unanswered fields ("—"). This is intentional — the popup is meant
+  // as a full snapshot of the question instrument applied to this
+  // respondent, not just the rows they happened to fill out. Skipping
+  // empties would obscure the difference between "didn't ask" and
+  // "asked, declined to answer".
+  const isAnswered = (v) => !(v == null || v === '');
+  const renderRow = (q, v) => {
+    const answered = isAnswered(v);
+    const display  = answered ? String(v) : '—';
+    return `<div class="popup-row" style="align-items:flex-start;gap:8px;padding:3px 0">
+      <span class="popup-label" style="max-width:58%;font-size:10.5px;line-height:1.35;color:var(--text2);font-weight:400" title="${escapeHtml(q)}">${escapeHtml(q.length > 90 ? q.slice(0, 87) + '…' : q)}</span>
+      <span class="popup-value" style="max-width:42%;text-align:right;font-size:11px;color:${answered ? 'var(--text)' : 'var(--muted)'};font-weight:${answered ? '500' : '400'};font-style:${answered ? 'normal' : 'italic'}">${escapeHtml(display)}</span>
+    </div>`;
+  };
 
-  // Walk EVERY property on the feature, partition by category, and
-  // skip only internal / non-answer fields. This means newly-added
-  // Qualtrics questions show up automatically (under "Other") without
-  // requiring a code change.
-  const grouped = {};
-  for (const k of Object.keys(iaqProps || {})) {
-    if (_IAQ_NON_ANSWER_FIELDS.has(k)) continue;
-    if (k.startsWith('_')) continue; // private / internal convention
-    const v = iaqProps[k];
-    if (v == null || v === '') continue;
-    const cat = keyCat.get(k) || 'Other';
-    (grouped[cat] = grouped[cat] || []).push([k, v]);
-  }
+  // Render each curated category. Sections always appear, even when
+  // every answer in them is blank, so the field team can see what
+  // the instrument covers at a glance.
+  const knownKeys = new Set();
+  _IAQ_CATEGORIES.forEach(([, keys]) => keys.forEach(k => knownKeys.add(k)));
 
-  // Render in canonical order; "Other" goes last so unknown questions
-  // are visible but don't disrupt the curated section order.
-  const renderOrder = [..._IAQ_CATEGORIES.map(([t]) => t), 'Other'];
-  const sections = renderOrder.map(title => {
-    const items = grouped[title];
-    if (!items || !items.length) return '';
-    const rows = items.map(([k, v]) => {
-      const q = qtext[k] || friendly(k);
-      return `<div class="popup-row" style="align-items:flex-start;gap:8px;padding:3px 0">
-        <span class="popup-label" style="max-width:58%;font-size:10.5px;line-height:1.35;color:var(--text2);font-weight:400" title="${escapeHtml(q)}">${escapeHtml(q.length > 90 ? q.slice(0, 87) + '…' : q)}</span>
-        <span class="popup-value" style="max-width:42%;text-align:right;font-size:11px;color:var(--text);font-weight:500">${escapeHtml(String(v))}</span>
-      </div>`;
-    }).join('');
-    // Category headers: cyan accent (var(--accent) = #22d3ee) so they
-    // visually separate from question text (var(--text2)) and answer
-    // values (var(--text)). Three-tier hierarchy: header > question > value.
+  const curatedSections = _IAQ_CATEGORIES.map(([title, keys]) => {
+    const rows = keys.map(k => renderRow(qtext[k] || friendly(k), props[k])).join('');
+    const answeredCount = keys.reduce((n, k) => n + (isAnswered(props[k]) ? 1 : 0), 0);
     return `<div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(34,211,238,.15)">
-      <div style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">${escapeHtml(title)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em">${escapeHtml(title)}</span>
+        <span style="font-size:9.5px;color:var(--muted);font-family:var(--mono)">${answeredCount}/${keys.length}</span>
+      </div>
       ${rows}
     </div>`;
-  }).filter(Boolean).join('');
+  }).join('');
 
-  if (!sections) {
-    return `<div class="popup-body">
-      <p style="color:var(--muted);text-align:center;padding:14px;font-size:11px">
-        No per-question survey answers recorded for this respondent.
-      </p>
-    </div>`;
-  }
+  // Anything else on the feature that isn't internal and isn't already
+  // claimed by a curated category goes under "Other" — only rendered
+  // when it has at least one non-empty value, so brand-new Qualtrics
+  // columns surface automatically without polluting the layout.
+  const otherEntries = Object.keys(props)
+    .filter(k => !_IAQ_NON_ANSWER_FIELDS.has(k))
+    .filter(k => !k.startsWith('_'))
+    .filter(k => !knownKeys.has(k))
+    .filter(k => isAnswered(props[k]));
+  const otherSection = otherEntries.length
+    ? `<div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(34,211,238,.15)">
+        <div style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Other</div>
+        ${otherEntries.map(k => renderRow(qtext[k] || friendly(k), props[k])).join('')}
+      </div>`
+    : '';
+
   // Top scoreboard repeats the Survey Summary numbers for at-a-glance
   // context (the user might land on this tab without seeing the
-  // Summary tab). Section list is scrollable so a long Qualtrics
-  // export doesn't overflow the popup.
-  return `<div class="popup-body" style="max-height:340px;overflow-y:auto;padding-right:4px">
+  // Summary tab first). Sections are scrollable so the full instrument
+  // doesn't overflow the popup.
+  return `<div class="popup-body" style="max-height:380px;overflow-y:auto;padding-right:4px">
     <div class="popup-row">
       <span class="popup-label">Risk score</span>
-      <span class="popup-value" style="font-family:var(--mono)"><strong>${Number(iaqProps.overall_risk) || 0}</strong>/100 · ${escapeHtml(iaqProps.risk_tier || '—')}</span>
+      <span class="popup-value" style="font-family:var(--mono)"><strong>${Number(props.overall_risk) || 0}</strong>/100 · ${escapeHtml(props.risk_tier || '—')}</span>
     </div>
-    <div class="popup-row"><span class="popup-label">Health</span><span class="popup-value" style="font-family:var(--mono)">${Number(iaqProps.health_score) || 0}</span></div>
-    <div class="popup-row"><span class="popup-label">IAQ</span><span class="popup-value" style="font-family:var(--mono)">${Number(iaqProps.iaq_score) || 0}</span></div>
-    <div class="popup-row"><span class="popup-label">Structural</span><span class="popup-value" style="font-family:var(--mono)">${Number(iaqProps.struct_score) || 0}</span></div>
-    ${sections}
+    <div class="popup-row"><span class="popup-label">Health</span><span class="popup-value" style="font-family:var(--mono)">${Number(props.health_score) || 0}</span></div>
+    <div class="popup-row"><span class="popup-label">IAQ</span><span class="popup-value" style="font-family:var(--mono)">${Number(props.iaq_score) || 0}</span></div>
+    <div class="popup-row"><span class="popup-label">Structural</span><span class="popup-value" style="font-family:var(--mono)">${Number(props.struct_score) || 0}</span></div>
+    ${curatedSections}
+    ${otherSection}
   </div>`;
 }
 
@@ -3585,16 +3609,18 @@ async function uploadFile(zone, endpoint, file) {
 // ── IAQ layers ──────────────────────────────────────────────────────────────
 //
 // Two related shapes for the Qualtric IAQ Survey layer — same house
-// silhouette, with G3 carrying extra "online signal" lines:
-//   • HOUSE (iaq-points-g1) — matched (G1) IAQ. Renders BEHIND the
-//     community-contact circle so its roof + corners peek out as the
-//     "this contact also has IAQ data" cue.
-//   • HOUSE-WITH-WIFI + purple SDF halo (iaq-points) — G3 (Qualtric
-//     only — flyer / QR / online; no community contact at this parcel).
-//     Same house silhouette plus two small wifi-style arcs above the
-//     roof, painting "respondent submitted from this house, online".
-//     The purple icon-halo wraps the entire shape so "Qualtric only"
-//     is unmistakable regardless of risk-tier tint underneath.
+// silhouette, with G3 "drawn line by line" inside:
+//   • HOUSE (iaq-points-g1) — matched (G1) IAQ. Solid filled house,
+//     renders BEHIND the community-contact circle so its roof +
+//     corners peek out as the "this contact also has IAQ data +
+//     in-person visit complete" cue.
+//   • HOUSE-WITH-SCANLINES + purple SDF halo (iaq-points) — G3
+//     (Qualtric only; no in-person visit at this parcel). Same house
+//     silhouette but with three curved horizontal cut-outs in the body,
+//     so the result is filled bands alternating with empty bands —
+//     a half-painted house. Reads as "we have the survey but not the
+//     full in-person fill". Purple icon-halo wraps the entire shape
+//     so "Qualtric only" is unmistakable regardless of risk-tier tint.
 //
 // Why a shape (not just a colour) carries the data-source signal:
 // IAQ risk-tier fill colours (orange / red) overlap with community-
@@ -3623,44 +3649,51 @@ function _makeHouseIcon(px = 32) {
   return ctx.getImageData(0, 0, px, px);
 }
 
-// House-with-wifi (G3) — same house silhouette, plus two small concentric
-// "signal" arcs radiating up from above the roof peak (and a small dot
-// at the wifi origin). The whole shape stays in one SDF channel so
-// icon-color tints it as a unit and icon-halo-color paints a purple
-// outline around the entire silhouette including the arcs.
-function _makeHouseWifiIcon(px = 36) {
+// House-with-scanlines (G3) — same house silhouette as G1, but the
+// body is "drawn line by line": three curved horizontal stripes are
+// punched out of the body so the result is filled bands alternating
+// with empty bands (like a half-painted house). When the icon is
+// tinted by icon-color, only the solid bands carry the risk-tier
+// fill; the punch-outs are transparent. Reads as "this respondent
+// answered online — the in-person visit is incomplete, drawn in
+// scanlines like a wifi/signal pattern".
+//
+// Implementation note: destination-out composite "erases" the cuts
+// from the previously-filled silhouette so the SDF is a single
+// channel of solid + cut-out shapes. icon-halo wraps the outer
+// perimeter (purple = "Qualtric only") and traces the inner cut
+// edges, making the bands feel like a scanned/printed pattern.
+function _makeHouseScanIcon(px = 32) {
   const c = document.createElement('canvas');
   c.width = c.height = px;
   const ctx = c.getContext('2d');
-  const s = px / 36;
+  const s = px / 32;
+
+  // 1. Solid house silhouette (same proportions as iaq-house).
   ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineCap = 'round';
-
-  // Wifi arcs above the roof — two concentric ribs + origin dot
-  ctx.lineWidth = 2.4 * s;
   ctx.beginPath();
-  ctx.moveTo(10.5 * s, 10 * s);
-  ctx.quadraticCurveTo(18 * s, 2.5 * s, 25.5 * s, 10 * s);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(13.5 * s, 11.5 * s);
-  ctx.quadraticCurveTo(18 * s, 7 * s, 22.5 * s, 11.5 * s);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(18 * s, 12 * s, 1.3 * s, 0, Math.PI * 2);
-  ctx.fill();
-
-  // House silhouette — same proportions as iaq-house, shifted down a
-  // touch to leave room for the arcs above.
-  ctx.beginPath();
-  ctx.moveTo(18 * s, 15 * s);   // peak
-  ctx.lineTo(31 * s, 23.5 * s); // right eave
-  ctx.lineTo(31 * s, 33 * s);   // bottom-right
-  ctx.lineTo( 5 * s, 33 * s);   // bottom-left
-  ctx.lineTo( 5 * s, 23.5 * s); // left eave
+  ctx.moveTo(16 * s,  4 * s);   // peak
+  ctx.lineTo(28 * s, 14 * s);   // right eave
+  ctx.lineTo(28 * s, 28 * s);   // bottom-right
+  ctx.lineTo( 4 * s, 28 * s);   // bottom-left
+  ctx.lineTo( 4 * s, 14 * s);   // left eave
   ctx.closePath();
   ctx.fill();
+
+  // 2. Punch out three curved horizontal "scanline" cuts in the body
+  //    (y ≈ 17, 21, 25). Inset 4 px from each side so the perimeter
+  //    stays intact and the house outline reads cleanly. Curves bow
+  //    upward like wifi arcs to echo the "online signal" story.
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.lineCap   = 'round';
+  ctx.lineWidth = 1.8 * s;
+  for (const yc of [17, 21, 25]) {
+    ctx.beginPath();
+    ctx.moveTo( 8 * s, yc * s);
+    ctx.quadraticCurveTo(16 * s, (yc - 1.6) * s, 24 * s, yc * s);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
   return ctx.getImageData(0, 0, px, px);
 }
 
@@ -3712,8 +3745,8 @@ function addIAQLayers() {
   if (!map.hasImage('iaq-house')) {
     map.addImage('iaq-house', _makeHouseIcon(32), { sdf: true });
   }
-  if (!map.hasImage('iaq-house-wifi')) {
-    map.addImage('iaq-house-wifi', _makeHouseWifiIcon(36), { sdf: true });
+  if (!map.hasImage('iaq-house-scan')) {
+    map.addImage('iaq-house-scan', _makeHouseScanIcon(32), { sdf: true });
   }
 
   // ── Layer 1: G1 matched IAQ — plain HOUSE ───────────────────────
@@ -3739,20 +3772,22 @@ function addIAQLayers() {
     },
   });
 
-  // ── Layer 2: G3 Qualtric-only — HOUSE-WITH-WIFI + purple halo ───
-  // Same house silhouette as G1 plus signal arcs above the roof
-  // (= "respondent submitted from this house, online"). Purple SDF
-  // halo wraps the entire shape (house + arcs) so the "Qualtric only"
-  // visual cue is unmistakable regardless of the risk-tier tint
-  // underneath. Keeps the layer id 'iaq-points' so existing
-  // setFilter / queryRenderedFeatures call sites work unchanged.
+  // ── Layer 2: G3 Qualtric-only — HOUSE-WITH-SCANLINES + purple halo ─
+  // Same house silhouette as G1 with three curved horizontal cut-outs
+  // in the body, so the icon reads as a half-painted house — solid
+  // bands alternating with empty bands. The metaphor: "we have the
+  // online survey but not the full in-person visit, so the house is
+  // drawn line by line". Purple SDF halo wraps the entire silhouette
+  // and traces the inner cuts. Keeps the layer id 'iaq-points' so
+  // existing setFilter / queryRenderedFeatures call sites work
+  // unchanged.
   map.addLayer({
     id: 'iaq-points',
     type: 'symbol',
     source: 'iaq-source',
     filter: ['==', ['get', 'match_status'], 'iaq_only'],
     layout: {
-      'icon-image': 'iaq-house-wifi',
+      'icon-image': 'iaq-house-scan',
       'icon-size': ['interpolate', ['linear'], ['zoom'],
                     12, 0.55, 14, 0.78, 16, 1.05, 19, 1.5],
       'icon-allow-overlap': true,

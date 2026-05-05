@@ -67,7 +67,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .match-row:hover{background:rgba(255,255,255,.04)}
 .match-row.dimmed{opacity:.35}
 .match-row .match-swatch{width:14px;height:14px;border-radius:50%;flex-shrink:0;box-sizing:border-box}
-.match-row .match-swatch.house-wifi{width:20px;height:20px;border-radius:0;border:none;background:transparent;display:flex;align-items:center;justify-content:center}
+.match-row .match-swatch.house-scan{width:20px;height:20px;border-radius:0;border:none;background:transparent;display:flex;align-items:center;justify-content:center}
 .match-row .match-label{flex:1;line-height:1.2}
 .match-row .match-count{font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .layer-row label{flex:1;font-size:13px;color:var(--text2);cursor:pointer;user-select:none}
@@ -596,16 +596,22 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
             <span class="match-count" id="ms-count-contact_only">0</span>
           </div>
           <div class="match-row" data-group="iaq_only">
-            <span class="match-swatch house-wifi" title="House with wifi arcs + purple outline = Qualtric only (online / flyer / QR), no community contact at this parcel.">
-              <svg width="20" height="20" viewBox="0 0 36 36" style="display:block;overflow:visible">
-                <!-- Wifi arcs above the roof, drawn with purple outer stroke for the halo effect, amber inner -->
-                <path d="M 10.5 10 Q 18 2.5 25.5 10" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round"/>
-                <path d="M 13.5 11.5 Q 18 7 22.5 11.5" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round"/>
-                <path d="M 10.5 10 Q 18 2.5 25.5 10" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
-                <path d="M 13.5 11.5 Q 18 7 22.5 11.5" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
-                <circle cx="18" cy="12" r="1.6" fill="#f59e0b"/>
-                <!-- House silhouette with purple stroke -->
-                <polygon points="18,15 31,23.5 31,33 5,33 5,23.5" fill="#f59e0b" stroke="#8b5cf6" stroke-width="2"/>
+            <span class="match-swatch house-scan" title="House drawn line by line + purple outline = Qualtric only (no in-person visit at this parcel; respondent submitted online).">
+              <svg width="20" height="20" viewBox="0 0 32 32" style="display:block;overflow:visible">
+                <defs>
+                  <!-- Mask: solid house with three curved bands punched out -->
+                  <mask id="house-scan-mask">
+                    <rect x="0" y="0" width="32" height="32" fill="black"/>
+                    <polygon points="16,4 28,14 28,28 4,28 4,14" fill="white"/>
+                    <path d="M 8 17 Q 16 15.4 24 17" stroke="black" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+                    <path d="M 8 21 Q 16 19.4 24 21" stroke="black" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+                    <path d="M 8 25 Q 16 23.4 24 25" stroke="black" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+                  </mask>
+                </defs>
+                <!-- Risk-tier-coloured house body, with curved bands cut out by the mask -->
+                <rect x="0" y="0" width="32" height="32" fill="#f59e0b" mask="url(#house-scan-mask)"/>
+                <!-- Purple outline traces the silhouette -->
+                <polygon points="16,4 28,14 28,28 4,28 4,14" fill="none" stroke="#8b5cf6" stroke-width="1.8" stroke-linejoin="round"/>
               </svg>
             </span>
             <span class="match-label">Qualtric only (flyer / QR)</span>
