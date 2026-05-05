@@ -445,12 +445,12 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
       <!-- Layers -->
       <div class="sidebar-section">
         <div class="sidebar-title">Layers</div>
-        <div class="layer-row">
-          <label for="layer-field-points">Field Points</label>
+        <div class="layer-row" title="Pins collected via the field-team mobile app, before they're rolled into the cached community-contact blob by the daily refresh.">
+          <label for="layer-field-points">Live Field Visits</label>
           <label class="toggle"><input type="checkbox" id="layer-field-points" checked><span></span></label>
         </div>
-        <div class="layer-row">
-          <label for="layer-points">Survey Points</label>
+        <div class="layer-row" title="Door-knock contact results from the cached blob (CSV uploads + field visits merged in by daily refresh). Circle dots — green=Completed, etc.">
+          <label for="layer-points">Community Contacts</label>
           <label class="toggle"><input type="checkbox" id="layer-points"><span></span></label>
         </div>
         <div class="layer-row">
@@ -472,7 +472,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 
         <!-- Heatmap controls (shows when heatmap is on) -->
         <div class="layer-legend" id="heatmap-legend" style="display:none;margin-top:10px;padding:8px 0">
-          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">HEATMAP: Survey Point Density</div>
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">HEATMAP: Community Contact Density</div>
           <!-- Status filter -->
           <div style="margin-bottom:8px">
             <label style="font-size:11px;color:var(--text2)">Show Status</label>
@@ -514,7 +514,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
             <div id="heat-gradient-bar" style="flex:1;height:10px;border-radius:5px;background:linear-gradient(to right,rgba(0,0,0,0),#3b82f6,#06b6d4,#10b981,#f59e0b,#ef4444)"></div>
             <span style="font-size:10px;color:var(--text2)">High</span>
           </div>
-          <div style="font-size:10px;color:var(--muted);margin-top:4px">Kernel density of survey points per area</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">Kernel density of community contacts per area</div>
         </div>
 
         <!-- Cluster controls (shows when clusters are on) -->
@@ -549,9 +549,9 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 
       <!-- IAQ Survey Layer (shown after IAQ data upload) -->
       <div class="sidebar-section iaq-section" id="iaq-sidebar-section">
-        <div class="sidebar-title">IAQ Survey Points</div>
-        <div class="layer-row">
-          <label for="layer-iaq">IAQ Points (Risk)</label>
+        <div class="sidebar-title">Qualtric IAQ Survey</div>
+        <div class="layer-row" title="Qualtric survey responses, classified by IAQ risk tier. Diamond markers — green=low, amber=medium, red=high.">
+          <label for="layer-iaq">Qualtric IAQ Survey (Risk)</label>
           <label class="toggle"><input type="checkbox" id="layer-iaq"><span></span></label>
         </div>
         <div class="layer-row">
@@ -628,10 +628,10 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         </div>
       </div>
 
-      <!-- Survey Points: unified symbology + status colors + filter -->
+      <!-- Community Contacts: unified symbology + status colors + filter -->
       <div class="sidebar-section">
         <div class="sidebar-title">
-          Survey Point Symbology
+          Community Contact Symbology
           <button class="btn btn-sm" id="legend-reset" style="padding:2px 8px;font-size:10px">Reset Filter</button>
         </div>
 
@@ -696,7 +696,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
         <div class="sidebar-title">Data Sources</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.6">
           <div style="margin-bottom:6px">
-            <span style="color:var(--text2);font-weight:500">Survey Points:</span><br>
+            <span style="color:var(--text2);font-weight:500">Community Contacts:</span><br>
             Your Excel file<br>
             <span style="font-size:10px;opacity:.7">Geocoded via US Census Bureau API</span>
           </div>

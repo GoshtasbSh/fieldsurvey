@@ -1567,7 +1567,7 @@ function onClusterClick(e) {
 
   const html = `<div class="popup-card" style="min-width:220px">
     <div class="popup-header" style="padding-bottom:8px">
-      <h3 style="font-size:13px">${total} Survey Points</h3>
+      <h3 style="font-size:13px">${total} Community Contacts</h3>
       <span style="font-size:11px;color:#64748b">Cluster breakdown by status</span>
     </div>
     <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin:0 16px">${bar}</div>
@@ -3184,7 +3184,7 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
   body.innerHTML = `
     <!-- Data match banner -->
     <div style="background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:16px;margin-bottom:18px">
-      <div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em">Survey Points — Mapping &amp; Geocoding</div>
+      <div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em">Community Contacts — Mapping &amp; Geocoding</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <div style="flex:1;min-width:100px;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 14px;text-align:center">
           <div style="font-size:26px;font-weight:700;font-family:var(--mono)">${_totalMap}</div>

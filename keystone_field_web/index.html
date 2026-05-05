@@ -785,15 +785,15 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
 
       <div class="sb-body">
         <div class="sb-lbl">Map Layers</div>
-        <label class="layer-row">
+        <label class="layer-row" title="Pins you and your team have just collected via this field app (live from Supabase). Rolled into Community Contacts by the daily refresh.">
           <div class="ld" style="background:#38bdf8"></div>
-          <div class="ll">Survey Points</div>
+          <div class="ll">Live Field Visits</div>
           <label class="tgl">
             <input type="checkbox" checked id="tgl-survey" onchange="toggleLayer('survey',this.checked)">
             <div class="tgl-track"></div><div class="tgl-thumb"></div>
           </label>
         </label>
-        <label class="layer-row">
+        <label class="layer-row" title="All door-knock contact results (CSV uploads + past field visits merged in by daily refresh).">
           <div class="ld" style="background:#64748b"></div>
           <div class="ll">Community Contacts</div>
           <label class="tgl">
@@ -801,9 +801,9 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
             <div class="tgl-track"></div><div class="tgl-thumb"></div>
           </label>
         </label>
-        <label class="layer-row">
+        <label class="layer-row" title="Qualtric IAQ survey responses. Diamond markers — green=low risk, amber=medium, red=high.">
           <div class="ld" style="background:#f97316"></div>
-          <div class="ll">IAQ Points</div>
+          <div class="ll">Qualtric IAQ Survey</div>
           <label class="tgl">
             <input type="checkbox" id="tgl-iaq" onchange="toggleLayer('iaq',this.checked)">
             <div class="tgl-track"></div><div class="tgl-thumb"></div>
@@ -1070,7 +1070,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </div>
         <div class="export-lbl">
-          <div class="export-lbl-title">Survey Points (CSV)</div>
+          <div class="export-lbl-title">Field Visits (CSV)</div>
           <div class="export-lbl-sub">All field entries · status &amp; notes</div>
         </div>
         <div class="export-arrow">›</div>
@@ -1122,7 +1122,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
   </div>
   <div class="bs-scroll">
     <div class="bs-header">
-      <div class="bs-title">Register Survey Point</div>
+      <div class="bs-title">Register Field Visit</div>
       <button class="bs-close" id="bs-close">✕</button>
     </div>
     <div class="bs-loc">
@@ -1146,7 +1146,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
       <div class="bs-meta-chip">👤 <strong id="bs-collector">You</strong></div>
       <div class="bs-meta-chip">🕐 <strong id="bs-time">--:--</strong></div>
     </div>
-    <button class="bs-save" id="bs-save">✓ &nbsp;Save Survey Point</button>
+    <button class="bs-save" id="bs-save">✓ &nbsp;Save Field Visit</button>
   </div>
 </div>
 
@@ -1797,7 +1797,7 @@ function openBottomSheet(lngLat) {
 
   const saveBtn = document.getElementById('bs-save');
   saveBtn.classList.remove('saving', 'saved');
-  saveBtn.textContent = '✓  Save Survey Point';
+  saveBtn.textContent = '✓  Save Field Visit';
   saveBtn.disabled = false;
 
   bsOpen = true;
@@ -1810,7 +1810,7 @@ function closeBottomSheet() {
   bsCoords = null;
   _editPointId  = null;
   _editPointLoc = null;
-  document.querySelector('.bs-title').textContent = 'Register Survey Point';
+  document.querySelector('.bs-title').textContent = 'Register Field Visit';
   const saveBtn = document.getElementById('bs-save');
   if (saveBtn) {
     saveBtn.textContent = '✓  Save Survey Point';
@@ -1832,7 +1832,7 @@ function openEditSheet(id) {
   _editPointLoc = [pt.lon, pt.lat];
   bsCoords      = [pt.lon, pt.lat];
 
-  document.querySelector('.bs-title').textContent = 'Edit Survey Point';
+  document.querySelector('.bs-title').textContent = 'Edit Field Visit';
 
   // Coords display
   const latStr = Math.abs(pt.lat).toFixed(5) + '°' + (pt.lat >= 0 ? 'N' : 'S');
