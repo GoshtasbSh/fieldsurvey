@@ -1421,7 +1421,19 @@ function buildSurveyAnswersTab(iaqProps) {
   // respondent, not just the rows they happened to fill out. Skipping
   // empties would obscure the difference between "didn't ask" and
   // "asked, declined to answer".
-  const isAnswered = (v) => !(v == null || v === '');
+  // Qualtrics emits placeholder text when a question's scale labels
+  // were never customised — e.g. "Click to write Scale Point 1",
+  // "Click to write Choice 4". Those are NOT real respondent answers,
+  // so treat them as unanswered. Also filters obvious "no-data"
+  // sentinels (n/a, none, skip) that can leak through CSV cleaning.
+  const _PLACEHOLDER_RE = /^(click to write (scale point|choice)\s*\d*|n\/?a|none|skip(ped)?|no answer|--)$/i;
+  const isAnswered = (v) => {
+    if (v == null) return false;
+    const s = String(v).trim();
+    if (!s) return false;
+    if (_PLACEHOLDER_RE.test(s)) return false;
+    return true;
+  };
   const renderRow = (q, v) => {
     const answered = isAnswered(v);
     const display  = answered ? String(v) : '—';
