@@ -667,17 +667,25 @@ async function initFieldPoints() {
   }
   sbClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
 
-  // Guest-mode gate: a guest surveyor session in sessionStorage means
-  // this device only has ephemeral access (no Supabase auth). Guests
-  // never have access to the desktop dashboard — bounce them back to
-  // the field app so they don't see admin/PI workflows.
+  // Guest-mode handling: a guest surveyor session in sessionStorage gives
+  // ephemeral, time-boxed access. Guests can VIEW the desktop dashboard
+  // read-only — admin/team-only UI (Update Data, Daily Refresh, Team
+  // panel, AI Chat, per-respondent Survey Answers) is hidden by
+  // applyRoleGatedUI() because _myRole='guest' is outside {admin,member}.
+  // (Earlier this path bounced guests to /field/ entirely; that broke
+  // Test 10 — Anon read-only sanity, since there's no truly-anon route
+  // and guests are the closest equivalent.)
+  let isGuestSession = false;
   try {
-    const guest = sessionStorage.getItem('keystone_guest_session');
-    if (guest) {
-      window.location.replace('/field/');
-      return;
+    const guestRaw = sessionStorage.getItem('keystone_guest_session');
+    if (guestRaw) {
+      isGuestSession = true;
+      try {
+        const g = JSON.parse(guestRaw);
+        if (g && g.name) currentDisplayName = `${g.name} (guest)`;
+      } catch { currentDisplayName = 'Guest'; }
     }
-  } catch { /* sessionStorage may be blocked — fall through to session check */ }
+  } catch { /* sessionStorage blocked — fall through */ }
 
   // Identify the user if they have an existing session (cookie/localStorage shared
   // with the field PWA subdomain). Viewer-only is fine — is_mine simply stays false.
@@ -686,18 +694,24 @@ async function initFieldPoints() {
     const { data: { session } } = await sbClient.auth.getSession();
     currentSession = session;
     currentUserId      = session?.user?.id || null;
-    currentDisplayName = session?.user?.user_metadata?.full_name
-      || (session?.user?.email || '').split('@')[0]
-      || 'Teammate';
+    if (!isGuestSession) {
+      currentDisplayName = session?.user?.user_metadata?.full_name
+        || (session?.user?.email || '').split('@')[0]
+        || 'Teammate';
+    }
   } catch (e) { /* ignore */ }
 
   // Bootstrap the user-menu chip + Team modal handlers if signed in.
   if (currentSession?.user) initUserMenu(currentSession.user);
   initTeamModal();
-  // Anon path: initUserMenu is skipped, so refreshMyRole() never fires —
-  // hide admin/member-only UI explicitly so anon viewers don't see
-  // buttons that always 401. _myRole stays null = anon.
-  if (!currentSession?.user) applyRoleGatedUI();
+  // Guest / anon path: initUserMenu is skipped, so refreshMyRole() never
+  // fires. Set _myRole explicitly so applyRoleGatedUI hides admin/team-only
+  // UI; 'guest' label distinguishes from null (true anon) for any future
+  // code that wants to special-case guests.
+  if (!currentSession?.user) {
+    if (isGuestSession) _myRole = 'guest';
+    applyRoleGatedUI();
+  }
 
   // Presence heartbeat (only when authenticated)
   if (currentSession?.user?.id) {

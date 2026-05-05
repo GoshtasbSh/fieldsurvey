@@ -1131,13 +1131,27 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<!-- Auth gate — no session → send to login. Runs BEFORE dashboard.js so we
-     never flash an unauthenticated map. Mobile devices are bounced to the
-     field PWA entry so the login flow lands them on the right app. -->
+<!-- Auth gate — accept Supabase session OR guest session; otherwise send
+     to the login page. Runs BEFORE dashboard.js so we never flash an
+     unauthenticated map. Mobile devices are bounced to the field PWA
+     entry so the login flow lands them on the right app.
+
+     Guests get the desktop dashboard in READ-ONLY mode: dashboard.js's
+     applyRoleGatedUI() hides every admin/team-only control (Update
+     Data, Daily Refresh, Team panel, AI Chat, per-respondent Survey
+     Answers tab) because guests' _myRole stays outside {admin,member}.
+     Server-side endpoints still own the security boundary; this client
+     gate just stops the redirect-to-login loop the auth-only check
+     used to cause for valid guest sessions. -->
 <script>
 (async () => {
   const isMobile = window.innerWidth < 768;
   if (isMobile) { window.location.replace('/keystone_field_web/index.html'); return; }
+  // Guest session present in this tab? Let it through — role-gated UI
+  // hides everything a guest shouldn't see.
+  try {
+    if (sessionStorage.getItem('keystone_guest_session')) return;
+  } catch { /* sessionStorage blocked → fall through to Supabase check */ }
   try {
     const r = await fetch('/api/config', { cache: 'no-store' });
     if (!r.ok) throw new Error('config');
