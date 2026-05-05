@@ -180,6 +180,15 @@ def _run_refresh() -> dict:
     features.extend(new_features)
     merged = {"type": "FeatureCollection", "features": features}
 
+    # Tag every Completed contact / field-as-feature with match_status
+    # (G1 = matched, G2 = contact_only) so the desktop map's stroke
+    # encoding stays correct after the daily-refresh append.
+    try:
+        from _processing import tag_contact_match_status
+        tag_contact_match_status(features)
+    except Exception as e:
+        print(f"[daily-refresh] tag_contact_match_status failed: {e}")
+
     label = f"Daily Update {datetime.now(timezone.utc).date().isoformat()} — {len(new_rows)} new field visits ({len(features)} total)"
 
     # Persist merged blob + version snapshot

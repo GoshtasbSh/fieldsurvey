@@ -744,6 +744,26 @@ def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
     return upgraded
 
 
+def tag_contact_match_status(contact_features: list) -> dict:
+    """Tag each contact with `match_status` so the dashboard's circle
+    stroke can encode the three groups (matched / contact_only / iaq_only).
+    Mirror of api/_processing.py:tag_contact_match_status."""
+    counts = {'matched': 0, 'contact_only': 0}
+    for cf in contact_features:
+        p = cf.get('properties') or {}
+        status = p.get('status')
+        if status == 'Completed':
+            if p.get('has_iaq_survey'):
+                p['match_status'] = 'matched'
+                counts['matched'] += 1
+            else:
+                p['match_status'] = 'contact_only'
+                counts['contact_only'] += 1
+        else:
+            p.pop('match_status', None)
+    return counts
+
+
 def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
                                   fallback_m: float = 30) -> int:
     """
@@ -2103,6 +2123,10 @@ async def lifespan(application):
         except Exception: pass
         n = len(survey_data.get('features', []))
         label = f"Initial Analysis — {n} contacts · {SURVEY_FILE.name}"
+        # Tag match_status so the desktop dashboard's stroke encoding
+        # works from first load — Completed contacts start as G2
+        # (contact_only) until an IAQ upload promotes them to G1.
+        tag_contact_match_status(survey_data.get('features', []))
         await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
         await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n)
         log.info(f"Auto-processed and saved {n} contact points to Supabase as '{label}'")
@@ -2409,6 +2433,10 @@ async def daily_refresh():
                + f" ({n_total} total)")
 
     survey_data = merged
+    # Daily-refresh appends new field-as-features to the blob. Re-tag
+    # the entire merged feature list so newly-added points pick up
+    # G1 / G2 strokes consistently with the rest.
+    tag_contact_match_status(survey_data.get('features', []))
     analysis    = compute_analysis(survey_data, parcels_data)
     await asyncio.to_thread(_sb_save, 'community_contact', survey_data)
     await asyncio.to_thread(_sb_save_version, 'community_contact', survey_data, label, n_total)
@@ -2503,6 +2531,9 @@ async def upload_iaq(file: UploadFile = File(...)):
     if contact_feats and iaq_data.get('features'):
         matches = _match_iaq_to_contacts(iaq_data['features'], contact_feats)
         n_upgraded = _upgrade_contacts_from_iaq(contact_feats, iaq_data['features'], matches)
+        # Always retag — even if nothing upgraded, an existing contact
+        # might have flipped from G2 → G1 and we want the stroke fresh.
+        tag_contact_match_status(contact_feats)
         if n_upgraded:
             survey_data['features'] = contact_feats
             analysis = compute_analysis(survey_data, parcels_data)
@@ -2513,6 +2544,12 @@ async def upload_iaq(file: UploadFile = File(...)):
                                     contact_label, len(contact_feats))
             if analysis:
                 await asyncio.to_thread(_sb_save, 'analysis', analysis)
+
+    # Tag every IAQ feature with G1 (matched) or G3 (iaq_only).
+    for _f in iaq_data.get('features', []):
+        _f['properties']['match_status'] = (
+            'matched' if _f['properties'].get('iaq_matched') else 'iaq_only'
+        )
 
     # Strip raw_address before persisting — it was only needed for address matching.
     # Storing full home addresses of respondents contradicts the anonymisation policy

@@ -751,6 +751,38 @@ def _cos_deg(deg: float) -> float:
     return cos(radians(deg))
 
 
+def tag_contact_match_status(contact_features: list) -> dict:
+    """Tag each contact with `match_status` so the dashboard's circle
+    stroke can encode the three groups (matched / contact_only / iaq_only).
+
+    Rule:
+      - Completed + has_iaq_survey=true → 'matched'   (G1, white stroke)
+      - Completed + has_iaq_survey false → 'contact_only' (G2, amber stroke)
+      - Otherwise → no match_status set (existing styling unchanged)
+
+    Returns counts {'matched': n, 'contact_only': n} for callers that
+    want to log how many of each group exist after a sync. Idempotent —
+    calling twice produces the same result.
+    """
+    counts = {'matched': 0, 'contact_only': 0}
+    for cf in contact_features:
+        p = cf.get('properties') or {}
+        status = p.get('status')
+        if status == 'Completed':
+            if p.get('has_iaq_survey'):
+                p['match_status'] = 'matched'
+                counts['matched'] += 1
+            else:
+                p['match_status'] = 'contact_only'
+                counts['contact_only'] += 1
+        else:
+            # Drop any stale match_status so a downgrade
+            # (Completed → No Answer via re-upload) doesn't leave a
+            # G1/G2 stroke on a dot that's now orange/red anyway.
+            p.pop('match_status', None)
+    return counts
+
+
 def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
                                 matches: dict) -> int:
     upgraded = 0
@@ -1337,6 +1369,16 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     if contact_features and features:
         matches = _match_iaq_to_contacts(features, contact_features)
         n_upgraded = _upgrade_contacts_from_iaq(contact_features, features, matches)
+
+    # Tag every IAQ feature with its match_status group so the desktop
+    # dashboard can render a stroke colour per group (G1=matched white,
+    # G2=contact_only amber, G3=iaq_only purple). The contact side gets
+    # its match_status set during the next call to _tag_contact_match_status
+    # in upload.py, after the upgrade pass mutates has_iaq_survey.
+    for f in features:
+        f['properties']['match_status'] = (
+            'matched' if f['properties'].get('iaq_matched') else 'iaq_only'
+        )
 
     # Strip PII (raw_address) before returning / persisting
     for f in features:

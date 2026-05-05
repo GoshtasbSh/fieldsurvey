@@ -30,7 +30,7 @@ from _lib import (
 from _processing import (
     parse_multipart_file, load_parcel_index,
     process_iaq_bytes, process_survey_bytes, compute_contact_analysis,
-    _apply_iaq_to_field_features, PII_COLS,
+    _apply_iaq_to_field_features, tag_contact_match_status, PII_COLS,
 )
 
 try:
@@ -186,6 +186,12 @@ class handler(BaseHTTPRequestHandler):
             'n_points':  n,
         }).execute()
 
+        # Tag every contact with its match_status (G1/G2 stroke encoding
+        # on the desktop map). Run regardless of whether n_upgraded > 0
+        # — the IAQ upload could have *downgraded* nothing but still
+        # toggled a contact from G2 to G1, and we want the tag fresh.
+        if contact_feats:
+            tag_contact_match_status(contact_feats)
         if n_upgraded and contact_feats:
             updated_contact = {**contact_blob, 'features': contact_feats}
             sb.table('keystone_dashboard_data').upsert(
@@ -320,6 +326,11 @@ class handler(BaseHTTPRequestHandler):
         today = datetime.now(timezone.utc).date().isoformat()
         label = f'Vercel Upload {today} — {n} contacts · {filename}'
         print(f"[upload/survey] processed n={n}")
+
+        # Fresh CSV upload starts with no IAQ tags. Mark every Completed
+        # contact as 'contact_only' so the desktop map shows them with
+        # the amber G2 stroke until the next IAQ upload promotes them.
+        tag_contact_match_status(survey_data.get('features', []))
 
         sb.table('keystone_dashboard_data').upsert(
             {'data_type': 'community_contact', 'payload': survey_data},

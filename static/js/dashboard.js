@@ -161,6 +161,11 @@ async function loadData() {
     parcelsData  = await _safeJson(parRes,    EMPTY_GJ);
     analysisData = await _safeJson(anaRes,    {});
     iaqData      = await _safeJson(iaqPtsRes, EMPTY_GJ);
+    // Backfill match_status on any feature that came from a pre-v3
+    // upload (no server-side tagger had run yet). This makes the new
+    // stroke encoding work without forcing a re-upload.
+    _backfillContactMatchStatus(surveyData);
+    _backfillIaqMatchStatus(iaqData);
     const iaqAnaData = await _safeJson(iaqAnaRes, {});
     if (iaqAnaData.loaded) iaqAnalysis = iaqAnaData;
 
@@ -231,6 +236,8 @@ async function refreshAllData() {
     parcelsData   = await safe(parRes, EMPTY_GJ);
     analysisData  = await safe(anaRes, {});
     iaqData       = await safe(iaqPtsRes, EMPTY_GJ);
+    _backfillContactMatchStatus(surveyData);
+    _backfillIaqMatchStatus(iaqData);
     const iaqAna  = await safe(iaqAnaRes, {});
     if (iaqAna.loaded) iaqAnalysis = iaqAna;
 
@@ -375,15 +382,36 @@ function addLayers() {
     paint: { 'text-color': '#ffffff' },
   });
 
-  // Survey point circles (hidden by default — user uploads or toggles on)
+  // Survey point circles (hidden by default — user uploads or toggles on).
+  //
+  // Stroke encodes the v3 IAQ match-status group (see
+  // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md):
+  //   match_status='matched'      → white  (G1 — contact + Qualtrics)
+  //   match_status='contact_only' → amber  (G2 — Completed but no
+  //                                         Qualtrics; data gap to
+  //                                         investigate)
+  //   anything else (No Answer / Inaccessible / etc. or pre-v3 data)
+  //                                → translucent white (existing look)
+  // G2 also gets a thicker stroke so the amber rim is unmistakable
+  // even at low zoom.
   map.addLayer({
     id: 'survey-points', type: 'circle', source: 'survey',
     layout: { visibility: 'none' },
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 5, 16, 9, 19, 14],
       'circle-color': ['get', 'color'],
-      'circle-stroke-width': 2,
-      'circle-stroke-color': 'rgba(255,255,255,0.5)',
+      'circle-stroke-width': [
+        'match', ['get', 'match_status'],
+        'contact_only', 2.8,
+        'matched',      1.5,
+        2,
+      ],
+      'circle-stroke-color': [
+        'match', ['get', 'match_status'],
+        'contact_only', '#f59e0b',
+        'matched',      '#ffffff',
+        'rgba(255,255,255,0.5)',
+      ],
       'circle-opacity': 0.9,
     },
   });
@@ -1010,6 +1038,33 @@ function switchTeamSubtab(tab) {
   document.getElementById('ttog-chats').classList.toggle('active', tab === 'chats');
   if (tab === 'chats')    { clearChatBadge(); loadTodayMessages(); }
   if (tab === 'activity' && typeof renderPerUserPanel === 'function') renderPerUserPanel();
+}
+
+// ── Match-status backfill (legacy data without v3 server-side tags) ────
+// Sets `match_status` on every feature so the survey-points / iaq-points
+// paint expressions can drive stroke colour by group:
+//   contact: 'matched' (G1) | 'contact_only' (G2) | undefined
+//   iaq:     'matched' (G1) | 'iaq_only' (G3)
+// Idempotent — keeps server-tagged value if already present.
+function _backfillContactMatchStatus(featureCollection) {
+  const feats = featureCollection?.features;
+  if (!Array.isArray(feats)) return;
+  for (const f of feats) {
+    const p = f.properties || (f.properties = {});
+    if (p.match_status) continue;
+    if (p.status === 'Completed') {
+      p.match_status = p.has_iaq_survey ? 'matched' : 'contact_only';
+    }
+  }
+}
+function _backfillIaqMatchStatus(featureCollection) {
+  const feats = featureCollection?.features;
+  if (!Array.isArray(feats)) return;
+  for (const f of feats) {
+    const p = f.properties || (f.properties = {});
+    if (p.match_status) continue;
+    p.match_status = p.iaq_matched ? 'matched' : 'iaq_only';
+  }
 }
 
 function escapeHtml(s) {
@@ -1748,6 +1803,103 @@ function buildUnifiedStatusControls() {
 function buildLegend() {
   // Now handled by buildUnifiedStatusControls
   buildUnifiedStatusControls();
+  updateMatchStatusPanel();
+}
+
+// ── Match-status sidebar panel (G1 / G2 / G3 stroke encoding) ───────────
+//
+// activeMatchFilter:
+//   null            → show all groups (default)
+//   'matched'       → only G1 (white-stroke contacts)
+//   'contact_only'  → only G2 (amber-stroke contacts)
+//   'iaq_only'      → only G3 (purple-stroke IAQ-only)
+//
+// When a filter is active, the OTHER two layers' MapLibre filters are
+// tightened so only the chosen group renders. Clicking the active row
+// again clears the filter back to "show all".
+let activeMatchFilter = null;
+
+function _countMatchGroups() {
+  const counts = { matched: 0, contact_only: 0, iaq_only: 0 };
+  for (const f of (surveyData?.features || [])) {
+    const ms = f.properties?.match_status;
+    if (ms === 'matched' || ms === 'contact_only') counts[ms]++;
+  }
+  for (const f of (iaqData?.features || [])) {
+    if (f.properties?.match_status === 'iaq_only') counts.iaq_only++;
+  }
+  return counts;
+}
+
+function updateMatchStatusPanel() {
+  const c = _countMatchGroups();
+  const setCount = (id, n) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = n.toLocaleString();
+  };
+  setCount('ms-count-matched',      c.matched);
+  setCount('ms-count-contact_only', c.contact_only);
+  setCount('ms-count-iaq_only',     c.iaq_only);
+
+  const rows = document.querySelectorAll('#match-status-rows .match-row');
+  rows.forEach(r => {
+    r.classList.toggle('dimmed',
+      activeMatchFilter !== null && r.dataset.group !== activeMatchFilter);
+    r.style.background = (activeMatchFilter === r.dataset.group)
+      ? 'rgba(56,189,248,.10)' : '';
+  });
+}
+
+function applyMatchStatusFilter() {
+  // Translate activeMatchFilter into MapLibre filter expressions on the
+  // three relevant layers. When the filter is cleared (null), defer to
+  // applyFilters() so the user's existing status / search filter is
+  // restored — never bash setFilter(null) blindly or we'd lose context.
+  const want = activeMatchFilter; // null | 'matched' | 'contact_only' | 'iaq_only'
+
+  if (want === null) {
+    // Restore via the existing status-filter pipeline.
+    if (typeof applyFilters === 'function') applyFilters();
+    const ip = map?.getLayer('iaq-points');
+    if (ip) map.setFilter('iaq-points', null);
+    updateMatchStatusPanel();
+    return;
+  }
+
+  // survey-points layer: G1 + G2 sit here. Filter to the picked group,
+  // or hide entirely if the user picked G3.
+  if (map?.getLayer('survey-points')) {
+    map.setFilter('survey-points',
+      (want === 'matched' || want === 'contact_only')
+        ? ['==', ['get', 'match_status'], want]
+        : ['==', ['get', 'match_status'], '__none__']);
+  }
+  // survey-iaq-risk: G1 only. Hide for non-G1 picks.
+  if (map?.getLayer('survey-iaq-risk')) {
+    map.setFilter('survey-iaq-risk',
+      (want === 'matched')
+        ? ['==', ['get', 'has_iaq_survey'], true]
+        : ['==', ['get', 'match_status'], '__none__']);
+  }
+  // iaq-points: G3 only. Hide for non-G3 picks.
+  if (map?.getLayer('iaq-points')) {
+    map.setFilter('iaq-points',
+      (want === 'iaq_only')
+        ? null
+        : ['==', ['get', 'match_status'], '__none__']);
+  }
+  updateMatchStatusPanel();
+}
+
+function bindMatchStatusRows() {
+  const rows = document.querySelectorAll('#match-status-rows .match-row');
+  rows.forEach(row => {
+    row.addEventListener('click', () => {
+      const g = row.dataset.group;
+      activeMatchFilter = (activeMatchFilter === g) ? null : g;
+      applyMatchStatusFilter();
+    });
+  });
 }
 
 // `activeFilters` is the set of statuses the user wants to SHOW. Empty = show all.
@@ -2247,6 +2399,7 @@ function setupUI() {
   setupUploadZones();
   setupLayerToggles();
   setupParcelColorBy();
+  bindMatchStatusRows();
   setupSymbology();
   initChat();
 }
@@ -2373,8 +2526,9 @@ async function restoreVersion(id, label, type) {
     if (type === 'contact') {
       const pts = await (await fetch('/api/survey-points')).json();
       surveyData = pts;
-      map.getSource('survey')?.setData(pts);
-      map.getSource('survey-clustered')?.setData(pts);
+      _backfillContactMatchStatus(surveyData);
+      map.getSource('survey')?.setData(surveyData);
+      map.getSource('survey-clustered')?.setData(surveyData);
       if (pts.features?.length) {
         map.setLayoutProperty('survey-points', 'visibility', 'visible');
         markStep1Done(); unlockIAQStep();
@@ -2386,6 +2540,7 @@ async function restoreVersion(id, label, type) {
     } else {
       const iaqPts = await (await fetchIaqPoints()).json();
       iaqData = iaqPts;
+      _backfillIaqMatchStatus(iaqData);
       const iaqAna = await (await fetch('/api/analysis?type=iaq')).json();
       if (iaqAna.loaded) iaqAnalysis = iaqAna;
       updateIAQOnMap();
@@ -2426,8 +2581,9 @@ async function runDailyRefresh() {
       // the cron just merged.
       const pts = await (await fetch('/api/survey-points')).json();
       surveyData = pts;
-      map.getSource('survey')?.setData(pts);
-      map.getSource('survey-clustered')?.setData(pts);
+      _backfillContactMatchStatus(surveyData);
+      map.getSource('survey')?.setData(surveyData);
+      map.getSource('survey-clustered')?.setData(surveyData);
       await loadFieldPointsFromServer();
       const ana = await (await fetch('/api/analysis')).json();
       analysisData = ana;
@@ -3250,15 +3406,21 @@ function addIAQLayers() {
     data: iaqUnmatched(iaqData) || { type: 'FeatureCollection', features: [] },
   });
 
-  // Main IAQ points (colored by risk tier)
+  // Main IAQ points (colored by risk tier).
+  //
+  // Stroke encodes group G3 (Qualtrics-only / flyer-respondent
+  // households): purple ring + +1 px radius at zoom ≥ 14 so a flyer
+  // dot is visually distinct from a matched contact even when the
+  // risk-on-contacts overlay is on. See
+  // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
   map.addLayer({
     id: 'iaq-points', type: 'circle', source: 'iaq-source',
     layout: { visibility: 'none' },
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 16, 10, 19, 14],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 14, 9, 16, 11, 19, 15],
       'circle-color': ['get', 'color'],
       'circle-stroke-width': 2.5,
-      'circle-stroke-color': 'rgba(255,255,255,0.7)',
+      'circle-stroke-color': '#8b5cf6',
       'circle-opacity': 0.92,
     },
   });
