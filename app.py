@@ -621,7 +621,7 @@ def _haversine_m(lat1, lon1, lat2, lon2):
 
 
 def _match_iaq_to_contacts(iaq_features: list, contact_features: list,
-                            threshold_m: float = 50) -> dict:
+                            threshold_m: float = 100) -> dict:
     """
     Match each IAQ feature to exactly one community-contact feature.
 
@@ -721,7 +721,7 @@ def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
 
 
 def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
-                                  threshold_m: float = 50) -> int:
+                                  threshold_m: float = 100) -> int:
     """
     Upgrade field survey point status to Completed when an IAQ survey exists
     within threshold_m metres (spatial-only — field points have no address field).

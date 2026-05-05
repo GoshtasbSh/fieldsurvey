@@ -1364,18 +1364,16 @@ function onPointClick(e) {
   // /api/iaq-points strips them server-side anyway, but we hide the
   // tab to avoid showing an empty pane).
   //
-  // Was previously gated additionally on `sp.has_iaq_survey`, which is
-  // only set during IAQ upload's spatial join with a 50 m threshold.
-  // That misses real matches where geocoding put the contact on a
-  // street centroid ~70 m from the respondent's phone-GPS, and never
-  // back-fills CSV contacts modified after the IAQ upload. Now we
-  // accept any IAQ feature within 120 m of the clicked contact —
-  // generous enough to cover normal geocoding offset, tight enough
-  // that the popup doesn't surface a wildly unrelated household.
+  // Survey Answers tab uses the same 100 m threshold the upload-time
+  // contact-IAQ matcher uses (api/_processing.py and app.py both
+  // default to 100). With both paths aligned, a contact that shows
+  // the Survey Answers tab is the SAME contact that was upgraded to
+  // Completed at upload time — no more "tab visible, status still
+  // Follow Up" inconsistency the user flagged.
   const isTeamMember = (typeof _myRole !== 'undefined') &&
                        (_myRole === 'admin' || _myRole === 'member');
   if (isTeamMember) {
-    const iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 120);
+    const iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 100);
     if (iaqFeat && iaqFeat.properties) {
       tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(iaqFeat.properties) });
     }

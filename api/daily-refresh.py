@@ -157,7 +157,7 @@ def _run_refresh() -> dict:
             f_lon, f_lat = ff["geometry"]["coordinates"]
             for iaq_f in iaq_feats:
                 i_lon, i_lat = iaq_f["geometry"]["coordinates"]
-                if haversine_m(f_lat, f_lon, i_lat, i_lon) <= 50:
+                if haversine_m(f_lat, f_lon, i_lat, i_lon) <= 100:
                     ff["properties"]["status"] = "Completed"
                     ff["properties"]["has_iaq_survey"] = True
                     n_iaq_upgraded += 1
