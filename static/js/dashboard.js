@@ -1364,16 +1364,25 @@ function onPointClick(e) {
   // /api/iaq-points strips them server-side anyway, but we hide the
   // tab to avoid showing an empty pane).
   //
-  // Survey Answers tab uses the same 100 m threshold the upload-time
-  // contact-IAQ matcher uses (api/_processing.py and app.py both
-  // default to 100). With both paths aligned, a contact that shows
-  // the Survey Answers tab is the SAME contact that was upgraded to
-  // Completed at upload time — no more "tab visible, status still
-  // Follow Up" inconsistency the user flagged.
+  // v3 (2026-05-05): server-side parcel-rep-point matching has now
+  // stored the matched IAQ's coords on the contact (`iaq_match_lon` /
+  // `iaq_match_lat`). Use those for an O(1)-ish lookup at the exact
+  // coord — no more 100 m radius scan that could pick a neighbour's
+  // Qualtrics response.
+  //
+  // Fall back to a *very* small 5 m search around the contact's own
+  // coord only when the contact predates the v3 match (no
+  // iaq_match_lon set) but somehow has has_iaq_survey=true. After
+  // re-uploading the IAQ CSV this fallback is no longer reachable.
   const isTeamMember = (typeof _myRole !== 'undefined') &&
                        (_myRole === 'admin' || _myRole === 'member');
   if (isTeamMember) {
-    const iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 100);
+    let iaqFeat = null;
+    if (sp.iaq_match_lon != null && sp.iaq_match_lat != null) {
+      iaqFeat = findMatchedIaqFeature(+sp.iaq_match_lon, +sp.iaq_match_lat, 1);
+    } else if (sp.has_iaq_survey) {
+      iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 5);
+    }
     if (iaqFeat && iaqFeat.properties) {
       tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(iaqFeat.properties) });
     }

@@ -146,22 +146,36 @@ def _run_refresh() -> dict:
     features = list(existing.get("features") or [])
     new_features = [f for f in (_field_row_to_feature(r) for r in new_rows) if f is not None]
 
-    # Upgrade new field points that have a Qualtric IAQ survey within 50 m.
+    # Upgrade new field points that have a Qualtric IAQ survey for the
+    # SAME parcel. v3 (2026-05-05): use _processing.load_parcel_index +
+    # _apply_iaq_to_field_features so daily-refresh and upload share the
+    # exact same parcel-aware logic. Falls back to a tight 30 m haversine
+    # if the parcel index can't be built (e.g. cached blob missing).
     iaq_stored = load_cached("iaq_survey") or {}
     iaq_feats = (iaq_stored.get("geojson") or {}).get("features") or []
     n_iaq_upgraded = 0
-    if iaq_feats:
-        for ff in new_features:
-            if ff["properties"].get("status") == "Completed":
-                continue
-            f_lon, f_lat = ff["geometry"]["coordinates"]
-            for iaq_f in iaq_feats:
-                i_lon, i_lat = iaq_f["geometry"]["coordinates"]
-                if haversine_m(f_lat, f_lon, i_lat, i_lon) <= 100:
-                    ff["properties"]["status"] = "Completed"
-                    ff["properties"]["has_iaq_survey"] = True
-                    n_iaq_upgraded += 1
-                    break
+    if iaq_feats and new_features:
+        try:
+            # Late import: keeps the daily-refresh function bundle slim
+            # when the IAQ blob is empty (no upgrade work to do).
+            from _processing import load_parcel_index, _apply_iaq_to_field_features
+            parcel_idx = load_parcel_index()
+            n_iaq_upgraded = _apply_iaq_to_field_features(
+                new_features, iaq_feats, parcel_idx=parcel_idx)
+        except Exception as e:
+            print(f"[daily-refresh] parcel-aware match unavailable ({e}); "
+                  f"falling back to 30 m distance.")
+            for ff in new_features:
+                if ff["properties"].get("status") == "Completed":
+                    continue
+                f_lon, f_lat = ff["geometry"]["coordinates"]
+                for iaq_f in iaq_feats:
+                    i_lon, i_lat = iaq_f["geometry"]["coordinates"]
+                    if haversine_m(f_lat, f_lon, i_lat, i_lon) <= 30:
+                        ff["properties"]["status"] = "Completed"
+                        ff["properties"]["has_iaq_survey"] = True
+                        n_iaq_upgraded += 1
+                        break
 
     features.extend(new_features)
     merged = {"type": "FeatureCollection", "features": features}

@@ -247,7 +247,12 @@ class handler(BaseHTTPRequestHandler):
                     for r in field_rows
                     if r.get('lon') is not None and r.get('lat') is not None
                 ]
-                n_field_upgraded = _apply_iaq_to_field_features(field_feats, iaq_feats)
+                # Pass parcel_idx so the matcher can do parcel-snap →
+                # coord-equality (the v3 GIS-correct path); falls back
+                # to a tight 30 m distance only if the field pin is
+                # outside any parcel.
+                n_field_upgraded = _apply_iaq_to_field_features(
+                    field_feats, iaq_feats, parcel_idx=parcel_idx)
                 upgraded_ids = [
                     ff['properties']['field_point_id']
                     for ff in field_feats

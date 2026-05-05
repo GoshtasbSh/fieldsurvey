@@ -279,9 +279,17 @@ class ParcelIndex:
             self.strtree = _STRtree([g[0] for g in geoms])
             self.geoms_list = geoms
 
-    def snap(self, lon: float, lat: float, max_dist_m: float = 150) -> tuple | None:
+    def snap(self, lon: float, lat: float, max_dist_m: float = 50) -> tuple | None:
         """Find nearest parcel representative_point within max_dist_m m.
-        Returns (lon, lat) inside the parcel, or None."""
+        Returns (lon, lat) inside the parcel, or None.
+
+        Default radius lowered from 150 m → 50 m on 2026-05-05. The 150 m
+        cap was historical and over-attached suburban points to wrong
+        parcels. 50 m ≈ 1.5 lot frontages in Keystone Heights, generous
+        enough for normal Census-API offset, tight enough that two
+        parcels rarely both qualify. Callers that want the looser value
+        can pass it explicitly.
+        """
         if self.strtree is None or not self.geoms_list:
             return None
         search_r = max_dist_m / 111_320
@@ -297,6 +305,21 @@ class ParcelIndex:
                 best_dist = d
                 best = (c_lon, c_lat)
         return best if best_dist <= max_dist_m else None
+
+    def parcel_rep_point(self, lon: float, lat: float,
+                         max_dist_m: float = 50) -> tuple | None:
+        """Canonical-form helper: given any (lon, lat) — geocoded contact,
+        Qualtrics-typed-address result, or door-GPS field pin — return
+        the rep-point of the parcel that should represent this household,
+        or None if no parcel within `max_dist_m`.
+
+        Different from snap() only in intent: snap() is for moving a
+        questionable point to a parcel; parcel_rep_point() is for getting
+        the canonical match key. Both currently use nearest-neighbour
+        with the same geometry; if we later switch to strict
+        point-in-polygon, this helper is the place to change it.
+        """
+        return self.snap(lon, lat, max_dist_m=max_dist_m)
 
     def geocode(self, addr: str) -> tuple:
         """4-tier geocoding (identical to _parcel_geocode in app.py).
@@ -628,7 +651,29 @@ def _address_match(q212: str, lookup: dict) -> tuple:
 # ── IAQ↔Contact matching (identical to app.py) ────────────────────────────────
 
 def _match_iaq_to_contacts(iaq_features: list, contact_features: list,
-                            threshold_m: float = 100) -> dict:
+                            coord_eq_m: float = 1.0) -> dict:
+    """Match IAQ responses to community contacts via parcel-centre coords.
+
+    Three tiers, no distance fallback:
+
+      1. **Address exact** — raw Q212 ↔ contact address after
+         normalisation. Catches typed-address matches.
+      2. **Address fuzzy** — same house number, fuzzy street ≥ 0.70.
+         Catches typos / abbreviations.
+      3. **Parcel rep-point equality** (NEW v3) — both sides have
+         already been geocoded through `parcel_idx.geocode()` which
+         snaps to the parcel's representative_point. Same household =
+         same rep-point (within `coord_eq_m`, default 1 m to absorb
+         rounding noise). This catches cases where the typed addresses
+         differ but both resolved to the same parcel.
+
+    No more radius-based distance fallback. With both sides at parcel
+    centres, "near but different parcel" is a different household and
+    must NOT match. Unmatched IAQ stays unmatched (flyer respondent).
+
+    Returns dict: iaq_index → contact_index. Bipartite (each contact
+    matched at most once).
+    """
     addr_lookup: dict = {}
     by_house: dict = {}
     for ci, cf in enumerate(contact_features):
@@ -638,12 +683,29 @@ def _match_iaq_to_contacts(iaq_features: list, contact_features: list,
             h, c = parsed
             addr_lookup[(h, c)] = ci
             by_house.setdefault(h, []).append((c, ci))
+
+    # Reverse-lookup table: contact rep-point coord → contact index. Used
+    # by tier 3 for O(1) coord equality. Quantised to ~1 m grid cells so
+    # a 6-decimal-place coord pair (lon, lat) lines up across both sides
+    # even with minor float rounding from the geocoder.
+    cell_m = max(coord_eq_m, 1.0)
+    deg_per_m_lat = 1.0 / 111_320.0
+    coord_lookup: dict = {}
+    for ci, cf in enumerate(contact_features):
+        c_lon, c_lat = cf['geometry']['coordinates']
+        deg_per_m_lon = deg_per_m_lat / max(0.05, abs(_cos_deg(c_lat)))
+        kx = round(c_lon / (cell_m * deg_per_m_lon))
+        ky = round(c_lat / (cell_m * deg_per_m_lat))
+        coord_lookup.setdefault((kx, ky), []).append(ci)
+
     used_contacts: set = set()
     matches: dict = {}
     for ii, iaq_f in enumerate(iaq_features):
         q212 = iaq_f['properties'].get('raw_address', '')
         iaq_lon, iaq_lat = iaq_f['geometry']['coordinates']
         matched_ci = None
+
+        # Tier 1 + 2: address-based.
         if q212:
             parsed = _parse_addr_parts(q212)
             if parsed:
@@ -660,21 +722,33 @@ def _match_iaq_to_contacts(iaq_features: list, contact_features: list,
                             best_sc, best_ci = sc, ci
                     if best_sc >= 0.70 and best_ci is not None:
                         matched_ci = best_ci
+
+        # Tier 3 (NEW): parcel rep-point equality. Both IAQ and contact
+        # were geocoded through the same parcel-snap pipeline, so the
+        # same household resolves to the same coord. Quantise to a
+        # ~1 m grid for the equality check.
         if matched_ci is None:
-            best_d, best_ci = float('inf'), None
-            for ci, cf in enumerate(contact_features):
+            deg_per_m_lon = deg_per_m_lat / max(0.05, abs(_cos_deg(iaq_lat)))
+            kx = round(iaq_lon / (cell_m * deg_per_m_lon))
+            ky = round(iaq_lat / (cell_m * deg_per_m_lat))
+            for ci in coord_lookup.get((kx, ky), []):
                 if ci in used_contacts:
                     continue
-                c_lon, c_lat = cf['geometry']['coordinates']
-                d = _haversine_m(iaq_lat, iaq_lon, c_lat, c_lon)
-                if d < best_d:
-                    best_d, best_ci = d, ci
-            if best_d <= threshold_m and best_ci is not None:
-                matched_ci = best_ci
+                c_lon, c_lat = contact_features[ci]['geometry']['coordinates']
+                if _haversine_m(iaq_lat, iaq_lon, c_lat, c_lon) <= coord_eq_m:
+                    matched_ci = ci
+                    break
+
         if matched_ci is not None:
             matches[ii] = matched_ci
             used_contacts.add(matched_ci)
     return matches
+
+
+def _cos_deg(deg: float) -> float:
+    """Cosine of degrees, clamped to avoid div/0 near the poles."""
+    from math import cos, radians
+    return cos(radians(deg))
 
 
 def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
@@ -684,6 +758,7 @@ def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
         cf = survey_feats[contact_idx]
         iaq_f = iaq_features[iaq_idx]
         ip = iaq_f['properties']
+        ig = iaq_f['geometry']['coordinates']
         cf['properties']['status']           = 'Completed'
         cf['properties']['color']            = STATUS['Completed']
         cf['properties']['has_iaq_survey']   = True
@@ -692,38 +767,82 @@ def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
         cf['properties']['iaq_health_score'] = ip.get('health_score', 0)
         cf['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
         cf['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+        # Store the matched IAQ's parcel-rep-point on the contact so the
+        # popup can do an O(1) lookup of the IAQ feature for the Survey
+        # Answers tab without a fresh spatial search. Replaces the old
+        # 100m findMatchedIaqFeature scan that produced wrong answers
+        # when two parcels were within 100m of each other.
+        cf['properties']['iaq_match_lon']    = ig[0]
+        cf['properties']['iaq_match_lat']    = ig[1]
         iaq_f['properties']['iaq_matched'] = True
         upgraded += 1
     return upgraded
 
 
 def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
-                                  threshold_m: float = 100) -> int:
+                                  parcel_idx: "ParcelIndex | None" = None,
+                                  fallback_m: float = 30) -> int:
     """
-    Upgrade field survey point status to Completed when an IAQ survey exists
-    within threshold_m metres (spatial-only — field points have no address field).
-    Verbatim port of app.py's _apply_iaq_to_field_features().
-    Returns count of field points upgraded.
+    Upgrade field survey point status to Completed when an IAQ survey
+    exists for the same parcel.
+
+    v3 algorithm (2026-05-05) — parcel-centred, GPS-aware:
+
+      1. **Same-parcel match (preferred):** snap the field pin's
+         door-GPS to its parcel rep-point via parcel_idx.snap(). Look
+         up an IAQ feature whose coords equal that rep-point (within
+         1 m). Same parcel = same household.
+
+      2. **Distance fallback (`fallback_m`, default 30 m):** when a
+         parcel index isn't provided OR the field pin is outside any
+         parcel (curb-side reading, GPS error). Conservative threshold
+         — 30 m ≈ one suburban lot frontage, won't cross property
+         lines in normal cases.
+
+    Returns the count of field points upgraded.
     """
+    if not iaq_features:
+        return 0
     upgraded = 0
     for ff in field_features:
         if ff['properties'].get('status') == 'Completed':
             continue
         f_lon, f_lat = ff['geometry']['coordinates']
-        for iaq_f in iaq_features:
-            i_lon, i_lat = iaq_f['geometry']['coordinates']
-            if _haversine_m(f_lat, f_lon, i_lat, i_lon) <= threshold_m:
-                ip = iaq_f['properties']
-                ff['properties']['status']           = 'Completed'
-                ff['properties']['color']            = STATUS['Completed']
-                ff['properties']['has_iaq_survey']   = True
-                ff['properties']['iaq_overall_risk'] = ip.get('overall_risk', 0)
-                ff['properties']['iaq_risk_tier']    = ip.get('risk_tier', '')
-                ff['properties']['iaq_health_score'] = ip.get('health_score', 0)
-                ff['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
-                ff['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
-                upgraded += 1
-                break
+        match_iaq = None
+
+        # Tier 1: parcel-snap the field pin, look up matching IAQ.
+        if parcel_idx is not None:
+            f_parcel = parcel_idx.parcel_rep_point(f_lon, f_lat, max_dist_m=50)
+            if f_parcel is not None:
+                p_lon, p_lat = f_parcel
+                for iaq_f in iaq_features:
+                    i_lon, i_lat = iaq_f['geometry']['coordinates']
+                    if _haversine_m(p_lat, p_lon, i_lat, i_lon) <= 1.0:
+                        match_iaq = iaq_f
+                        break
+
+        # Tier 2: conservative distance fallback (no parcel context).
+        if match_iaq is None:
+            for iaq_f in iaq_features:
+                i_lon, i_lat = iaq_f['geometry']['coordinates']
+                if _haversine_m(f_lat, f_lon, i_lat, i_lon) <= fallback_m:
+                    match_iaq = iaq_f
+                    break
+
+        if match_iaq is not None:
+            ip = match_iaq['properties']
+            ig = match_iaq['geometry']['coordinates']
+            ff['properties']['status']           = 'Completed'
+            ff['properties']['color']            = STATUS['Completed']
+            ff['properties']['has_iaq_survey']   = True
+            ff['properties']['iaq_overall_risk'] = ip.get('overall_risk', 0)
+            ff['properties']['iaq_risk_tier']    = ip.get('risk_tier', '')
+            ff['properties']['iaq_health_score'] = ip.get('health_score', 0)
+            ff['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
+            ff['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+            ff['properties']['iaq_match_lon']    = ig[0]
+            ff['properties']['iaq_match_lat']    = ig[1]
+            upgraded += 1
     return upgraded
 
 
@@ -1130,38 +1249,49 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
         street_name = _extract_street_name(q212) or 'Unknown'
         street_name = _canonicalize_street(street_name, known_streets)
 
-        lat_q = pd.to_numeric(row.get('LocationLatitude'),  errors='coerce')
-        lon_q = pd.to_numeric(row.get('LocationLongitude'), errors='coerce')
-        coord_source = 'gps'
+        # ── ADDRESS-ONLY GEOCODING (v3, 2026-05-05) ───────────────────
+        # The Qualtrics LocationLatitude / LocationLongitude is *where
+        # the respondent submitted the survey*, NOT necessarily their
+        # home: respondents fill from kitchen tables, community centres,
+        # work, friends' houses — anywhere with cell signal. Treating it
+        # as the household coord caused systematic mis-matching against
+        # community contacts.
+        #
+        # Both community contacts and IAQ are now reduced to the same
+        # canonical form: parcel rep-point of the typed address (Q212).
+        # Match becomes deterministic parcel-coord equality, not radius.
+        #
+        # Branches, in priority order:
+        #   1. Q212 matches an existing contact's geocoded coord →
+        #      'address_matched' (uses the contact's already-snapped
+        #      parcel rep-point — guaranteed identical for tier-3 match).
+        #   2. parcel_idx.geocode(Q212) — runs the same 4-tier path that
+        #      community contacts go through (parcel_exact / parcel_fuzzy
+        #      / Census API + parcel_snap / Census-only).
+        #   3. None of the above → drop. Logged. Most likely a flyer
+        #      respondent who left Q212 blank or typed something we
+        #      can't parse. Better to drop than to attach to a random
+        #      nearby parcel by GPS.
         coords = None
-
-        if (pd.notna(lat_q) and pd.notna(lon_q) and
-                KH_LAT_MIN <= float(lat_q) <= KH_LAT_MAX and
-                KH_LON_MIN <= float(lon_q) <= KH_LON_MAX):
-            coords = [round(float(lon_q), 6), round(float(lat_q), 6)]
-            snapped = parcel_idx.snap(float(lon_q), float(lat_q), max_dist_m=80)
-            if snapped:
-                coords = [round(snapped[0], 6), round(snapped[1], 6)]
-                coord_source = 'gps_snapped'
-        else:
-            q212_str = ' '.join(str(q212).split()) if q212 else ''
-            if q212_str and q212_str.lower() not in ('', 'ttt', 'nan', 'read to respondent'):
-                lng_m, lat_m, matched_addr, _ = _address_match(q212_str, contact_lookup)
-                if lng_m is not None:
-                    coords = [round(float(lng_m), 6), round(float(lat_m), 6)]
-                    coord_source = 'address_matched'
-                    street_name = _extract_street_name(matched_addr) or street_name
-                else:
-                    lng_g, lat_g, matched, gsrc = parcel_idx.geocode(q212_str)
+        coord_source = 'none'
+        q212_str = ' '.join(str(q212).split()) if q212 else ''
+        if q212_str and q212_str.lower() not in ('', 'ttt', 'nan', 'read to respondent'):
+            lng_m, lat_m, matched_addr, _ = _address_match(q212_str, contact_lookup)
+            if lng_m is not None:
+                coords = [round(float(lng_m), 6), round(float(lat_m), 6)]
+                coord_source = 'address_matched'
+                street_name = _extract_street_name(matched_addr) or street_name
+            else:
+                lng_g, lat_g, matched, gsrc = parcel_idx.geocode(q212_str)
+                if lng_g is not None:
+                    coords = [round(float(lng_g), 6), round(float(lat_g), 6)]
                     coord_source = gsrc
-                    if lng_g is not None:
-                        coords = [round(float(lng_g), 6), round(float(lat_g), 6)]
-                        if street_name == 'Unknown':
-                            street_name = _extract_street_name(matched or '') or 'Unknown'
+                    if street_name == 'Unknown':
+                        street_name = _extract_street_name(matched or '') or 'Unknown'
 
         if coords is None:
-            addr_str = ' '.join(str(q212).split()) if q212 else ''
-            print(f"[geocode] FAILED iaq: '{addr_str[:80]}'")
+            addr_str = q212_str
+            print(f"[geocode] FAILED iaq (no Q212 / unparseable): '{addr_str[:80]}'")
             failed_geocodes.append(addr_str[:200])
             continue
 
