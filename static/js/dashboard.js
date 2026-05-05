@@ -1309,64 +1309,116 @@ function findMatchedIaqFeature(lon, lat, maxMeters) {
 // survey_questions) so question text always tracks the canonical Qualtrics
 // labels. Items without a recorded answer are skipped to keep the popup
 // readable.
+// Internal / non-answer fields stripped from the Survey Answers tab.
+// Anything outside this set is treated as a real survey response and
+// rendered (under "Other" if the categorisation list below doesn't
+// claim it). Keeping it as a denylist (rather than an allowlist) means
+// new Qualtrics questions show up automatically without code changes.
+const _IAQ_NON_ANSWER_FIELDS = new Set([
+  // Display / geometry
+  'street_name', 'address', 'color', 'risk_tier',
+  // Scoring (already in Survey Summary tab — would just duplicate)
+  'overall_risk', 'health_score', 'iaq_score', 'struct_score',
+  // Match-status / merge internals
+  'match_status', 'iaq_matched', 'has_iaq_survey',
+  'iaq_match_lon', 'iaq_match_lat',
+  // Qualtrics export metadata
+  'response_id', 'recorded_date', 'recordeddate',
+  'startdate', 'enddate', 'progress', 'duration',
+  'finished', 'distributionchannel', 'userlanguage',
+  'ipaddress', 'locationlatitude', 'locationlongitude',
+  'id',
+  // Contact-side fields that may bleed in via _upgrade_contacts_from_iaq
+  'iaq_overall_risk', 'iaq_health_score', 'iaq_iaq_score', 'iaq_struct_score',
+  'iaq_risk_tier', 'date', 'status', 'notes', 'collector',
+  'collector_id', 'collected_at', 'collector_name', 'has_field_point',
+  'matched_address', 'coord_source', 'second_attempt',
+  'status_detail', 'parcel_id', 'parcel_lon', 'parcel_lat',
+  'source', 'field_point_id', 'coincident_contacts',
+]);
+
+// Question -> category mapping. Keys not listed here fall under "Other"
+// at the bottom of the popup so we never silently drop an answer.
+const _IAQ_CATEGORIES = [
+  ['Health & Symptoms', [
+    'respiratory_ill','asthma_freq','wheeze_freq','headache_freq',
+    'hospital_visit','has_mold','mold_resp_link',
+  ]],
+  ['Housing & Residency', [
+    'years_in_hre','anticipated_stay','mh_skirting','housing_type',
+    'ownership','year_built','safety_env','safety_social',
+    'afford_urgency','afford_strategy',
+  ]],
+  ['Relocation Factors', [
+    'reloc_factor_emp','reloc_factor_aff','reloc_factor_qol',
+    'reloc_factor_fam','reloc_factor_ret','reloc_factor_env',
+    'reloc_factor_inh','reloc_factor_oth',
+  ]],
+  ['Resilience Interventions', [
+    'intv_roof_walls','intv_windows_doors','intv_rain_gardens','intv_hvac',
+    'intv_plumbing_elec','intv_well_septic','intv_ccua_water','intv_fence',
+    'intv_trees_shade','intv_trim_trees','intv_drainage',
+  ]],
+  ['Experiences in HRE', [
+    'exp_flooding','exp_flood_help','exp_extreme_heat','exp_school_change',
+    'exp_law_enf','exp_insurance_loss','exp_well_dry','exp_pests',
+    'exp_water_leaks','exp_loose_animals',
+  ]],
+  ['Well-being & Mobility', [
+    'car_access','hurricane_transport',
+  ]],
+  ['Demographics', [
+    'education','employment','household_size','age','gender','race',
+    'ethnicity','income','marital_status','primary_language',
+  ]],
+];
+
 function buildSurveyAnswersTab(iaqProps) {
-  // Pull canonical question text from the analysis blob (loaded once into
-  // analysisData / iaqAnalysis at boot). Falls back to a humanised key if
-  // the mapping is missing.
+  // Pull canonical question text from the analysis blob (loaded once
+  // into iaqAnalysis at boot). Falls back to a humanised key when the
+  // mapping is missing — that way even brand-new Qualtrics columns
+  // render with a readable label.
   const qtext = (iaqAnalysis?.survey_questions || {});
   const friendly = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-  // Display order: scores first (score-style answers already shown elsewhere),
-  // then residency, safety, affordability, interventions, experiences,
-  // mobility, demographics. Anything else falls under "Other".
-  const order = [
-    ['Health & symptoms', [
-      'respiratory_ill','asthma_freq','wheeze_freq','headache_freq','hospital_visit',
-    ]],
-    ['Residency & housing', [
-      'years_in_hre','anticipated_stay','mh_skirting',
-      'safety_env','safety_social','afford_urgency','afford_strategy',
-    ]],
-    ['Relocation factors', [
-      'reloc_factor_emp','reloc_factor_aff','reloc_factor_qol','reloc_factor_fam',
-      'reloc_factor_ret','reloc_factor_env','reloc_factor_inh','reloc_factor_oth',
-    ]],
-    ['Resilience interventions', [
-      'intv_roof_walls','intv_windows_doors','intv_rain_gardens','intv_hvac',
-      'intv_plumbing_elec','intv_well_septic','intv_ccua_water','intv_fence',
-      'intv_trees_shade','intv_trim_trees','intv_drainage',
-    ]],
-    ['Experiences in HRE', [
-      'exp_flooding','exp_flood_help','exp_extreme_heat','exp_school_change',
-      'exp_law_enf','exp_insurance_loss','exp_well_dry','exp_pests',
-      'exp_water_leaks','exp_loose_animals',
-    ]],
-    ['Well-being & mobility', ['car_access','hurricane_transport']],
-    ['Demographics', ['education','employment','ownership']],
-  ];
+  // Build the field -> category index for O(1) lookup
+  const keyCat = new Map();
+  _IAQ_CATEGORIES.forEach(([title, keys]) => keys.forEach(k => keyCat.set(k, title)));
 
-  const sections = order.map(([title, fields]) => {
-    const rows = fields
-      .map(k => {
-        const v = iaqProps?.[k];
-        // Skip only truly empty answers — keep legitimate "no" / boolean false
-        // (e.g., a respondent who has no respiratory illness should still
-        // appear in the popup with that answer rendered).
-        if (v == null || v === '') return '';
-        const q = qtext[k] || friendly(k);
-        return `<div class="popup-row" style="align-items:flex-start">
-          <span class="popup-label" style="max-width:55%;font-size:10px;line-height:1.3" title="${escapeHtml(q)}">${escapeHtml(q.length > 70 ? q.slice(0, 67) + '…' : q)}</span>
-          <span class="popup-value" style="max-width:45%;text-align:right;font-size:11px">${escapeHtml(String(v))}</span>
-        </div>`;
-      })
-      .filter(Boolean)
-      .join('');
-    return rows
-      ? `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
-          <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${title}</div>
-          ${rows}
-        </div>`
-      : '';
+  // Walk EVERY property on the feature, partition by category, and
+  // skip only internal / non-answer fields. This means newly-added
+  // Qualtrics questions show up automatically (under "Other") without
+  // requiring a code change.
+  const grouped = {};
+  for (const k of Object.keys(iaqProps || {})) {
+    if (_IAQ_NON_ANSWER_FIELDS.has(k)) continue;
+    if (k.startsWith('_')) continue; // private / internal convention
+    const v = iaqProps[k];
+    if (v == null || v === '') continue;
+    const cat = keyCat.get(k) || 'Other';
+    (grouped[cat] = grouped[cat] || []).push([k, v]);
+  }
+
+  // Render in canonical order; "Other" goes last so unknown questions
+  // are visible but don't disrupt the curated section order.
+  const renderOrder = [..._IAQ_CATEGORIES.map(([t]) => t), 'Other'];
+  const sections = renderOrder.map(title => {
+    const items = grouped[title];
+    if (!items || !items.length) return '';
+    const rows = items.map(([k, v]) => {
+      const q = qtext[k] || friendly(k);
+      return `<div class="popup-row" style="align-items:flex-start;gap:8px;padding:3px 0">
+        <span class="popup-label" style="max-width:58%;font-size:10.5px;line-height:1.35;color:var(--text2);font-weight:400" title="${escapeHtml(q)}">${escapeHtml(q.length > 90 ? q.slice(0, 87) + '…' : q)}</span>
+        <span class="popup-value" style="max-width:42%;text-align:right;font-size:11px;color:var(--text);font-weight:500">${escapeHtml(String(v))}</span>
+      </div>`;
+    }).join('');
+    // Category headers: cyan accent (var(--accent) = #22d3ee) so they
+    // visually separate from question text (var(--text2)) and answer
+    // values (var(--text)). Three-tier hierarchy: header > question > value.
+    return `<div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(34,211,238,.15)">
+      <div style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">${escapeHtml(title)}</div>
+      ${rows}
+    </div>`;
   }).filter(Boolean).join('');
 
   if (!sections) {
@@ -1376,7 +1428,11 @@ function buildSurveyAnswersTab(iaqProps) {
       </p>
     </div>`;
   }
-  return `<div class="popup-body" style="max-height:280px;overflow-y:auto">
+  // Top scoreboard repeats the Survey Summary numbers for at-a-glance
+  // context (the user might land on this tab without seeing the
+  // Summary tab). Section list is scrollable so a long Qualtrics
+  // export doesn't overflow the popup.
+  return `<div class="popup-body" style="max-height:340px;overflow-y:auto;padding-right:4px">
     <div class="popup-row">
       <span class="popup-label">Risk score</span>
       <span class="popup-value" style="font-family:var(--mono)"><strong>${Number(iaqProps.overall_risk) || 0}</strong>/100 · ${escapeHtml(iaqProps.risk_tier || '—')}</span>
@@ -1518,15 +1574,22 @@ function onPointClick(e) {
 }
 
 function onParcelClick(e) {
-  // Don't open parcel popup if a survey point was also clicked.
-  // Include `survey-iaq-risk` since dedup hides matched contacts from
-  // `survey-points` and renders them only on the IAQ-risk layer.
-  const pointLayers = ['survey-points', 'survey-iaq-risk']
-    .filter(l => map.getLayer(l));
+  // Don't open a second parcel popup when ANY contact / IAQ marker
+  // was clicked at the same pixel. Both the contact (onPointClick)
+  // and IAQ (onIAQPointClick) handlers attach the parcel as their
+  // own "Parcel Data (FL DOR)" tab, so a separate parcels-fill popup
+  // would just duplicate that info. Includes the IAQ symbol layers
+  // (iaq-points = G3 house-with-wifi, iaq-points-g1 = G1 plain house,
+  // iaq-highlighted = street-highlight halo) so a click on a Qualtric-
+  // only marker no longer triggers a second popup.
+  const pointLayers = [
+    'survey-points', 'survey-iaq-risk',
+    'iaq-points', 'iaq-points-g1', 'iaq-highlighted',
+  ].filter(l => map.getLayer(l));
   const pointFeats = pointLayers.length
     ? map.queryRenderedFeatures(e.point, { layers: pointLayers })
     : [];
-  if (pointFeats.length > 0) return; // let onPointClick handle it
+  if (pointFeats.length > 0) return; // let the marker handler own it
 
   const f = e.features[0];
   const pp = f.properties;
