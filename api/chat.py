@@ -37,25 +37,25 @@ contacts: Completed=done · No Answer=nobody home · Inaccessible=locked/dog/gat
   Not Interested=declined · Left Info=QR/flyer · Vacant=empty · Follow Up=will complete later
 
 MAP ACTIONS (all layers auto-cleared before each response; activate only what was asked):
-highlight_streets {{streets:["Exact"],color:"#hex"}}  — OSM road line only (NO circles/points); pair with zoom_to_street; accepts multiple streets
+highlight_streets {streets:["Exact"],color:"#hex"}  — OSM road line only (NO circles/points); pair with zoom_to_street; accepts multiple streets
   color MUST reflect the query context — pick from:
     worst health/risk → "#ef4444"  (red)
     worst structural/age → "#f97316"  (orange)
     worst IAQ/mold → "#8b5cf6"  (purple)
     best/safest → "#10b981"  (green)
     neutral comparison → "#3b82f6"  (blue)
-zoom_to_street {{street:"Exact"}}  — always with highlight_streets
-filter_iaq_symptom {{field,values}}  — auto-shows iaq_points
+zoom_to_street {street:"Exact"}  — always with highlight_streets
+filter_iaq_symptom {field,values}  — auto-shows iaq_points
   respiratory_ill|asthma_freq|wheeze_freq|headache_freq → ["weekly","month","season"]
   has_mold→[true] · hospital_visit→["yes"] · ownership→["Owner"/"Renter"]
   risk_tier→["High"/"Medium"/"Low"] · housing_type→["Single Wide"/"Double Wide"/"Site Built"]
   coord_source→["geocoded"]
-filter_contact_status {{statuses:[...]}}  — auto-shows contact_survey
+filter_contact_status {statuses:[...]}  — auto-shows contact_survey
   "Completed"|"No Answer"|"Inaccessible"|"Not Interested"|"Left Info"|"Vacant"|"Follow Up" · []=all
-show_iaq_choropleth {{field}}  — auto-shows iaq_points | overall_risk|health_score|iaq_score|struct_score
-set_layer_visibility {{layer,visible}}  — extras only: heatmap|parcels|clusters|labels|3d
+show_iaq_choropleth {field}  — auto-shows iaq_points | overall_risk|health_score|iaq_score|struct_score
+set_layer_visibility {layer,visible}  — extras only: heatmap|parcels|clusters|labels|3d
 clear_filters  — restore default view (both layers on)
-show_analysis_tab {{tab}}  — summary|charts|streets|parcels|results
+show_analysis_tab {tab}  — summary|charts|streets|parcels|results
 
 PATTERNS:
 worst street (overall) → highlight_streets([risk_rank=1 name], color="#ef4444") + zoom_to_street + detailed report
@@ -374,11 +374,18 @@ class handler(BaseHTTPRequestHandler):
 
         street_stats = ctx.pop("_street_stats_all", {})
 
-        system = (CHAT_SYSTEM_PROMPT + TEXT_ACTION_PROTOCOL).format(
-            n_iaq=ctx["dataset"]["n_surveyed"],
-            n_contact=ctx["dataset"]["n_community_contacts"],
-            map_state=map_state,
-            data=json.dumps(ctx, separators=(",", ":")),
+        # Use manual .replace() instead of .format() — TEXT_ACTION_PROTOCOL
+        # is full of JSON-style examples like {"type":"highlight_streets",...}
+        # which .format() interprets as format placeholders and explodes
+        # with KeyError: '"type"'. Double-brace-escaping every example
+        # would be lossy and a maintenance hazard; .replace() is exact.
+        system = (CHAT_SYSTEM_PROMPT + TEXT_ACTION_PROTOCOL)
+        system = (
+            system
+            .replace("{n_iaq}",     str(ctx["dataset"]["n_surveyed"]))
+            .replace("{n_contact}", str(ctx["dataset"]["n_community_contacts"]))
+            .replace("{map_state}", str(map_state))
+            .replace("{data}",      json.dumps(ctx, separators=(",", ":")))
         )
         msgs = [{"role": "system", "content": system}]
         for h in history[-5:]:
