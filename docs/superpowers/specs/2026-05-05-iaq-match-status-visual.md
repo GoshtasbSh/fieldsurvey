@@ -62,26 +62,48 @@ for IAQ).
 | Group | Layer | Stroke colour | Stroke width | Radius modifier |
 |---|---|---|---|---|
 | G1 | `survey-points` | `#ffffff` (white) | 1.5 | — |
-| G2 | `survey-points` | `#f59e0b` (amber) | 2.5 | — |
-| G3 | `iaq-points` | `#8b5cf6` (purple) | 2.0 | +1 px at zoom ≥ 14 |
+| G2 | `survey-points` | `#fde047` (bright yellow) | 2.8 | — |
+| G3 | `iaq-points` | `#22d3ee` (bright cyan) | 2.5 | +1 px at zoom ≥ 14 |
+
+**Why these specific stroke colours:** the contact-status palette already
+uses `#f97316` (No Answer orange) and `#8b5cf6` (Not Interested purple),
+and the IAQ risk-tier palette already uses `#f59e0b` (medium-risk
+amber). An earlier draft used amber for G2 and purple for G3; under
+real usage the rings collided visually with status / risk fills (a
+purple-stroked medium-risk IAQ dot looked identical to a Not Interested
+contact pin). The current pair (yellow `#fde047` + cyan `#22d3ee`) is
+chosen so the rim never matches any status or risk-tier fill, regardless
+of what's underneath.
 
 Other contact statuses (No Answer / Inaccessible / etc.) keep current
 strokes unchanged. The G1/G2 distinction only applies to the green
 "Completed" subset.
 
-MapLibre paint expression for `survey-points`:
+MapLibre paint expression for `survey-points` (defence-in-depth: require
+both `status='Completed'` AND `match_status` to apply the G1/G2 rim, so
+a stale `match_status` on a contact whose status changed during a
+partial re-upload can't bleed through):
 
 ```js
 'circle-stroke-color': [
-  'match', ['get', 'match_status'],
-  'matched',      '#ffffff',
-  'contact_only', '#f59e0b',
-  /* default */   '#ffffff',
+  'case',
+  ['all',
+    ['==', ['get', 'status'], 'Completed'],
+    ['==', ['get', 'match_status'], 'contact_only']],   '#fde047',
+  ['all',
+    ['==', ['get', 'status'], 'Completed'],
+    ['==', ['get', 'match_status'], 'matched']],        '#ffffff',
+  'rgba(255,255,255,0.5)',
 ],
 'circle-stroke-width': [
-  'match', ['get', 'match_status'],
-  'contact_only', 2.5,
-  /* default */   1.5,
+  'case',
+  ['all',
+    ['==', ['get', 'status'], 'Completed'],
+    ['==', ['get', 'match_status'], 'contact_only']],   2.8,
+  ['all',
+    ['==', ['get', 'status'], 'Completed'],
+    ['==', ['get', 'match_status'], 'matched']],        1.5,
+  2,
 ],
 ```
 
@@ -118,7 +140,7 @@ just makes the underlying state visible at a glance without clicking.
 | `api/_processing.py` | Add `_tag_match_status(contacts, iaq_features)` helper. Call after `_upgrade_contacts_from_iaq` in `process_iaq_bytes`. |
 | `app.py` | Mirror the same helper + call site (local source-of-truth). |
 | `api/daily-refresh.py` | Set `match_status` on appended field-as-features. |
-| `static/js/dashboard.js` | (a) update `survey-points` paint expression to switch stroke by `match_status`; (b) update `iaq-points` paint to use purple stroke + larger radius at zoom; (c) add "Match Status" sidebar block + filter handlers; (d) recompute counts on data refresh. |
+| `static/js/dashboard.js` | (a) update `survey-points` paint expression to switch stroke by `match_status` (yellow `#fde047` for G2); (b) update `iaq-points` paint to use cyan `#22d3ee` stroke + smaller radius so contact pins win the visual stack when stacked; (c) add "Match Status" sidebar block + filter handlers; (d) recompute counts on data refresh. |
 | `static/index.html` | Add the sidebar Match Status section (placeholder div + header). |
 
 ## Edge cases
@@ -136,12 +158,18 @@ just makes the underlying state visible at a glance without clicking.
 
 ## Testing
 
-1. **Re-upload IAQ** → confirm G1 dots (white stroke), G2 dots (amber
-   stroke), G3 dots (purple ring + larger).
-2. **Click an amber dot** → popup shows `Completed` + no Survey Answers
+1. **Re-upload IAQ** → confirm G1 dots (white stroke), G2 dots (yellow
+   stroke), G3 dots (cyan ring).
+2. **Click a yellow dot** → popup shows `Completed` + no Survey Answers
    tab. Confirms G2 is what we think it is.
-3. **Click a purple dot** → popup shows IAQ data only. Confirms G3.
-4. **Sidebar toggle** "Completed, no Qualtrics" → only amber dots remain.
+3. **Click a cyan-ringed dot** → popup shows IAQ data only. Confirms G3.
+4. **Sidebar toggle** "Completed, no Qualtrics" → only yellow-ringed
+   dots remain.
+5. **Visual collision check**: a medium-risk IAQ-only dot has an orange
+   fill (`#f59e0b`) — confirm its cyan rim is unambiguously different
+   from a No-Answer contact (orange fill `#f97316`, translucent rim).
+   And a Not Interested contact (purple fill `#8b5cf6`) must never
+   render with a cyan rim — only G3 dots get the cyan rim.
 5. **Cross-check with `verify_iaq_matches.py`**: G1 count matches script
    output; G3 count matches the script's "flyer" count.
 

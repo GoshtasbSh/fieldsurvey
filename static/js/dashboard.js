@@ -386,13 +386,13 @@ function addLayers() {
   //
   // Stroke encodes the v3 IAQ match-status group (see
   // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md):
-  //   match_status='matched'      → white  (G1 — contact + Qualtrics)
-  //   match_status='contact_only' → amber  (G2 — Completed but no
-  //                                         Qualtrics; data gap to
-  //                                         investigate)
+  //   match_status='matched'      → white   (G1 — contact + Qualtrics)
+  //   match_status='contact_only' → yellow  (G2 — Completed but no
+  //                                          Qualtrics; data gap to
+  //                                          investigate)
   //   anything else (No Answer / Inaccessible / etc. or pre-v3 data)
   //                                → translucent white (existing look)
-  // G2 also gets a thicker stroke so the amber rim is unmistakable
+  // G2 also gets a thicker stroke so the yellow rim is unmistakable
   // even at low zoom.
   map.addLayer({
     id: 'survey-points', type: 'circle', source: 'survey',
@@ -405,6 +405,14 @@ function addLayers() {
       // against a stale match_status persisting on a contact whose
       // status has since changed (rare but possible during a partial
       // re-upload).
+      //
+      // G2 stroke = #fde047 (bright pure yellow). The earlier amber
+      // #f59e0b was visually too close to the "No Answer" orange
+      // (#f97316) in the status palette — at low zoom and with the
+      // dot stacking that occurs when two CSV rows resolve to the
+      // same parcel, users couldn't tell whether a yellow rim was a
+      // genuine G2 marker or just an orange No-Answer dot leaking.
+      // Pure yellow is unique in the palette.
       'circle-stroke-width': [
         'case',
         ['all',
@@ -419,7 +427,7 @@ function addLayers() {
         'case',
         ['all',
           ['==', ['get', 'status'], 'Completed'],
-          ['==', ['get', 'match_status'], 'contact_only']],   '#f59e0b',
+          ['==', ['get', 'match_status'], 'contact_only']],   '#fde047',
         ['all',
           ['==', ['get', 'status'], 'Completed'],
           ['==', ['get', 'match_status'], 'matched']],        '#ffffff',
@@ -3477,12 +3485,12 @@ function addIAQLayers() {
 
   // Main IAQ points (colored by risk tier).
   //
-  // G3 (Qualtrics-only / flyer respondent) gets a purple stroke. The
+  // G3 (Qualtrics-only / flyer respondent) gets a cyan stroke. The
   // dot is sized SMALLER than survey-points so when a G3 IAQ resolves
   // to coordinates close to a community contact (different parcels but
   // nearby), the contact dot still wins the visual stack — preventing
-  // the "purple ring on Not Interested contact" optical illusion the
-  // user reported. See
+  // the "ring on Not Interested contact" optical illusion the user
+  // reported. See
   // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
   map.addLayer({
     id: 'iaq-points', type: 'circle', source: 'iaq-source',
@@ -3491,7 +3499,14 @@ function addIAQLayers() {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 16, 8, 19, 11],
       'circle-color': ['get', 'color'],
       'circle-stroke-width': 2.5,
-      'circle-stroke-color': '#8b5cf6',
+      // G3 stroke = #22d3ee (bright cyan). The earlier purple #8b5cf6
+      // collided with the "Not Interested" status fill (also #8b5cf6),
+      // making purple-stroked IAQ dots indistinguishable from a
+      // contact pin. Cyan is not in the contact-status palette so the
+      // ring always reads as "IAQ-only" regardless of the dot's risk
+      // colour underneath. See
+      // docs/superpowers/specs/2026-05-05-iaq-match-status-visual.md.
+      'circle-stroke-color': '#22d3ee',
       'circle-opacity': 0.92,
     },
   });
