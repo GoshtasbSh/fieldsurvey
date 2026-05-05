@@ -57,12 +57,52 @@ def _stats(arr):
 
 
 def _load_parcels():
+    """Two sources, in order of preference:
+
+      1. The cached parcels GeoJSON in `keystone_dashboard_data['parcels']`
+         — this is what the live dashboard reads via /api/parcels, so
+         using it guarantees the parcel_stats we compute match what
+         the user actually sees on the map.
+      2. The denormalised `parcels` table populated by
+         scripts/export_parcels_to_supabase.py, used as fallback.
+
+    Each source returns a uniform list of dicts with the keys
+    parcel_id / address / land_use / just_value / living_area /
+    year_built so the stats builder doesn't care which one was used.
+    """
+    # 1. Cached blob (this is the dashboard's actual source today).
+    try:
+        r = sb.table("keystone_dashboard_data").select("payload").eq("data_type", "parcels").execute()
+        payload = r.data[0]["payload"] if r.data else None
+        if payload and isinstance(payload, dict):
+            feats = payload.get("features") or []
+            if feats:
+                rows = []
+                for f in feats:
+                    p = (f.get("properties") or {}) if isinstance(f, dict) else {}
+                    rows.append({
+                        "parcel_id":   p.get("parcel_id"),
+                        "address":     p.get("address"),
+                        "land_use":    p.get("land_use"),
+                        "just_value":  p.get("just_value"),
+                        "living_area": p.get("living_area"),
+                        "year_built":  p.get("year_built"),
+                    })
+                print(f"  source: keystone_dashboard_data['parcels'] cached blob")
+                return rows
+    except Exception as e:
+        print(f"  cached blob read failed: {e}")
+
+    # 2. Fallback: the `parcels` table (export_parcels_to_supabase.py).
     rows, offset, page = [], 0, 1000
     while True:
-        r = (sb.table("parcels")
-              .select("parcel_id,address,land_use,just_value,living_area,year_built")
-              .range(offset, offset + page - 1)
-              .execute())
+        try:
+            r = (sb.table("parcels")
+                  .select("parcel_id,address,land_use,just_value,living_area,year_built")
+                  .range(offset, offset + page - 1)
+                  .execute())
+        except Exception:
+            break
         batch = r.data or []
         if not batch:
             break
@@ -70,6 +110,8 @@ def _load_parcels():
         if len(batch) < page:
             break
         offset += page
+    if rows:
+        print(f"  source: `parcels` table")
     return rows
 
 
@@ -122,7 +164,12 @@ def main():
     print(f"Loaded {len(parcels)} parcels.")
 
     if not parcels:
-        sys.exit("ERROR: parcels table is empty. Run scripts/export_parcels_to_supabase.py first.")
+        sys.exit(
+            "ERROR: no parcels found in keystone_dashboard_data['parcels'] "
+            "or the `parcels` table. Either run app.py locally to ingest the "
+            ".gdb (it auto-saves to keystone_dashboard_data on first load), "
+            "or run scripts/export_parcels_to_supabase.py to populate the table."
+        )
 
     print("Building parcel_stats…")
     ps = _build_parcel_stats(parcels)
