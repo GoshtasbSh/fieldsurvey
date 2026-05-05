@@ -145,15 +145,14 @@ RELOC_FIELDS = (
 )
 
 # Source-question captions for every chart_id rendered in the dashboard.
-# Each entry calls out the Qualtrics column(s) and the SURVEY_QUESTIONS
-# Q-number (= original CSV column index) so analysts can trace any
-# visualisation back to the specific question it summarises. Format
-# convention:
-#     'chart_id': 'CSV-column / QID (Q<idx>, "canonical text") — role'
-# For composites: list each component separated by ' + '.
-# Q-numbers (Q27, Q44, …) are the original CSV column indices stored
-# as the first tuple element in SURVEY_QUESTIONS — the ONLY stable
-# Qualtrics-side identifier this codebase exposes for non-QID columns.
+# Each entry exposes the Qualtrics ImportId (QID) — the stable identifier
+# Qualtrics writes into row 3 of the CSV ({"ImportId":"QIDxxx_n"}). QIDs
+# are unique across survey versions, so every visualisation is traceable
+# to the exact Qualtrics question regardless of column shuffles.
+# Format convention:
+#     'chart_id': 'QID — "canonical text" — role'
+# For composites: list each component QID separated by ' + '.
+# Matrix QIDs use the form QID<base>_<n> where <n> is the matrix row.
 CHART_SOURCES = {
     # ── Overview ─────────────────────────────────────────────────────────────
     'mean_risk':        'derived: 0.35·Health + 0.35·IAQ + 0.30·Structural — Mean Risk composite',
@@ -161,7 +160,7 @@ CHART_SOURCES = {
     'mean_iaq':         'composite IAQ: Mold + Leakage 2_1..4 + Cooling System _1..4 + Cooking',
     'mean_struct':      'composite Structural: QID192 (year built) + QID128 (housing type) + QID141 (condition)',
     'risk_tiers':       'derived from mean_risk — Low <34 / Medium 34–66 / High ≥67',
-    'ownership':        'Ownership (CSV col) — "What is your current housing ownership status?"',
+    'ownership':        'Ownership — "What is your current housing ownership status?"',
     # ── Health ───────────────────────────────────────────────────────────────
     'symptoms':         'symptom prevalence: RespIll + asthma + wheeze + Mold + Hospital Respiratory',
     'respiratory_pct':  'RespIll — "How often does anyone in your home have respiratory illness symptoms?" (Health input)',
@@ -184,23 +183,23 @@ CHART_SOURCES = {
     'unmatched':        'derived: IAQ rows with no community-contact match — data-quality metric',
     'match_rate':       'derived: % of community contacts upgraded by IAQ — data-quality metric',
     # ── Residency & Housing ──────────────────────────────────────────────────
-    'years_in_hre':       'CSV col 27 (Q27) — "How long have you lived in High Ridge Estates? (years)"',
-    'anticipated_stay':   'CSV col 44 (Q44) — "How long do you anticipate continuing to live in your current house?"',
-    'mh_skirting':        'CSV col 42 (Q42) — "If you live in a mobile home, does your home have its skirting intact?"',
-    'safety_env':         'CSV col 56 (Q56) — "Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?"',
-    'safety_social':      'CSV col 57 (Q57) — "Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?"',
-    'afford_urgency':     'CSV col 58 (Q58) — "How would you rate the urgency of having affordable housing in HRE?"',
-    'afford_strategy':    'CSV col 59 (Q59) — "What is the most effective strategy to improve housing affordability in HRE?"',
-    'reloc_factors':      'CSV cols 29–36 (Q29–Q36) matrix — relocation-factor importance (Employment / Affordability / Quality of Life / Family / Retirement / Environment / Inheritance / Other)',
+    'years_in_hre':       'QID12_TEXT — "How long have you lived in High Ridge Estates? (years)"',
+    'anticipated_stay':   'QID47 — "How long do you anticipate continuing to live in your current house?"',
+    'mh_skirting':        'QID100 — "If you live in a mobile home, does your home have its skirting intact?"',
+    'safety_env':         'QID21 — "Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?"',
+    'safety_social':      'QID194 — "Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?"',
+    'afford_urgency':     'QID17 — "How would you rate the urgency of having affordable housing in HRE?"',
+    'afford_strategy':    'QID19 — "What is the most effective strategy to improve housing affordability in HRE?"',
+    'reloc_factors':      'QID181_1..8 matrix — relocation-factor importance (Employment / Affordability / Quality of Life / Family / Retirement / Environment / Inheritance / Other)',
     # ── Community living matrix charts ───────────────────────────────────────
-    'interventions_pct':  'CSV cols 67–77 (Q67–Q77) matrix — % wanting each home-resilience intervention (roof/walls, windows/doors, rain gardens, HVAC, plumbing/elec, well/septic, CCUA water, fence, trees-shade, trim trees, drainage)',
-    'experiences_pct':    'CSV cols 84–93 (Q84–Q93) matrix — % reporting each HRE experience (flooding, flood help, extreme heat, school change, law enforcement, insurance loss, well drying, pests, water leaks, loose animals)',
+    'interventions_pct':  'QID195_1..11 matrix — % wanting each home-resilience intervention (roof/walls, windows/doors, rain gardens, HVAC, plumbing/elec, well/septic, CCUA water, fence, trees-shade, trim trees, drainage). Likert 1–7; counts answers > scale-midpoint as positive.',
+    'experiences_pct':    'QID124_1..10 matrix — % reporting each HRE experience (flooding, flood help, extreme heat, school change, law enforcement, insurance loss, well drying, pests, water leaks, loose animals). Likert 1–7; counts answers > scale-midpoint as positive.',
     # ── Well-being & Mobility ────────────────────────────────────────────────
-    'car_access':         'CSV col 133 (Q133) — "Do you (or your household) own or have regular access to a car?"',
-    'hurricane_transport':'CSV col 134 (Q134) — "During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?"',
+    'car_access':         'QID211 — "Do you (or your household) own or have regular access to a car?"',
+    'hurricane_transport':'QID219 — "During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?"',
     # ── Demographics+ ────────────────────────────────────────────────────────
-    'education':          'CSV col 142 (Q142) — "What is the highest level of education you have completed?"',
-    'employment':         'CSV col 143 (Q143) — "Which best describes your employment status?"',
+    'education':          'QID178 — "What is the highest level of education you have completed?"',
+    'employment':         'QID176 — "Which best describes your employment status?"',
 }
 
 
@@ -1104,15 +1103,29 @@ def _compute_iaq_analysis(features: list) -> dict:
                 out['other'] += 1
         return out
 
-    # Token sets used by _pct_yes / _pct_want. Real Qualtrics matrix
-    # answers in the production export use a mix of literal yes/no,
-    # frequency words (Daily / Weekly / Biweekly / Monthly / Yearly /
-    # Never), and Likert-positive phrasings ("Strongly want", "Somewhat
-    # want", "Strongly agree"), so the predicates have to recognise all
-    # three forms or every Community / Experiences chart renders 0%.
-    # Order matters: NEGATIVE first (so "not interested" / "I don't want"
-    # / "Strongly disagree" / "Never" short-circuit before the positive
-    # patterns trigger on any embedded substring).
+    # Predicates used by _pct_yes / _pct_want. The production Qualtrics
+    # export stores matrix answers as INTEGERS on a Likert scale (1–5,
+    # 1–6, or 1–7 depending on the question — verified against the
+    # actual CSV; column BP _1 ranges 1–7 with most respondents
+    # answering 6 or 7 = "agree" / "strongly want"). Older exports
+    # used text strings ("Strongly want", "Daily", "Weekly", "Yes"),
+    # so the predicates accept BOTH forms or we'd silently zero-out
+    # any survey that uses the other format.
+    #
+    # Numeric rule: pick the per-field max observed value as the scale
+    # ceiling, then count any answer strictly greater than the scale
+    # midpoint as positive. This auto-handles 1–5, 1–6, 1–7, etc.:
+    #   1–5 scale: midpoint 2.5 → counts 3,4,5 (top 60%)
+    #   1–6 scale: midpoint 3.0 → counts 4,5,6 (top 50%)
+    #   1–7 scale: midpoint 3.5 → counts 4,5,6,7 (top 57%)
+    # Strict ≥4 backstop also applies in case the field has too few
+    # numeric responses to detect a scale (n=1 has scale_max=1 →
+    # midpoint 0.5 → would count "1" wrongly).
+    #
+    # Text rule: ordered token sets — NEGATIVE first (so "not
+    # interested" / "Never" short-circuit before any embedded positive
+    # token triggers), then AFFIRM, then FREQUENCY (any non-Never
+    # frequency = "experienced it"), then POSITIVE_WANT.
     _NEGATIVE_TOKENS = (
         'not ', "don't", 'do not', 'never', 'no - ', 'no, ',
         'strongly disagree', 'somewhat disagree', 'disagree',
@@ -1128,52 +1141,64 @@ def _compute_iaq_analysis(features: list) -> dict:
         'occasionally', 'every',
     )
 
-    def _is_negative(v: str) -> bool:
+    def _is_negative_text(v: str) -> bool:
         return any(t in v for t in _NEGATIVE_TOKENS)
 
-    def _pct_yes(field):
-        """Percentage of respondents who reported they have experienced
-        this. Recognises:
-          - explicit 'yes' / 'agree' / 'true'
-          - frequency words (Daily/Weekly/Biweekly/Monthly/Yearly/etc.)
-            — having an experience at any frequency counts as "yes".
-        Negative answers (no/never/disagree/not/don't) short-circuit
-        regardless of any positive token they happen to contain."""
+    def _try_num(v):
+        """Best-effort numeric coercion. Returns float or None."""
+        if v is None:
+            return None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return float(v)
+        s = str(v).strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+
+    def _scale_max(field):
+        """Auto-detect the field's Likert ceiling from the data. Falls
+        back to 5 (most common) when no numeric answers exist."""
+        m = 0
+        for p in props:
+            x = _try_num(p.get(field))
+            if x is not None and x > m:
+                m = x
+        return m if m >= 2 else 5
+
+    def _pct_positive(field, positive_text_tokens):
         if not n:
             return 0.0
+        smax = _scale_max(field)
+        threshold = max(smax / 2.0, 3.5)  # never lenient on 1–5 scale
         hits = 0
         for p in props:
-            v = str(p.get(field, '') or '').lower().strip()
-            if not v:
+            raw = p.get(field)
+            x = _try_num(raw)
+            if x is not None:
+                if x > threshold:
+                    hits += 1
                 continue
-            if _is_negative(v):
+            v = str(raw or '').lower().strip()
+            if not v or _is_negative_text(v):
                 continue
-            if any(t in v for t in _AFFIRM_TOKENS):
-                hits += 1
-                continue
-            if any(t in v for t in _FREQUENCY_TOKENS):
+            if any(t in v for t in positive_text_tokens):
                 hits += 1
         return round(hits / n * 100, 1)
 
+    def _pct_yes(field):
+        """% who reported experiencing this. Numeric: > midpoint
+        of the per-field scale. Text: yes/agree/true OR any frequency
+        word (Daily/Weekly/Biweekly/...). Negative phrases short-circuit."""
+        return _pct_positive(field, _AFFIRM_TOKENS + _FREQUENCY_TOKENS)
+
     def _pct_want(field):
-        """Percentage of respondents who want / would like / agree with
-        an intervention. Recognises:
-          - 'want' / 'would like' / 'yes' / 'agree' / 'true'
-          - Likert positives ('strongly', 'somewhat', 'definitely',
-            'interested')
-        Negative phrases short-circuit before the positive scan."""
-        if not n:
-            return 0.0
-        hits = 0
-        for p in props:
-            v = str(p.get(field, '') or '').lower().strip()
-            if not v:
-                continue
-            if _is_negative(v):
-                continue
-            if any(t in v for t in _POSITIVE_WANT_TOKENS):
-                hits += 1
-        return round(hits / n * 100, 1)
+        """% who want / would like / agree with this intervention.
+        Numeric: > midpoint. Text: want/like/yes/agree + Likert
+        positives (strongly/somewhat/definitely/interested)."""
+        return _pct_positive(field, _POSITIVE_WANT_TOKENS)
 
     yrs_vals = [p['years_in_hre_num'] for p in props
                 if isinstance(p.get('years_in_hre_num'), (int, float))]

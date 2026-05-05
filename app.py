@@ -1074,23 +1074,23 @@ CHART_SOURCES = {
     'unmatched':        'derived: IAQ rows with no community-contact match — data-quality metric',
     'match_rate':       'derived: % of community contacts upgraded by IAQ — data-quality metric',
     # ── Residency & Housing ──────────────────────────────────────────────────
-    'years_in_hre':       'CSV col 27 (Q27) — "How long have you lived in High Ridge Estates? (years)"',
-    'anticipated_stay':   'CSV col 44 (Q44) — "How long do you anticipate continuing to live in your current house?"',
-    'mh_skirting':        'CSV col 42 (Q42) — "If you live in a mobile home, does your home have its skirting intact?"',
-    'safety_env':         'CSV col 56 (Q56) — "Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?"',
-    'safety_social':      'CSV col 57 (Q57) — "Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?"',
-    'afford_urgency':     'CSV col 58 (Q58) — "How would you rate the urgency of having affordable housing in HRE?"',
-    'afford_strategy':    'CSV col 59 (Q59) — "What is the most effective strategy to improve housing affordability in HRE?"',
-    'reloc_factors':      'CSV cols 29–36 (Q29–Q36) matrix — relocation-factor importance (Employment / Affordability / Quality of Life / Family / Retirement / Environment / Inheritance / Other)',
+    'years_in_hre':       'QID12_TEXT — "How long have you lived in High Ridge Estates? (years)"',
+    'anticipated_stay':   'QID47 — "How long do you anticipate continuing to live in your current house?"',
+    'mh_skirting':        'QID100 — "If you live in a mobile home, does your home have its skirting intact?"',
+    'safety_env':         'QID21 — "Do you feel safe in your house in terms of environmental threats (flooding, heatwaves, heavy rain/wind)?"',
+    'safety_social':      'QID194 — "Do you feel safe in your house in terms of social threats (loose pets, concerns about neighbors, etc.)?"',
+    'afford_urgency':     'QID17 — "How would you rate the urgency of having affordable housing in HRE?"',
+    'afford_strategy':    'QID19 — "What is the most effective strategy to improve housing affordability in HRE?"',
+    'reloc_factors':      'QID181_1..8 matrix — relocation-factor importance (Employment / Affordability / Quality of Life / Family / Retirement / Environment / Inheritance / Other)',
     # ── Community living matrix charts ───────────────────────────────────────
-    'interventions_pct':  'CSV cols 67–77 (Q67–Q77) matrix — % wanting each home-resilience intervention (roof/walls, windows/doors, rain gardens, HVAC, plumbing/elec, well/septic, CCUA water, fence, trees-shade, trim trees, drainage)',
-    'experiences_pct':    'CSV cols 84–93 (Q84–Q93) matrix — % reporting each HRE experience (flooding, flood help, extreme heat, school change, law enforcement, insurance loss, well drying, pests, water leaks, loose animals)',
+    'interventions_pct':  'QID195_1..11 matrix — % wanting each home-resilience intervention (roof/walls, windows/doors, rain gardens, HVAC, plumbing/elec, well/septic, CCUA water, fence, trees-shade, trim trees, drainage). Likert 1–7; counts answers > scale-midpoint as positive.',
+    'experiences_pct':    'QID124_1..10 matrix — % reporting each HRE experience (flooding, flood help, extreme heat, school change, law enforcement, insurance loss, well drying, pests, water leaks, loose animals). Likert 1–7; counts answers > scale-midpoint as positive.',
     # ── Well-being & Mobility ────────────────────────────────────────────────
-    'car_access':         'CSV col 133 (Q133) — "Do you (or your household) own or have regular access to a car?"',
-    'hurricane_transport':'CSV col 134 (Q134) — "During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?"',
+    'car_access':         'QID211 — "Do you (or your household) own or have regular access to a car?"',
+    'hurricane_transport':'QID219 — "During hurricanes/disasters, have you experienced transportation problems (e.g., difficulty evacuating)?"',
     # ── Demographics+ ────────────────────────────────────────────────────────
-    'education':          'CSV col 142 (Q142) — "What is the highest level of education you have completed?"',
-    'employment':         'CSV col 143 (Q143) — "Which best describes your employment status?"',
+    'education':          'QID178 — "What is the highest level of education you have completed?"',
+    'employment':         'QID176 — "Which best describes your employment status?"',
 }
 
 
@@ -1443,9 +1443,11 @@ def _compute_iaq_analysis(features):
                 out['other'] += 1
         return out
 
-    # Mirror of api/_processing.py token sets — see that file for the
-    # rationale (must recognise yes/no, frequency words, and Likert
-    # positives or every Community / Experiences chart renders 0%).
+    # Mirror of api/_processing.py — see that file for the rationale.
+    # Production Qualtrics export stores matrix answers as integers
+    # (1–5, 1–6, 1–7 Likert depending on the question). Predicates
+    # accept BOTH numeric (>midpoint) AND text (yes/want/Daily/etc.)
+    # forms or any Community / Experiences chart silently zeros out.
     _NEGATIVE_TOKENS = (
         'not ', "don't", 'do not', 'never', 'no - ', 'no, ',
         'strongly disagree', 'somewhat disagree', 'disagree',
@@ -1461,39 +1463,55 @@ def _compute_iaq_analysis(features):
         'occasionally', 'every',
     )
 
-    def _is_negative(v: str) -> bool:
+    def _is_negative_text(v: str) -> bool:
         return any(t in v for t in _NEGATIVE_TOKENS)
 
-    def _pct_yes(field):
+    def _try_num(v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return float(v)
+        s = str(v).strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+
+    def _scale_max(field):
+        m = 0
+        for p in props:
+            x = _try_num(p.get(field))
+            if x is not None and x > m:
+                m = x
+        return m if m >= 2 else 5
+
+    def _pct_positive(field, positive_text_tokens):
         if not n:
             return 0.0
+        smax = _scale_max(field)
+        threshold = max(smax / 2.0, 3.5)
         hits = 0
         for p in props:
-            v = str(p.get(field, '') or '').lower().strip()
-            if not v:
+            raw = p.get(field)
+            x = _try_num(raw)
+            if x is not None:
+                if x > threshold:
+                    hits += 1
                 continue
-            if _is_negative(v):
+            v = str(raw or '').lower().strip()
+            if not v or _is_negative_text(v):
                 continue
-            if any(t in v for t in _AFFIRM_TOKENS):
-                hits += 1
-                continue
-            if any(t in v for t in _FREQUENCY_TOKENS):
+            if any(t in v for t in positive_text_tokens):
                 hits += 1
         return round(hits / n * 100, 1)
 
+    def _pct_yes(field):
+        return _pct_positive(field, _AFFIRM_TOKENS + _FREQUENCY_TOKENS)
+
     def _pct_want(field):
-        if not n:
-            return 0.0
-        hits = 0
-        for p in props:
-            v = str(p.get(field, '') or '').lower().strip()
-            if not v:
-                continue
-            if _is_negative(v):
-                continue
-            if any(t in v for t in _POSITIVE_WANT_TOKENS):
-                hits += 1
-        return round(hits / n * 100, 1)
+        return _pct_positive(field, _POSITIVE_WANT_TOKENS)
 
     yrs_vals = [p['years_in_hre_num'] for p in props
                 if isinstance(p.get('years_in_hre_num'), (int, float))]
