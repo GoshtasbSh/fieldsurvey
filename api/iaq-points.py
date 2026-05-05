@@ -32,10 +32,11 @@ class handler(BaseHTTPRequestHandler):
             # Auth-gate: any team member (admin or member) may see full answers.
             if require_team_member(self) is None:
                 return  # 401/403 already written
-            json_response(self, 200, data or empty_geojson(),
-                          cache="private, max-age=30")
+            # no-store: blob updates on every IAQ upload; browser cache
+            # of stale data caused "uploaded N but panel shows M" reports.
+            json_response(self, 200, data or empty_geojson(), cache="no-store")
             return
 
         # Anonymous public path: strip SURVEY_ANSWER_FIELDS.
         data = strip_survey_answers(data) if data else empty_geojson()
-        json_response(self, 200, data, cache="public, max-age=30")
+        json_response(self, 200, data, cache="no-store")

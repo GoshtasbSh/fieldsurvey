@@ -209,12 +209,19 @@ async function refreshAllData() {
   const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
 
   try {
+    // Cache-buster query param + `cache: 'no-cache'` on the fetch
+    // options. Belt-and-suspenders so any intermediate proxy / CDN /
+    // browser cache must revalidate. The endpoints themselves now use
+    // Cache-Control: no-store, but adding this on the client side
+    // means we'll be safe even if a future CDN config gets it wrong.
+    const _b = `_=${Date.now()}`;
+    const noCache = { cache: 'no-cache' };
     const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
-      fetch('/api/survey-points'),
-      fetch('/api/parcels'),
-      fetch('/api/analysis'),
+      fetch(`/api/survey-points?${_b}`, noCache),
+      fetch(`/api/parcels?${_b}`, noCache),
+      fetch(`/api/analysis?${_b}`, noCache),
       fetchIaqPoints(),
-      fetch('/api/analysis?type=iaq'),
+      fetch(`/api/analysis?type=iaq&${_b}`, noCache),
     ]);
     const safe = async (res, fb) => {
       if (!res || !res.ok) return fb;

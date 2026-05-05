@@ -64,9 +64,15 @@ class handler(BaseHTTPRequestHandler):
         if is_meta:
             json_response(self, 200, _meta_payload(), cache="no-store")
             return
+        # NB: no-store on analysis endpoints. The data flips on every
+        # CSV upload / daily-refresh, and stale CDN responses produced
+        # confusing "I uploaded 64 but the panel shows 71" reports.
+        # JSON payload is small (<300 KB typical) so the perf hit from
+        # uncached origin reads is negligible vs. the data-correctness
+        # bugs caching introduces here.
         if kind == "iaq":
-            json_response(self, 200, _iaq_analysis_payload(), cache="public, max-age=30")
+            json_response(self, 200, _iaq_analysis_payload(), cache="no-store")
             return
         # default: community-contact analysis
         data = load_cached("analysis") or {}
-        json_response(self, 200, data, cache="public, max-age=30")
+        json_response(self, 200, data, cache="no-store")
