@@ -142,9 +142,19 @@ def _build_context() -> dict:
     street_stats = iaq.get("street_stats") or {}
     survey = load_cached("community_contact") or {"features": []}
 
+    # Coerce mean_risk to a number — it's stored as None for streets with
+    # too few responses, and `-None` throws TypeError on sort. Likewise
+    # ignore any street whose stats dict isn't actually a dict.
+    def _risk(d):
+        v = d.get("mean_risk")
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
     ranked = sorted(
-        [(s, d) for s, d in street_stats.items() if not d.get("insufficient_data")],
-        key=lambda x: -x[1].get("mean_risk", 0),
+        [(s, d) for s, d in street_stats.items()
+         if isinstance(d, dict) and not d.get("insufficient_data")],
+        key=lambda x: -_risk(x[1]),
     )
     worst = ranked[0][0] if ranked else None
     best = ranked[-1][0] if ranked else None
@@ -300,6 +310,20 @@ def _call_groq(messages: list, api_key: str) -> str:
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        try:
+            return self._handle()
+        except Exception as e:
+            # Any uncaught exception below would yield BaseHTTPRequestHandler's
+            # default HTML 500 page, which the dashboard then renders as
+            # "AI chat failed: HTTP 500" with no detail. Catch here so the
+            # client always gets a JSON body it can display.
+            import traceback as _tb
+            print(f"[chat] UNCAUGHT {type(e).__name__}: {e}\n{_tb.format_exc()[:2000]}")
+            json_response(self, 500, {
+                "error": f"{type(e).__name__}: {e}"[:300],
+            })
+
+    def _handle(self):
         # Auth-gate: chat is team-member-only. Anonymous callers cannot
         # drain Groq budget or probe dataset shape.
         if require_team_member(self) is None:
