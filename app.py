@@ -2619,11 +2619,17 @@ async def upload_iaq(file: UploadFile = File(...)):
         # might have flipped from G2 → G1 and we want the stroke fresh.
         # Then dedup at parcel rep-point so co-located contacts collapse
         # to a single dot regardless of how many CSV rows they came from.
+        # Detect whether tag_contact_match_status mutated anything so a
+        # stale 'contact_only' on a now-matched contact gets re-persisted
+        # (otherwise the cached blob keeps the wrong rim forever).
+        pre_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_feats]
         tag_contact_match_status(contact_feats)
+        post_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_feats]
+        tag_changed = pre_tag != post_tag
         pre_dedup_n = len(contact_feats)
         contact_feats = dedup_contacts_at_parcel(contact_feats)
         dedup_dropped = pre_dedup_n - len(contact_feats)
-        if n_upgraded or dedup_dropped:
+        if n_upgraded or dedup_dropped or tag_changed:
             survey_data['features'] = contact_feats
             analysis = compute_analysis(survey_data, parcels_data)
             contact_label = (f"IAQ-merged {_datetime.now(_tz.utc).date().isoformat()} — "

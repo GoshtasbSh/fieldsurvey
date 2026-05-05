@@ -1062,19 +1062,34 @@ function switchTeamSubtab(tab) {
 }
 
 // ── Match-status backfill (legacy data without v3 server-side tags) ────
-// Sets `match_status` on every feature so the survey-points / iaq-points
-// paint expressions can drive stroke colour by group:
-//   contact: 'matched' (G1) | 'contact_only' (G2) | undefined
-//   iaq:     'matched' (G1) | 'iaq_only' (G3)
-// Idempotent — keeps server-tagged value if already present.
+// Re-derives `match_status` on every load from the underlying source of
+// truth so stale server-side tags cannot persist:
+//   contact: 'matched' (G1) when status='Completed' AND has_iaq_survey
+//            'contact_only' (G2) when status='Completed' AND !has_iaq_survey
+//            unset for any other status
+//   iaq:     'matched' (G1) when iaq_matched
+//            'iaq_only' (G3) otherwise
+//
+// Why we re-derive (instead of skipping rows that already have a tag):
+// the cached community-contact blob was written by an older code path
+// that set match_status='contact_only' on first CSV upload (before any
+// IAQ upload). When IAQ was uploaded later, the contact's
+// has_iaq_survey flipped to true but the original match_status='contact_only'
+// stuck in the cache. Result: popup shows "Qualtric matched" (has_iaq_survey=true)
+// while the dot's rim is yellow (match_status='contact_only'). Re-deriving
+// every load makes has_iaq_survey/iaq_matched the single source of truth
+// and lets the cache self-heal without a re-upload.
 function _backfillContactMatchStatus(featureCollection) {
   const feats = featureCollection?.features;
   if (!Array.isArray(feats)) return;
   for (const f of feats) {
     const p = f.properties || (f.properties = {});
-    if (p.match_status) continue;
     if (p.status === 'Completed') {
       p.match_status = p.has_iaq_survey ? 'matched' : 'contact_only';
+    } else {
+      // A non-Completed dot (No Answer / Inaccessible / etc.) must not
+      // carry G1/G2 — strip a stale tag from a prior Completed snapshot.
+      delete p.match_status;
     }
   }
 }
@@ -1083,7 +1098,6 @@ function _backfillIaqMatchStatus(featureCollection) {
   if (!Array.isArray(feats)) return;
   for (const f of feats) {
     const p = f.properties || (f.properties = {});
-    if (p.match_status) continue;
     p.match_status = p.iaq_matched ? 'matched' : 'iaq_only';
   }
 }

@@ -197,12 +197,16 @@ class handler(BaseHTTPRequestHandler):
         # Without this pass, a Completed dot's wider yellow rim pokes
         # out around a stacked Left Info dot at the same parcel.
         dedup_dropped = 0
+        tag_changed = False
         if contact_feats:
+            pre_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_feats]
             tag_contact_match_status(contact_feats)
+            post_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_feats]
+            tag_changed = pre_tag != post_tag
             pre_dedup_n = len(contact_feats)
             contact_feats = dedup_contacts_at_parcel(contact_feats)
             dedup_dropped = pre_dedup_n - len(contact_feats)
-        if (n_upgraded or dedup_dropped) and contact_feats:
+        if (n_upgraded or dedup_dropped or tag_changed) and contact_feats:
             updated_contact = {**contact_blob, 'features': contact_feats}
             sb.table('keystone_dashboard_data').upsert(
                 {'data_type': 'community_contact', 'payload': updated_contact},
