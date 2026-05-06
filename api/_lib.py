@@ -128,6 +128,11 @@ SURVEY_ANSWER_FIELDS = (
     'exp_pests', 'exp_water_leaks', 'exp_loose_animals',
     'car_access', 'hurricane_transport',
     'education', 'employment',
+    # Raw IAQ scorer inputs — per-respondent, kept private like other answers
+    'tired_freq',
+    'leakage_roof', 'leakage_walls', 'leakage_windows', 'leakage_floor',
+    'cooling_central_ac', 'cooling_window_unit', 'cooling_fan', 'cooling_none',
+    'cooking_method',
 )
 
 

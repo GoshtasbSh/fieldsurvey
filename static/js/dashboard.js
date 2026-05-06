@@ -845,7 +845,7 @@ function renderPerUserPanel() {
   const empty  = document.getElementById('team-empty');
   if (!rowsEl) return;
 
-  const midnight = new Date(); midnight.setHours(0,0,0,0);
+  const todayUtc = new Date().toISOString().slice(0, 10);
   const byId = {};
 
   // Seed from presence (so idle-but-signed-in teammates still appear)
@@ -867,7 +867,7 @@ function renderPerUserPanel() {
     const m = byId[key];
     if (!m.name || m.name === 'Teammate') m.name = p.collector || m.name;
     m.total++;
-    if (new Date(p.collected_at) >= midnight) m.today++;
+    if ((p.collected_at || '').slice(0, 10) === todayUtc) m.today++;
     m.statuses[p.status] = (m.statuses[p.status] || 0) + 1;
   }
 
@@ -1364,7 +1364,7 @@ const _IAQ_CATEGORIES = [
   ['Health & Symptoms', [
     'respiratory_ill', 'asthma_freq', 'wheeze_freq',
     'headache_freq', 'tired_freq',
-    'hospital_visit', 'mold_resp_link',
+    'hospital_visit',
   ]],
   ['Indoor Air Quality', [
     'has_mold',
@@ -1401,17 +1401,29 @@ const _IAQ_CATEGORIES = [
   ]],
   ['Demographics', [
     'education', 'employment',
-    'household_size', 'age', 'gender', 'race', 'ethnicity',
-    'income', 'marital_status', 'primary_language',
   ]],
 ];
+
+// Readable labels for raw IAQ scorer fields not in SURVEY_QUESTIONS.
+const _RAW_IAQ_LABELS = {
+  tired_freq:          'How often do you feel tired or fatigued in your home?',
+  leakage_roof:        'Water leakage — Roof',
+  leakage_walls:       'Water leakage — Walls',
+  leakage_windows:     'Water leakage — Windows',
+  leakage_floor:       'Water leakage — Floor',
+  cooling_central_ac:  'Cooling system — Central AC',
+  cooling_window_unit: 'Cooling system — Window unit',
+  cooling_fan:         'Cooling system — Fan only',
+  cooling_none:        'Cooling system — No cooling',
+  cooking_method:      'Cooking fuel / method',
+};
 
 function buildSurveyAnswersTab(iaqProps) {
   // Pull canonical question text from the analysis blob (loaded once
   // into iaqAnalysis at boot). Falls back to a humanised key when the
   // mapping is missing — that way even brand-new Qualtrics columns
   // render with a readable label.
-  const qtext = (iaqAnalysis?.survey_questions || {});
+  const qtext = { ..._RAW_IAQ_LABELS, ...(iaqAnalysis?.survey_questions || {}) };
   const friendly = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const props = iaqProps || {};
 
@@ -1553,7 +1565,7 @@ function attachPopupTabEvents(popup) {
 }
 
 // ── Click handlers ──────────────────────────────────────────────────────────
-function onPointClick(e) {
+async function onPointClick(e) {
   // survey-points and survey-iaq-risk share the same source. When both layers are
   // visible at the same location, MapLibre fires click events for each layer
   // separately — both call this handler. Mark the underlying DOM event so the
@@ -1598,8 +1610,13 @@ function onPointClick(e) {
   // coord only when the contact predates the v3 match (no
   // iaq_match_lon set) but somehow has has_iaq_survey=true. After
   // re-uploading the IAQ CSV this fallback is no longer reachable.
-  const isTeamMember = (typeof _myRole !== 'undefined') &&
-                       (_myRole === 'admin' || _myRole === 'member');
+  // If the user just signed in, _myRole may still be null while refreshMyRole()
+  // is in flight. Wait for it to resolve (max ~3 s) so the Survey Answers tab
+  // is not missed on the very first click after login.
+  if (_myRole === null && sbClient) {
+    await refreshMyRole();
+  }
+  const isTeamMember = _myRole === 'admin' || _myRole === 'member';
   if (isTeamMember) {
     let iaqFeat = null;
     if (sp.iaq_match_lon != null && sp.iaq_match_lat != null) {
@@ -1715,12 +1732,12 @@ function onClusterClick(e) {
     if (!el) return;
     const btn = el.querySelector('.cluster-zoom-btn');
     if (btn) {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         popup.remove();
-        map.getSource('survey-clustered').getClusterExpansionZoom(p.cluster_id, (err, zoom) => {
-          if (err) return;
+        try {
+          const zoom = await map.getSource('survey-clustered').getClusterExpansionZoom(p.cluster_id);
           map.easeTo({ center: coords, zoom: zoom + 1, duration: 500 });
-        });
+        } catch { /* source may have been removed */ }
       });
     }
   }, 50);
@@ -2154,8 +2171,7 @@ function applyFilters() {
 
   // Status filter: show only selected; if nothing selected, no status filter
   if (activeFilters.size > 0) {
-    const shown = [...activeFilters];
-    filter.push(['in', 'status', ...shown]);
+    filter.push(['in', ['get', 'status'], ['literal', [...activeFilters]]]);
   }
 
   // Search filter
@@ -2194,7 +2210,7 @@ function applyFilters() {
   // etc. show ALL contacts of that status, regardless of source.
   if (map.getLayer('field-points-dots')) {
     const fieldFilter = activeFilters.size > 0
-      ? ['all', ['in', 'status', ...activeFilters]]
+      ? ['in', ['get', 'status'], ['literal', [...activeFilters]]]
       : null;
     map.setFilter('field-points-dots', fieldFilter);
     map.setFilter('field-points-glow', fieldFilter);
@@ -2879,7 +2895,14 @@ function setupSymbology() {
   ptStroke.addEventListener('input', () => {
     const v = parseInt(ptStroke.value);
     document.getElementById('pt-stroke-val').textContent = v;
-    map.setPaintProperty('survey-points', 'circle-stroke-width', v);
+    // Rebuild the match-status expression so the G2 yellow-rim encoding is
+    // preserved — a flat override would erase the case expression entirely.
+    map.setPaintProperty('survey-points', 'circle-stroke-width', [
+      'case',
+      ['all', ['==', ['get', 'status'], 'Completed'], ['==', ['get', 'match_status'], 'contact_only']], Math.max(1, v + 0.8),
+      ['all', ['==', ['get', 'status'], 'Completed'], ['==', ['get', 'match_status'], 'matched']], Math.max(0.5, v - 0.5),
+      v,
+    ]);
   });
 
   // ── Unified status controls: color + name + count + filter ──
@@ -3386,9 +3409,9 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
         <tbody>
           ${unmatchedStreetRows.map(([street, d]) => `
             <tr>
-              <td style="font-weight:500">${street}</td>
+              <td style="font-weight:500">${escapeHtml(street)}</td>
               <td style="text-align:center;font-family:var(--mono);color:var(--red)">${d.count}</td>
-              <td style="color:var(--muted)">${d.reasons.join(', ')}</td>
+              <td style="color:var(--muted)">${escapeHtml(d.reasons.join(', '))}</td>
             </tr>`).join('')}
         </tbody>
       </table>` : ''}
@@ -3433,10 +3456,10 @@ function showSummaryPopup(uploadResult, iaqAnaData) {
             const rc = d.mean_risk > 66 ? 'var(--red)' : d.mean_risk > 33 ? 'var(--orange)' : 'var(--green)';
             return `<tr>
               <td style="color:var(--muted);font-family:var(--mono)">${i+1}</td>
-              <td style="font-weight:500">${street}</td>
+              <td style="font-weight:500">${escapeHtml(street)}</td>
               <td style="font-family:var(--mono)">${d.n}</td>
               <td style="font-family:var(--mono);font-weight:700;color:${rc}">${d.mean_risk}</td>
-              <td style="font-size:11px;color:var(--text2)">${concern}</td>
+              <td style="font-size:11px;color:var(--text2)">${escapeHtml(concern)}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -4482,8 +4505,23 @@ function _initResultsCharts(tab, ctx) {
       let imp = 0, n = 0;
       Object.entries(counts).forEach(([k, c]) => {
         n += c;
-        const kl = String(k).toLowerCase();
-        if (kl.includes('important') || kl.includes('very') || kl.includes('high')) imp += c;
+        const kl = String(k).toLowerCase().trim();
+        // Numeric scale: count above midpoint (handles Qualtrics recode exports).
+        const num = parseFloat(k);
+        if (!isNaN(num)) {
+          // Detect scale ceiling from the full counts dict.
+          const allNums = Object.keys(counts).map(parseFloat).filter(x => !isNaN(x));
+          const scaleMax = Math.max(...allNums);
+          if (num > scaleMax / 2) imp += c;
+          return;
+        }
+        // Text labels: exclude anything prefixed with "not" or "not at all".
+        // "Not Important" contains "important" so must be checked first.
+        const isNegative = kl.startsWith('not ') || kl.startsWith('not at');
+        if (!isNegative && (
+          kl.includes('important') || kl === 'very' ||
+          kl.includes('high') || kl.includes('strongly')
+        )) imp += c;
       });
       relocPct[f] = n > 0 ? Math.round(imp / n * 100) : 0;
     });
@@ -4582,14 +4620,23 @@ function clearMapForChatbot() {
 
 async function executeMapActions(actions) {
   if (!actions || !actions.length) return;
-  // Preserve the user's IAQ risk overlay state — clearMapForChatbot() would
-  // silently wipe it. Restore immediately after the clear so chatbot actions
-  // can still override it if they need to. (We probe the wifi G3 sub-layer
-  // since that's the user-facing Qualtric IAQ Survey toggle's representative.)
-  const iaqRiskWasOn = map.getLayer('iaq-points') &&
-    map.getLayoutProperty('iaq-points', 'visibility') !== 'none';
+  // Snapshot every user-controlled layer before clearing so we can restore
+  // them after chatbot actions complete. clearMapForChatbot() hides everything;
+  // the chatbot actions then selectively re-enable what they need.
+  const _layerSnap = {};
+  for (const name of Object.keys(LAYER_DEFS)) {
+    const def = LAYER_DEFS[name];
+    const probeId = Array.isArray(def) ? def[0] : def;
+    try {
+      _layerSnap[name] = map.getLayer(probeId) &&
+        map.getLayoutProperty(probeId, 'visibility') !== 'none';
+    } catch { _layerSnap[name] = false; }
+  }
   clearMapForChatbot();
-  if (iaqRiskWasOn) setLayerVisibility('iaq_risk', true);
+  // Restore all layers the user had on before the chatbot took over.
+  for (const [name, wasOn] of Object.entries(_layerSnap)) {
+    if (wasOn) setLayerVisibility(name, true);
+  }
   for (const action of actions) {
     const { type, params = {} } = action;
     switch (type) {

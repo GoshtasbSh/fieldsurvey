@@ -472,9 +472,9 @@ def _compute_health_score(row) -> int:
 
 def _compute_iaq_score(row) -> int:
     score = 0.0
-    # Normalize column names: Qualtrics sometimes exports \xa0 (no-break space)
-    # instead of regular space. Build a lookup once so both variants resolve.
-    _nr = {str(k).replace('\xa0', ' '): v for k, v in row.items()}
+    # Normalize column names: strip whitespace and replace \xa0 so both
+    # 'Cooking' and 'Cooking ' (Qualtrics trailing space) resolve to the same key.
+    _nr = {str(k).replace('\xa0', ' ').strip(): v for k, v in row.items()}
     mold = _nr.get('Mold')
     if mold and not _isna(mold) and str(mold).strip() not in ('', 'nan'):
         score += 30
@@ -489,7 +489,7 @@ def _compute_iaq_score(row) -> int:
             score += 4
         elif "don't know" in val or 'not applicable' in val:
             score += 2
-    if any(kw in str(_nr.get('Cooking ', '') or '').lower() for kw in ('gas', 'propane')):
+    if any(kw in str(_nr.get('Cooking', '') or '').lower() for kw in ('gas', 'propane')):
         score += 10
     return round(min(score, 100))
 
@@ -1625,32 +1625,47 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
         ownership = 'Owner' if 'owner' in ow_raw else ('Renter' if 'renter' in ow_raw else 'Other')
         raw_addr  = ' '.join(str(q212).split()) if q212 and str(q212).strip().lower() not in (
             '', 'ttt', 'nan', 'read to respondent') else ''
+        # Normalise column names for the IAQ-scorer raw inputs (Qualtrics
+        # sometimes emits non-breaking spaces instead of regular spaces).
+        _row_nr = {str(k).replace('\xa0', ' '): v for k, v in row.items()}
 
         features.append({
             'type': 'Feature',
             'geometry': {'type': 'Point', 'coordinates': coords},
             'properties': {
-                'street_name':     street_name,
-                'health_score':    health,
-                'iaq_score':       iaq,
-                'struct_score':    struct,
-                'overall_risk':    risk,
-                'risk_tier':       tier,
-                'color':           tier_color,
-                'ownership':       ownership,
-                'housing_type':    str(row.get('QID128', '') or ''),
-                'year_built':      str(row.get('QID192', '') or ''),
-                'condition':       str(row.get('QID141', '') or ''),
-                'has_mold':        has_mold,
-                'respiratory_ill': str(row.get('RespIll', '')  or ''),
-                'asthma_freq':     str(row.get('asthma', '')   or ''),
-                'wheeze_freq':     str(row.get('wheeze', '')   or ''),
-                'headache_freq':   str(row.get('Headache', '') or ''),
-                'hospital_visit':  ('yes' if 'yes' in str(
-                    row.get('Hospital Respiratory', '') or '').lower() else 'no'),
-                'coord_source':    coord_source,
-                'raw_address':     raw_addr,
-                'iaq_matched':     False,
+                'street_name':        street_name,
+                'health_score':       health,
+                'iaq_score':          iaq,
+                'struct_score':       struct,
+                'overall_risk':       risk,
+                'risk_tier':          tier,
+                'color':              tier_color,
+                'ownership':          ownership,
+                'housing_type':       str(row.get('QID128', '') or ''),
+                'year_built':         str(row.get('QID192', '') or ''),
+                'condition':          str(row.get('QID141', '') or ''),
+                'has_mold':           has_mold,
+                'respiratory_ill':    str(_row_nr.get('RespIll', '')  or ''),
+                'asthma_freq':        str(_row_nr.get('asthma', '')   or ''),
+                'wheeze_freq':        str(_row_nr.get('wheeze', '')   or ''),
+                'headache_freq':      str(_row_nr.get('Headache', '') or ''),
+                'tired_freq':         str(_row_nr.get('Tired', '')    or ''),
+                'hospital_visit':     ('yes' if 'yes' in str(
+                    _row_nr.get('Hospital Respiratory', '') or '').lower() else 'no'),
+                # Raw IAQ sub-items — stored so the popup can display the
+                # full per-respondent IAQ question set without showing "—".
+                'leakage_roof':       str(_row_nr.get('Leakage 2_1', '')       or ''),
+                'leakage_walls':      str(_row_nr.get('Leakage 2_2', '')       or ''),
+                'leakage_windows':    str(_row_nr.get('Leakage 2_3', '')       or ''),
+                'leakage_floor':      str(_row_nr.get('Leakage 2_4', '')       or ''),
+                'cooling_central_ac': str(_row_nr.get('Cooling System _1', '') or ''),
+                'cooling_window_unit':str(_row_nr.get('Cooling System _2', '') or ''),
+                'cooling_fan':        str(_row_nr.get('Cooling System _3', '') or ''),
+                'cooling_none':       str(_row_nr.get('Cooling System _4', '') or ''),
+                'cooking_method':     str(_row_nr.get('Cooking ', '')           or ''),
+                'coord_source':       coord_source,
+                'raw_address':        raw_addr,
+                'iaq_matched':        False,
                 **survey_extras,
             },
         })
