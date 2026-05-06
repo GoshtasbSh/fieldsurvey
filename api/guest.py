@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+from zoneinfo import ZoneInfo
 import sys
 import pathlib
 
@@ -35,6 +36,10 @@ from _lib import json_response, supabase_admin
 
 
 MAX_BODY_BYTES = 64 * 1024
+LOCAL_TZ = ZoneInfo("America/New_York")
+MAX_CLAIMS_PER_IP_PER_DAY = 12
+MAX_CHAT_MSGS_PER_SESSION_PER_DAY = 250
+MIN_CHAT_SEND_INTERVAL_SEC = 2
 ALLOWED_STATUS = {
     'Completed', 'No Answer', 'Inaccessible', 'Not Interested',
     'Left Info', 'Vacant', 'Follow Up', 'Other', 'Unknown',
@@ -67,8 +72,17 @@ def _name_safe(name: str) -> str:
     return " ".join(s.split())[:80]
 
 
-def _today_utc():
-    return datetime.now(timezone.utc).date()
+def _now_local() -> datetime:
+    return datetime.now(LOCAL_TZ)
+
+
+def _today_local():
+    return _now_local().date()
+
+
+def _local_day_start_utc_iso() -> str:
+    start_local = datetime.combine(_today_local(), datetime.min.time(), tzinfo=LOCAL_TZ)
+    return start_local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _fetch_today_code(sb) -> str | None:
@@ -76,10 +90,10 @@ def _fetch_today_code(sb) -> str | None:
     first hour after UTC midnight (~7–8 PM ET) so evening field work isn't
     cut off the moment the calendar rolls over."""
     try:
-        now_utc = datetime.now(timezone.utc)
-        dates = [now_utc.date().isoformat()]
-        if now_utc.hour == 0:
-            dates.append((now_utc - timedelta(days=1)).date().isoformat())
+        now_local = _now_local()
+        dates = [now_local.date().isoformat()]
+        if now_local.hour == 0:
+            dates.append((now_local - timedelta(days=1)).date().isoformat())
         r = (sb.table("invite_codes")
                .select("code,date")
                .in_("date", dates)
@@ -90,6 +104,56 @@ def _fetch_today_code(sb) -> str | None:
         return (rows[0] or {}).get("code") if rows else None
     except Exception:
         return None
+
+
+def _too_many_claims_today(sb, ip_hash: str) -> bool:
+    if not ip_hash:
+        return False
+    try:
+        r = (sb.table("field_guest_sessions")
+               .select("id", count="exact")
+               .eq("ip_hash", ip_hash)
+               .eq("invite_date", _today_local().isoformat())
+               .execute())
+        count = getattr(r, "count", None) or 0
+        return int(count) >= MAX_CLAIMS_PER_IP_PER_DAY
+    except Exception:
+        return False
+
+
+def _chat_rate_limit(sb, session_id: str) -> tuple[bool, str]:
+    """Return (allowed, reason)."""
+    day_start = _local_day_start_utc_iso()
+    try:
+        rc = (sb.table("team_chat_messages")
+                .select("id", count="exact")
+                .eq("guest_session_id", session_id)
+                .gte("sent_at", day_start)
+                .execute())
+        sent_today = int(getattr(rc, "count", None) or 0)
+        if sent_today >= MAX_CHAT_MSGS_PER_SESSION_PER_DAY:
+            return False, "daily_limit"
+    except Exception:
+        return True, ""
+
+    try:
+        rr = (sb.table("team_chat_messages")
+                .select("sent_at")
+                .eq("guest_session_id", session_id)
+                .order("sent_at", desc=True)
+                .limit(1)
+                .execute())
+        rows = rr.data or []
+        if rows:
+            last = (rows[0].get("sent_at") or "").replace("Z", "+00:00")
+            if last:
+                delta = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+                if delta < MIN_CHAT_SEND_INTERVAL_SEC:
+                    return False, "too_fast"
+    except Exception:
+        return True, ""
+
+    return True, ""
 
 
 _UUID_RE = re.compile(
@@ -216,6 +280,9 @@ class handler(BaseHTTPRequestHandler):
         if not code:
             json_response(self, 400, {"ok": False, "error": "Enter today's invite code."})
             return
+        if _too_many_claims_today(sb, _hash_ip(_get_client_ip(self))):
+            json_response(self, 429, {"ok": False, "error": "Too many claim attempts today. Ask an admin."})
+            return
         today_code = _fetch_today_code(sb)
         if not today_code or today_code.upper() != code:
             json_response(self, 401, {"ok": False, "error": "Invalid or expired invite code. Ask an admin."})
@@ -225,7 +292,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             r = (sb.table("field_guest_sessions").insert({
                 "name":        name,
-                "invite_date": _today_utc().isoformat(),
+                "invite_date": _today_local().isoformat(),
                 "device_ua":   ua,
                 "ip_hash":     ip_h,
             }).execute())
@@ -453,10 +520,10 @@ class handler(BaseHTTPRequestHandler):
     # ── action: chat-list (today's team chat messages) ────────────────
     def _chat_list(self, sb, sess: dict):
         try:
-            today_utc = datetime.now(timezone.utc).date().isoformat()
+            day_start_utc = _local_day_start_utc_iso()
             r = (sb.table("team_chat_messages")
                    .select("id,user_id,display_name,body,sent_at,attachment_url,attachment_type,guest_session_id")
-                   .gte("sent_at", today_utc + "T00:00:00Z")
+                   .gte("sent_at", day_start_utc)
                    .order("sent_at", desc=False)
                    .limit(500)
                    .execute())
@@ -472,10 +539,10 @@ class handler(BaseHTTPRequestHandler):
     def _chat_poll(self, body: dict, sb, sess: dict):
         since = (body.get("since_sent_at") or "").strip()
         try:
-            today_utc = datetime.now(timezone.utc).date().isoformat()
+            day_start_utc = _local_day_start_utc_iso()
             q = (sb.table("team_chat_messages")
                    .select("id,user_id,display_name,body,sent_at,attachment_url,attachment_type,guest_session_id")
-                   .gte("sent_at", today_utc + "T00:00:00Z")
+                   .gte("sent_at", day_start_utc)
                    .order("sent_at", desc=False)
                    .limit(500))
             if since:
@@ -497,6 +564,14 @@ class handler(BaseHTTPRequestHandler):
             return
         if len(text) > 1000:
             text = text[:1000]
+        allowed, reason = _chat_rate_limit(sb, sess["id"])
+        if not allowed:
+            if reason == "daily_limit":
+                msg = "Daily chat limit reached for this guest session."
+            else:
+                msg = "Sending too fast. Please wait a moment."
+            json_response(self, 429, {"ok": False, "error": msg})
+            return
         try:
             r = (sb.table("team_chat_messages").insert({
                 "user_id":          None,

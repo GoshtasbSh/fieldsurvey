@@ -1,11 +1,8 @@
 """GET /api/field-points — live field-collected points as GeoJSON.
 
-Reads field_survey_points via the service-role client so unauthenticated
-viewers (PIs / public dashboard) and viewers who aren't yet in the
-team_members table can still see real-time field activity. RLS on
-field_survey_points itself remains team-member-only for direct PostgREST
-writes; this endpoint is read-only and exposes the same fields the
-field PWA already shares team-wide (location, status, collector name).
+Two access levels:
+  - No auth / guest: notes + collector identifiers stripped.
+  - Team member (Bearer JWT): full properties.
 
 Caching is short (10 s) so dashboards see new pins quickly even if the
 client doesn't have an active Supabase realtime subscription.
@@ -15,10 +12,30 @@ from http.server import BaseHTTPRequestHandler
 import sys
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
-from _lib import supabase_admin, json_response, empty_geojson
+from _lib import supabase_admin, json_response, empty_geojson, _bearer_jwt
 
 PAGE = 1000
 HARD_CAP = 100_000
+
+
+def _is_team_member(jwt: str | None) -> bool:
+    if not jwt:
+        return False
+    from _lib import supabase_anon
+    sb_anon = supabase_anon()
+    sb_adm = supabase_admin()
+    if not sb_anon or not sb_adm:
+        return False
+    try:
+        resp = sb_anon.auth.get_user(jwt)
+        user = getattr(resp, "user", None)
+        uid = getattr(user, "id", None) if user else None
+        if not uid:
+            return False
+        r = sb_adm.table("team_members").select("role").eq("id", uid).limit(1).execute()
+        return bool(r.data)
+    except Exception:
+        return False
 
 
 class handler(BaseHTTPRequestHandler):
@@ -54,6 +71,7 @@ class handler(BaseHTTPRequestHandler):
             json_response(self, 503, {"error": "data unavailable"}, cache="no-store")
             return
 
+        is_member = _is_team_member(_bearer_jwt(self))
         features = []
         for p in rows:
             try:
@@ -67,14 +85,14 @@ class handler(BaseHTTPRequestHandler):
                 "properties": {
                     "id": p.get("id"),
                     "status": p.get("status") or "Unknown",
-                    "notes": p.get("notes") or "",
-                    "collector_id": p.get("collector_id"),
+                    "notes": (p.get("notes") or "") if is_member else "",
+                    "collector_id": p.get("collector_id") if is_member else None,
                     "collector": p.get("collector_name") or "Unknown",
                     # Required so the field-web's pointsToGeoJSON can
                     # mark a guest's own pins as is_mine=true. Without
                     # this, the 30 s polling refresh wiped guest_session_id
                     # from every pin and Edit/Delete buttons disappeared.
-                    "guest_session_id": p.get("guest_session_id"),
+                    "guest_session_id": p.get("guest_session_id") if is_member else None,
                     "collected_at": p.get("collected_at"),
                     "is_field": True,
                 },

@@ -10,6 +10,7 @@ Protected by CRON_SECRET header when called from Vercel's scheduler.
 from http.server import BaseHTTPRequestHandler
 from datetime import datetime, timezone
 import os
+from zoneinfo import ZoneInfo
 
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
@@ -32,6 +33,7 @@ _STATUS_COLORS = {
     "Other":          "#ec4899",
     "Unknown":        "#9ca3af",
 }
+LOCAL_TZ = ZoneInfo("America/New_York")
 
 
 def _compute_analysis(features: list) -> dict:
@@ -193,7 +195,8 @@ def _run_refresh() -> dict:
     except Exception as e:
         print(f"[daily-refresh] tag/dedup failed: {e}")
 
-    label = f"Daily Update {datetime.now(timezone.utc).date().isoformat()} — {len(new_rows)} new field visits ({len(features)} total)"
+    local_day = datetime.now(LOCAL_TZ).date().isoformat()
+    label = f"Daily Update {local_day} — {len(new_rows)} new field visits ({len(features)} total)"
 
     # Persist merged blob + version snapshot
     try:
@@ -278,9 +281,23 @@ def _authorized(handler_obj) -> bool:
 
 class handler(BaseHTTPRequestHandler):
     def _handle(self):
-        if not _authorized(self):
+        cron_ok = _cron_authorized(self)
+        admin_ok = _admin_authorized(self)
+        if not (cron_ok or admin_ok):
             json_response(self, 401, {"error": "unauthorized"})
             return
+        # Cron is scheduled at both 04:00 and 05:00 UTC so DST shifts still
+        # hit local midnight in Florida. Only the invocation that is actually
+        # 00:00 local performs work; the other exits early.
+        if cron_ok and not admin_ok:
+            now_local = datetime.now(LOCAL_TZ)
+            if now_local.hour != 0:
+                json_response(self, 200, {
+                    "refreshed": False,
+                    "reason": "outside Florida local-midnight window",
+                    "local_time": now_local.isoformat(),
+                })
+                return
         try:
             result = _run_refresh()
             json_response(self, 200, result)

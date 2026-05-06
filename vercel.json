@@ -3,10 +3,12 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "crons": [
-    { "path": "/api/daily-refresh", "schedule": "0 6 * * *" }
+    { "path": "/api/daily-refresh", "schedule": "0 4 * * *" },
+    { "path": "/api/daily-refresh", "schedule": "0 5 * * *" }
   ],
   "functions": {
-    "api/upload.py": { "maxDuration": 300 }
+    "api/upload.py": { "maxDuration": 300 },
+    "api/daily-refresh.py": { "maxDuration": 300 }
   },
   "rewrites": [
     { "source": "/",                 "destination": "/keystone_field_web/index" },

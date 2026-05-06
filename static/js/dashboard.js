@@ -1642,8 +1642,6 @@ async function onPointClick(e) {
     let iaqFeat = null;
     if (sp.iaq_match_lon != null && sp.iaq_match_lat != null) {
       iaqFeat = findMatchedIaqFeature(+sp.iaq_match_lon, +sp.iaq_match_lat, 1);
-    } else if (sp.has_iaq_survey) {
-      iaqFeat = findMatchedIaqFeature(coords[0], coords[1], 5);
     }
     if (iaqFeat && iaqFeat.properties) {
       tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(iaqFeat.properties) });

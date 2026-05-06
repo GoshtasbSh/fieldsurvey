@@ -167,7 +167,10 @@ class handler(BaseHTTPRequestHandler):
         today = datetime.now(timezone.utc).date().isoformat()
         print(f"[upload/iaq] processed n_features={n} n_upgraded={n_upgraded}")
 
-        validation = analysis.get('validation_warnings', {}) or {}
+        validation = analysis.get('validation', {}) or {}
+        warn = analysis.get('validation_warnings', {}) or {}
+        if warn:
+            validation = {**validation, 'warnings': warn}
         payload = {
             'geojson':         geojson,
             'analysis':        analysis,

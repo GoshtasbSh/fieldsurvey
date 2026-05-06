@@ -25,6 +25,18 @@ from pathlib import Path
 import pandas as pd
 from shapely.geometry import shape as _shp_shape, Point as _ShapelyPoint
 from shapely.strtree import STRtree as _STRtree
+try:
+    from survey_logic import (
+        QID141_RECODE_LABELS,
+        compute_struct_score as _compute_struct_score_light,
+        build_validation_summary as _build_validation_summary_light,
+    )
+except ImportError:
+    from .survey_logic import (
+        QID141_RECODE_LABELS,
+        compute_struct_score as _compute_struct_score_light,
+        build_validation_summary as _build_validation_summary_light,
+    )
 
 # ── Constants (identical to app.py) ───────────────────────────────────────────
 STATUS = {
@@ -215,9 +227,10 @@ _QSF_RECODE_LABELS: dict = {
     'QID128': {'1': 'Single Wide Mobile Home',  '2': 'Double Wide Mobile Home',
                '3': 'House built on site',
                '4': 'Non-traditional structure (camper, shed, etc.)', '5': 'Other'},
-    # QID141 RecodeValues: choice5→1 (Critical), rest sequential 1-4
-    'QID141': {'1': 'Excellent- No repairs needed.',  '2': 'Good- Minor repairs needed.',
-               '3': 'Fair- Some repairs needed.',     '4': 'Poor- Major repairs needed.'},
+    # QID141 has a 5th "Critical - Uninhabitable" option in the QSF.
+    # Keep both 5 and 1 mappings here so either choice-code or legacy
+    # recode export styles remain interpretable.
+    'QID141': dict(QID141_RECODE_LABELS),
 }
 
 # Columns exported with custom Qualtrics names (not "QIDNNN" headers).
@@ -265,6 +278,19 @@ def _is_numeric_recode_export(df_full, qid_to_col_idx: dict) -> bool:
     ]
     numeric_hits = 0
     total_checked = 0
+    def _is_numeric_code(v: str) -> bool:
+        s = str(v).strip()
+        if not s:
+            return False
+        try:
+            x = float(s)
+        except (ValueError, TypeError):
+            return False
+        # Qualtrics recode cells are small integer-like values.
+        if abs(x - round(x)) > 1e-9:
+            return False
+        return 0 <= x <= 20
+
     for col_name, qid_key in check_pairs:
         # Resolve column
         if qid_key and qid_key in qid_to_col_idx:
@@ -278,7 +304,7 @@ def _is_numeric_recode_export(df_full, qid_to_col_idx: dict) -> bool:
                   .replace('', None).dropna().head(30))
         if sample.empty:
             continue
-        n_num = sum(1 for v in sample if v.isdigit() and int(v) <= 20)
+        n_num = sum(1 for v in sample if _is_numeric_code(v))
         total_checked += 1
         if n_num / len(sample) >= 0.6:
             numeric_hits += 1
@@ -734,19 +760,7 @@ def _extract_survey_extras(full_row, qid_to_col_idx: dict | None = None) -> dict
 
 
 def _compute_struct_score(row) -> int:
-    score = 0
-    yr = str(row.get('QID192', '') or '').lower()
-    if 'before 1960' in yr:   score += 30
-    elif '1960' in yr:         score += 20
-    elif '1980' in yr:         score += 10
-    ht = str(row.get('QID128', '') or '').lower()
-    if 'single wide' in ht:        score += 25
-    elif 'double wide' in ht:      score += 15
-    elif 'non-traditional' in ht or 'camper' in ht:  score += 20
-    cond = str(row.get('QID141', '') or '').lower()
-    if 'poor' in cond:   score += 25
-    elif 'fair' in cond: score += 15
-    return round(min(score, 100))
+    return _compute_struct_score_light(row)
 
 
 # ── Address utilities (verbatim from app.py) ───────────────────────────────────
@@ -977,6 +991,24 @@ def _cos_deg(deg: float) -> float:
     """Cosine of degrees, clamped to avoid div/0 near the poles."""
     from math import cos, radians
     return cos(radians(deg))
+
+
+def _nearest_contact_distance_m(iaq_lon: float, iaq_lat: float, contact_features: list) -> float | None:
+    """Distance from IAQ point to nearest contact point in meters."""
+    best = None
+    for cf in contact_features:
+        try:
+            c_lon, c_lat = cf['geometry']['coordinates']
+            d = _haversine_m(iaq_lat, iaq_lon, float(c_lat), float(c_lon))
+        except Exception:
+            continue
+        if best is None or d < best:
+            best = d
+    return round(best, 1) if best is not None else None
+
+
+def _build_validation_summary(iaq_features: list, contact_features: list) -> dict:
+    return _build_validation_summary_light(iaq_features, contact_features)
 
 
 def tag_contact_match_status(contact_features: list) -> dict:
@@ -1733,9 +1765,11 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
             "Only rows where Finished='True' or Finished=1 are processed."
         )
 
-    # Auto-detect numeric-recode export (May 4 style) and translate to text
-    # labels so all downstream scoring functions work identically to text exports.
-    if _is_numeric_recode_export(df_full, qid_to_col_idx):
+    # Auto-detect upload structure:
+    # - numeric recode export (May 4 style): translate to text labels first
+    # - text-label export (April 15 style): analyze directly
+    numeric_recode_mode = _is_numeric_recode_export(df_full, qid_to_col_idx)
+    if numeric_recode_mode:
         print("[iaq] Numeric recode export detected — applying QSF label translation")
         _apply_qsf_recode_labels(df_full, qid_to_col_idx)
 
@@ -1897,6 +1931,9 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     # by spatial-matching the clicked contact to its IAQ feature in iaqData.
     # The numeric helper years_in_hre_num is dropped (analysis-only).
     analysis = _compute_iaq_analysis(features)
+    analysis['input_format'] = 'numeric_recode' if numeric_recode_mode else 'text_labels'
+    analysis['recode_translation_applied'] = bool(numeric_recode_mode)
+    analysis['validation'] = _build_validation_summary(features, contact_features)
     print(f"[iaq-debug] pct_want sample: { {k: v for k, v in (analysis.get('interventions') or {}).get('pct_want', {}).items()} }")
     print(f"[iaq-debug] pct_yes sample:  { {k: v for k, v in (analysis.get('experiences') or {}).get('pct_yes', {}).items()} }")
     # Store QID map summary in analysis for dashboard-visible diagnostics
