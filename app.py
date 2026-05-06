@@ -34,7 +34,12 @@ import requests
 from contextlib import asynccontextmanager
 import sys as _sys, pathlib as _pathlib
 _sys.path.insert(0, str(_pathlib.Path(__file__).parent / 'api'))
-from _processing import _is_numeric_recode_export, _apply_qsf_recode_labels
+from _processing import (
+    _is_numeric_recode_export,
+    _apply_qsf_recode_labels,
+    IAQ_FEATURE_POPUP_LABELS,
+)
+from survey_logic import symptom_frequency_score
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
@@ -353,16 +358,7 @@ def _freq_score(val):
     """Convert symptom frequency string to 0–4 numeric score."""
     if not val or pd.isna(val):
         return 0
-    v = str(val).lower()
-    if 'weekly' in v:
-        return 4
-    if 'month' in v:
-        return 3
-    if 'season' in v:
-        return 2
-    if 'year' in v:
-        return 1
-    return 0  # rarely or never
+    return symptom_frequency_score(val)
 
 
 def _compute_health_score(row):
@@ -1262,9 +1258,12 @@ def process_iaq_survey(csv_bytes: bytes):
             "Only rows where Finished='True' or Finished=1 are processed."
         )
 
-    if _is_numeric_recode_export(df_full, qid_to_col_idx):
-        log.info("IAQ: numeric recode export detected — applying QSF label translation")
-        _apply_qsf_recode_labels(df_full, qid_to_col_idx)
+    numeric_recode_mode = _is_numeric_recode_export(df_full, qid_to_col_idx)
+    log.info(
+        "IAQ: applying QSF label harmonisation (detected_numeric_export=%s)",
+        numeric_recode_mode,
+    )
+    _apply_qsf_recode_labels(df_full, qid_to_col_idx)
 
     log.info(f"IAQ survey: {len(df_full)}/{len(raw)} finished responses")
     df = df_full.copy()
@@ -1400,6 +1399,10 @@ def process_iaq_survey(csv_bytes: bytes):
     # stripped at the upload-endpoint level. The numeric helper years_in_hre_num
     # is dropped (analysis-only).
     analysis_result = _compute_iaq_analysis(features)
+    analysis_result['input_format'] = (
+        'numeric_recode' if numeric_recode_mode else 'text_labels'
+    )
+    analysis_result['recode_translation_applied'] = True
     for f in features:
         f['properties'].pop('years_in_hre_num', None)
     geojson = {'type': 'FeatureCollection', 'features': features}
@@ -1455,6 +1458,8 @@ def _compute_iaq_analysis(features):
             conds['Fair'] += 1
         elif 'poor' in c:
             conds['Poor'] += 1
+        elif 'critical' in c or 'uninhabitable' in c:
+            conds['Critical'] += 1
         else:
             conds['Unknown'] += 1
 
@@ -1662,7 +1667,10 @@ def _compute_iaq_analysis(features):
         },
 
         # ── Question-text + chart-source provenance for the dashboard ────────
-        'survey_questions': {f: meta[-1] for f, meta in SURVEY_QUESTIONS.items()},
+        'survey_questions': {
+            **{f: meta[-1] for f, meta in SURVEY_QUESTIONS.items()},
+            **IAQ_FEATURE_POPUP_LABELS,
+        },
         'chart_sources':    dict(CHART_SOURCES),
     }
 

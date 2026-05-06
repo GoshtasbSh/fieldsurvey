@@ -138,21 +138,23 @@ async function _authFetch(url, opts = {}) {
 }
 
 // IAQ points come in two flavours:
-//   - /api/iaq-points       (public, per-respondent answers stripped)
-//   - /api/iaq-points?full=1 (auth-gated, includes answers for the popup tab)
-// Try the full endpoint first when the user has a Supabase session, fall
-// back to the public one otherwise. Anonymous viewers still get the map
-// dots + risk scores; only the per-question popup tab is blank.
+//   - /api/iaq-points            (public, per-respondent answers stripped)
+//   - /api/iaq-points-full       (auth-gated — Flask app.py; Vercel api/iaq-points-full.py)
+//   - /api/iaq-points?full=1     (same payload — legacy Vercel iaq-points.py query flag)
+// Try full payloads first when the user has a Supabase session, fall back to
+// public data. Anonymous viewers still get map dots + risk scores; only the
+// per-question popup tab stays blank without auth.
 async function fetchIaqPoints() {
   try {
     if (!_cachedSession && sbClient?.auth) {
       _cachedSession = (await sbClient.auth.getSession()).data?.session;
     }
     if (_cachedSession?.access_token) {
-      const r = await fetch('/api/iaq-points?full=1', {
-        headers: { 'Authorization': `Bearer ${_cachedSession.access_token}` },
-      });
-      if (r.ok) return r;
+      const headers = { 'Authorization': `Bearer ${_cachedSession.access_token}` };
+      for (const url of ['/api/iaq-points-full', '/api/iaq-points?full=1']) {
+        const r = await fetch(url, { headers });
+        if (r.ok) return r;
+      }
     }
   } catch (e) { /* fall through to public */ }
   return fetch('/api/iaq-points');
@@ -1119,6 +1121,13 @@ function _backfillContactMatchStatus(featureCollection) {
   if (!Array.isArray(feats)) return;
   for (const f of feats) {
     const p = f.properties || (f.properties = {});
+    // Field-visit features are merged into the same source for
+    // visibility/counting, but they are not contact CSV records.
+    // Never classify them as contact_only/matched in G1/G2.
+    if (p.source === 'field' || p.field_point_id != null) {
+      delete p.match_status;
+      continue;
+    }
     if (p.status === 'Completed') {
       p.match_status = p.has_iaq_survey ? 'matched' : 'contact_only';
     } else {
@@ -1382,15 +1391,7 @@ function resolveMatchedIaqFeature(contactProps, contactCoords) {
   return candidates[0].f;
 }
 
-// Build the "Survey Answers" popup tab from an IAQ feature. Walks the
-// SURVEY_QUESTIONS metadata baked into the analysis blob (chart_sources +
-// survey_questions) so question text always tracks the canonical Qualtrics
-// labels. Items without a recorded answer are skipped to keep the popup
-// readable.
-// Internal / non-answer fields stripped from the Survey Answers tab.
-// Anything outside this set is treated as a real survey response.
-// Denylist (not allowlist) so new Qualtrics questions show up
-// automatically under "Other" without code changes.
+// Internal / non-answer fields stripped from categorisation + "Other exported fields".
 const _IAQ_NON_ANSWER_FIELDS = new Set([
   // Display / geometry
   'street_name', 'address', 'color', 'risk_tier',
@@ -1483,81 +1484,78 @@ const _RAW_IAQ_LABELS = {
   cooking_method:      'Cooking fuel / method',
 };
 
+// Numeric-coded Qualtrics exports are decoded server-side; placeholders stay visible here as muted text.
+const _IAQ_PLACEHOLDER_RE = /^(click to write (scale point|choice)\s*\d*|skip(ped)?|no answer|--)$/i;
+
+/** @returns {{ text: string, muted: boolean }} */
+function formatIaqAnswerCell(key, raw) {
+  if (key === 'has_mold') {
+    if (raw === true || raw === 'true' || raw === 1 || raw === '1') {
+      return { text: 'Yes', muted: false };
+    }
+    if (raw === false || raw === 'false' || raw === 0 || raw === '0') {
+      return { text: 'No', muted: false };
+    }
+  }
+  if (raw == null) return { text: '—', muted: true };
+  const s = String(raw).trim();
+  if (!s) return { text: '—', muted: true };
+  if (_IAQ_PLACEHOLDER_RE.test(s)) {
+    return { text: `${s} (Qualtrics placeholder)`, muted: true };
+  }
+  return { text: s, muted: false };
+}
+
 function buildSurveyAnswersTab(iaqProps) {
-  // Pull canonical question text from the analysis blob (loaded once
-  // into iaqAnalysis at boot). Falls back to a humanised key when the
-  // mapping is missing — that way even brand-new Qualtrics columns
-  // render with a readable label.
   const qtext = { ..._RAW_IAQ_LABELS, ...(iaqAnalysis?.survey_questions || {}) };
   const friendly = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const props = iaqProps || {};
 
-  // Render an answered-first survey view. Showing every unanswered row
-  // made the popup look mostly empty for real users, especially on
-  // legacy exports with many placeholder labels.
-  // Qualtrics emits placeholder text when a question's scale labels
-  // were never customised — e.g. "Click to write Scale Point 1",
-  // "Click to write Choice 4". Those are NOT real respondent answers,
-  // so treat them as unanswered.
-  const _PLACEHOLDER_RE = /^(click to write (scale point|choice)\s*\d*|skip(ped)?|no answer|--)$/i;
-  const isAnswered = (v) => {
-    if (v == null) return false;
-    const s = String(v).trim();
-    if (!s) return false;
-    if (_PLACEHOLDER_RE.test(s)) return false;
-    return true;
-  };
-  const renderRow = (q, v) => {
+  const renderRow = (qLabel, cell) => {
+    const shortQ = qLabel.length > 90 ? qLabel.slice(0, 87) + '…' : qLabel;
+    const valStyle = cell.muted
+      ? 'max-width:42%;text-align:right;font-size:11px;color:var(--muted);font-weight:400;font-style:italic;line-height:1.35'
+      : 'max-width:42%;text-align:right;font-size:11px;color:var(--text);font-weight:500;line-height:1.35';
     return `<div class="popup-row" style="align-items:flex-start;gap:8px;padding:3px 0">
-      <span class="popup-label" style="max-width:58%;font-size:10.5px;line-height:1.35;color:var(--text2);font-weight:400" title="${escapeHtml(q)}">${escapeHtml(q.length > 90 ? q.slice(0, 87) + '…' : q)}</span>
-      <span class="popup-value" style="max-width:42%;text-align:right;font-size:11px;color:var(--text);font-weight:500">${escapeHtml(String(v))}</span>
+      <span class="popup-label" style="max-width:58%;font-size:10.5px;line-height:1.35;color:var(--text2);font-weight:400" title="${escapeHtml(qLabel)}">${escapeHtml(shortQ)}</span>
+      <span class="popup-value" style="${valStyle}">${escapeHtml(cell.text)}</span>
     </div>`;
   };
 
-  // Render each curated category with answered rows only. Keep a subtle
-  // "hidden unanswered" count so reviewers can still tell this is a
-  // filtered presentation, not missing data.
   const knownKeys = new Set();
   _IAQ_CATEGORIES.forEach(([, keys]) => keys.forEach(k => knownKeys.add(k)));
 
   const curatedSections = _IAQ_CATEGORIES.map(([title, keys]) => {
-    const answeredCount = keys.reduce((n, k) => n + (isAnswered(props[k]) ? 1 : 0), 0);
-    if (answeredCount === 0) return '';
-    const unansweredCount = keys.length - answeredCount;
+    const answeredMeaningful = keys.reduce((n, k) => {
+      const c = formatIaqAnswerCell(k, props[k]);
+      return n + (!c.muted && c.text !== '—' ? 1 : 0);
+    }, 0);
     const rows = keys
-      .filter(k => isAnswered(props[k]))
-      .map(k => renderRow(qtext[k] || friendly(k), props[k]))
+      .map(k => renderRow(qtext[k] || friendly(k), formatIaqAnswerCell(k, props[k])))
       .join('');
     return `<div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(34,211,238,.15)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <span style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em">${escapeHtml(title)}</span>
-        <span style="font-size:9.5px;color:var(--muted);font-family:var(--mono)">${answeredCount}/${keys.length}</span>
+        <span style="font-size:9.5px;color:var(--muted);font-family:var(--mono)" title="Meaningful answers / total fields">${answeredMeaningful}/${keys.length}</span>
       </div>
-      ${unansweredCount > 0 ? `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">${unansweredCount} unanswered hidden</div>` : ''}
       ${rows}
     </div>`;
-  }).filter(Boolean).join('');
+  }).join('');
 
-  // Anything else on the feature that isn't internal and isn't already
-  // claimed by a curated category goes under "Other" — only rendered
-  // when it has at least one non-empty value, so brand-new Qualtrics
-  // columns surface automatically without polluting the layout.
   const otherEntries = Object.keys(props)
     .filter(k => !_IAQ_NON_ANSWER_FIELDS.has(k))
     .filter(k => !k.startsWith('_'))
     .filter(k => !knownKeys.has(k))
-    .filter(k => isAnswered(props[k]));
+    .sort((a, b) => a.localeCompare(b));
+
   const otherSection = otherEntries.length
     ? `<div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(34,211,238,.15)">
-        <div style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Other</div>
-        ${otherEntries.map(k => renderRow(qtext[k] || friendly(k), props[k])).join('')}
+        <div style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Other exported fields</div>
+        <div style="font-size:9px;color:var(--muted);margin-bottom:6px">Extra Qualtrics columns on this feature (includes empty cells).</div>
+        ${otherEntries.map(k => renderRow(qtext[k] || friendly(k), formatIaqAnswerCell(k, props[k]))).join('')}
       </div>`
     : '';
 
-  // Top scoreboard repeats the Survey Summary numbers for at-a-glance
-  // context (the user might land on this tab without seeing the
-  // Summary tab first). Sections are scrollable so the full instrument
-  // doesn't overflow the popup.
   return `<div class="popup-body" style="max-height:380px;overflow-y:auto;padding-right:4px">
     <div class="popup-row">
       <span class="popup-label">Risk score</span>

@@ -30,12 +30,14 @@ try:
         QID141_RECODE_LABELS,
         compute_struct_score as _compute_struct_score_light,
         build_validation_summary as _build_validation_summary_light,
+        symptom_frequency_score,
     )
 except ImportError:
     from .survey_logic import (
         QID141_RECODE_LABELS,
         compute_struct_score as _compute_struct_score_light,
         build_validation_summary as _build_validation_summary_light,
+        symptom_frequency_score,
     )
 
 # ── Constants (identical to app.py) ───────────────────────────────────────────
@@ -162,6 +164,38 @@ RELOC_FIELDS = (
     'reloc_factor_inh', 'reloc_factor_oth',
 )
 
+# Extra property keys written onto each IAQ feature (not in SURVEY_QUESTIONS)
+# — merged into analysis['survey_questions'] for popup labels.
+IAQ_FEATURE_POPUP_LABELS: dict[str, str] = {
+    'respiratory_ill': (
+        'How often does anyone in your home have respiratory illness symptoms?'
+    ),
+    'asthma_freq': 'How often does anyone in your home have asthma symptoms?',
+    'wheeze_freq': 'How often does anyone in your home wheeze?',
+    'headache_freq': 'How often does anyone in your home experience headaches?',
+    'tired_freq': 'How often do you feel tired or fatigued in your home?',
+    'hospital_visit': (
+        'Has anyone in your home visited a hospital for respiratory issues?'
+    ),
+    'has_mold': 'Evidence of mold in any area of the home?',
+    'year_built': 'When was your house built?',
+    'housing_type': 'What type of house do you live in?',
+    'condition': (
+        'How would you describe the condition of your current house in terms '
+        'of maintenance and repair?'
+    ),
+    'ownership': 'What is your current housing ownership status?',
+    'leakage_roof': 'Water leakage — Roof',
+    'leakage_walls': 'Water leakage — Walls',
+    'leakage_windows': 'Water leakage — Windows',
+    'leakage_floor': 'Water leakage — Floor',
+    'cooling_central_ac': 'Cooling system — Central AC',
+    'cooling_window_unit': 'Cooling system — Window unit',
+    'cooling_fan': 'Cooling system — Fan only',
+    'cooling_none': 'Cooling system — No cooling',
+    'cooking_method': 'Cooking fuel / method',
+}
+
 # ── Qualtrics recode → text-label translation tables ─────────────────────────
 # Qualtrics can export surveys in two modes:
 #   "Text" (April 15 style)  — stores the choice label as the cell value ("Like",
@@ -180,8 +214,9 @@ RELOC_FIELDS = (
 #                          (Headache, RespIll, Leakage 2_1, etc.) that
 #                          Qualtrics exports with bespoke headers.
 #
-# _is_numeric_recode_export() detects which format is present.
-# _apply_qsf_recode_labels()  translates numeric → text in-place on df_full.
+# _is_numeric_recode_export() records export style for diagnostics (input_format).
+# _apply_qsf_recode_labels() runs on every upload — numeric codes become labels;
+# existing text answers pass through when they are not keys in that column's map.
 
 # Matrix questions: scale answers. MC questions: choice options.
 # QID195: Interventions — RecodeValues {key1→1(Dislike), key2→6(Like), key3→7(N/A)}
@@ -314,11 +349,14 @@ def _is_numeric_recode_export(df_full, qid_to_col_idx: dict) -> bool:
 
 
 def _apply_qsf_recode_labels(df_full, qid_to_col_idx: dict) -> None:
-    """Translate numeric recode values → text labels in df_full in-place.
+    """Translate numeric Qualtrics codes → choice labels in df_full in-place.
 
     Uses _QSF_RECODE_LABELS (QID-keyed) and _COLNAME_RECODE_LABELS (name-keyed).
-    After this call df_full looks identical to a Qualtrics text export, so all
-    downstream scoring and analysis code works without modification.
+    Safe on **text-label exports**: values that are not keys in a question's map
+    pass through unchanged (e.g. ``Like``, ``Never or rarely``).
+
+    Called for **every** upload so May (numeric) and April (text) rows share the
+    same downstream scoring, GeoJSON properties, and dashboard analysis.
     """
     # QID-keyed: apply to every sub-column QIDxxx_N matching the base QID
     for qid_base, label_map in _QSF_RECODE_LABELS.items():
@@ -646,14 +684,9 @@ def _isna(val) -> bool:
 
 
 def _freq_score(val) -> int:
-    if not val or _isna(val):
+    if _isna(val):
         return 0
-    v = str(val).lower()
-    if 'weekly' in v:  return 4
-    if 'month'  in v:  return 3
-    if 'season' in v:  return 2
-    if 'year'   in v:  return 1
-    return 0
+    return symptom_frequency_score(val)
 
 
 def _compute_health_score(row) -> int:
@@ -1265,6 +1298,7 @@ def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
             ff['properties']['iaq_health_score'] = ip.get('health_score', 0)
             ff['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
             ff['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+            ff['properties']['iaq_response_id']  = ip.get('response_id', '')
             ff['properties']['iaq_match_lon']    = ig[0]
             ff['properties']['iaq_match_lat']    = ig[1]
             upgraded += 1
@@ -1302,7 +1336,10 @@ def _compute_iaq_analysis(features: list) -> dict:
         if 'good' in c:   conds['Good'] += 1
         elif 'fair' in c: conds['Fair'] += 1
         elif 'poor' in c: conds['Poor'] += 1
-        else:             conds['Unknown'] += 1
+        elif 'critical' in c or 'uninhabitable' in c:
+            conds['Critical'] += 1
+        else:
+            conds['Unknown'] += 1
     yr_dist: dict = defaultdict(int)
     for p in props:
         y = str(p.get('year_built', '') or '').lower()
@@ -1530,7 +1567,10 @@ def _compute_iaq_analysis(features: list) -> dict:
         },
 
         # ── Question-text + chart-source provenance for the dashboard ────────
-        'survey_questions': {f: meta[-1] for f, meta in SURVEY_QUESTIONS.items()},
+        'survey_questions': {
+            **{f: meta[-1] for f, meta in SURVEY_QUESTIONS.items()},
+            **IAQ_FEATURE_POPUP_LABELS,
+        },
         'chart_sources':    dict(CHART_SOURCES),
     }
 
@@ -1772,9 +1812,11 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     # - numeric recode export (May 4 style): translate to text labels first
     # - text-label export (April 15 style): analyze directly
     numeric_recode_mode = _is_numeric_recode_export(df_full, qid_to_col_idx)
-    if numeric_recode_mode:
-        print("[iaq] Numeric recode export detected — applying QSF label translation")
-        _apply_qsf_recode_labels(df_full, qid_to_col_idx)
+    print(
+        "[iaq] Applying QSF label harmonisation "
+        f"(detected_numeric_export={numeric_recode_mode})"
+    )
+    _apply_qsf_recode_labels(df_full, qid_to_col_idx)
 
     df = df_full.copy()
     df.drop(columns=[c for c in PII_COLS if c in df.columns], inplace=True)
@@ -1936,7 +1978,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     # The numeric helper years_in_hre_num is dropped (analysis-only).
     analysis = _compute_iaq_analysis(features)
     analysis['input_format'] = 'numeric_recode' if numeric_recode_mode else 'text_labels'
-    analysis['recode_translation_applied'] = bool(numeric_recode_mode)
+    analysis['recode_translation_applied'] = True
     analysis['validation'] = _build_validation_summary(features, contact_features)
     print(f"[iaq-debug] pct_want sample: { {k: v for k, v in (analysis.get('interventions') or {}).get('pct_want', {}).items()} }")
     print(f"[iaq-debug] pct_yes sample:  { {k: v for k, v in (analysis.get('experiences') or {}).get('pct_yes', {}).items()} }")

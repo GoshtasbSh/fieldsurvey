@@ -77,6 +77,56 @@ def _sync_community_contacts(sb, features: list) -> None:
         print(f'[upload/survey] community_contacts sync WARN {type(e).__name__}: {e}')
 
 
+def _field_row_to_feature(row: dict) -> dict | None:
+    lon = row.get('lon')
+    lat = row.get('lat')
+    if lon is None or lat is None:
+        return None
+    return {
+        'type': 'Feature',
+        'geometry': {'type': 'Point', 'coordinates': [lon, lat]},
+        'properties': {
+            'source': 'field',
+            'field_point_id': row.get('id'),
+            'status': row.get('status') or 'Unknown',
+            'street_name': 'Field Survey',
+            'notes': row.get('notes') or '',
+            'collector': row.get('collector_name'),
+            'collector_id': row.get('collector_id'),
+            'collected_at': row.get('collected_at'),
+        },
+    }
+
+
+def _load_all_field_features(sb) -> list:
+    rows: list = []
+    page = 1000
+    hard_cap = 100_000
+    offset = 0
+    while offset < hard_cap:
+        batch = (
+            sb.table('field_survey_points')
+            .select('id, lat, lon, status, notes, collector_id, collector_name, collected_at')
+            .range(offset, offset + page - 1)
+            .execute()
+            .data
+        ) or []
+        if not batch:
+            break
+        rows.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    if offset >= hard_cap and len(rows) >= hard_cap:
+        print(f"[upload/survey] WARNING: field_survey_points capped at {hard_cap} rows")
+    return [f for f in (_field_row_to_feature(r) for r in rows) if f is not None]
+
+
+def _is_field_feature(f: dict) -> bool:
+    p = (f or {}).get('properties') or {}
+    return p.get('source') == 'field' or p.get('field_point_id') is not None
+
+
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
@@ -131,8 +181,10 @@ class handler(BaseHTTPRequestHandler):
 
         contact_blob  = load_cached('community_contact') or {}
         contact_feats = list(contact_blob.get('features', []))
+        contact_only_feats = [cf for cf in contact_feats if not _is_field_feature(cf)]
+        field_only_feats = [cf for cf in contact_feats if _is_field_feature(cf)]
         print(f"[upload/iaq] contacts loaded n={len(contact_feats)}")
-        if not contact_feats:
+        if not contact_only_feats:
             return json_response(self, 400, {
                 'detail': (
                     'No Community Contact data found. Upload the Community '
@@ -149,7 +201,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             geojson, analysis, streets, n_upgraded, failed_geocodes = process_iaq_bytes(
-                csv_bytes, contact_feats, parcel_idx)
+                csv_bytes, contact_only_feats, parcel_idx)
         except _PD_PARSE_ERR as e:
             print(f"[upload/iaq] pandas parse error: {e}")
             return json_response(self, 400, {
@@ -201,16 +253,17 @@ class handler(BaseHTTPRequestHandler):
         # out around a stacked Left Info dot at the same parcel.
         dedup_dropped = 0
         tag_changed = False
-        if contact_feats:
-            pre_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_feats]
-            tag_contact_match_status(contact_feats)
-            post_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_feats]
+        if contact_only_feats:
+            pre_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_only_feats]
+            tag_contact_match_status(contact_only_feats)
+            post_tag = [(cf.get('properties') or {}).get('match_status') for cf in contact_only_feats]
             tag_changed = pre_tag != post_tag
-            pre_dedup_n = len(contact_feats)
-            contact_feats = dedup_contacts_at_parcel(contact_feats)
-            dedup_dropped = pre_dedup_n - len(contact_feats)
-        if (n_upgraded or dedup_dropped or tag_changed) and contact_feats:
-            updated_contact = {**contact_blob, 'features': contact_feats}
+            pre_dedup_n = len(contact_only_feats)
+            contact_only_feats = dedup_contacts_at_parcel(contact_only_feats)
+            dedup_dropped = pre_dedup_n - len(contact_only_feats)
+        if (n_upgraded or dedup_dropped or tag_changed) and (contact_only_feats or field_only_feats):
+            updated_feats = list(contact_only_feats) + list(field_only_feats)
+            updated_contact = {**contact_blob, 'features': updated_feats}
             sb.table('keystone_dashboard_data').upsert(
                 {'data_type': 'community_contact', 'payload': updated_contact},
                 on_conflict='data_type',
@@ -219,9 +272,9 @@ class handler(BaseHTTPRequestHandler):
                 'data_type': 'community_contact',
                 'payload':   updated_contact,
                 'label':     f'IAQ-merged {today} — {n_upgraded} contacts upgraded · {filename}',
-                'n_points':  len(contact_feats),
+                'n_points':  len(updated_feats),
             }).execute()
-            contact_analysis = compute_contact_analysis(contact_feats)
+            contact_analysis = compute_contact_analysis(updated_feats)
             # compute_contact_analysis returns parcel_stats: {} (Vercel
             # can't run geopandas to recompute it). Merge with the
             # existing analysis blob so the Parcels tab stays populated
@@ -351,11 +404,20 @@ class handler(BaseHTTPRequestHandler):
         # sharing a parcel collapse to a single dot (highest-priority
         # status wins; the rest move to coincident_contacts on the
         # survivor). See dedup_contacts_at_parcel() docstring for why.
-        feats = survey_data.get('features', [])
-        tag_contact_match_status(feats)
-        feats = dedup_contacts_at_parcel(feats)
-        survey_data['features'] = feats
-        n = len(feats)
+        contact_feats = survey_data.get('features', [])
+        tag_contact_match_status(contact_feats)
+        contact_feats = dedup_contacts_at_parcel(contact_feats)
+
+        # Keep dashboard community points as "CSV contacts + existing field points"
+        # so users always see one combined layer immediately after CSV upload.
+        field_feats = _load_all_field_features(sb)
+        # Keep CSV contacts authoritative (already tagged + deduped).
+        # Append field features as-is so both datasets are visible/countable
+        # without cross-source winner-take-all dedup side effects.
+        merged_feats = list(contact_feats) + list(field_feats)
+
+        survey_data['features'] = merged_feats
+        n = len(merged_feats)
 
         sb.table('keystone_dashboard_data').upsert(
             {'data_type': 'community_contact', 'payload': survey_data},
@@ -376,13 +438,15 @@ class handler(BaseHTTPRequestHandler):
             {'data_type': 'analysis', 'payload': contact_analysis},
             on_conflict='data_type',
         ).execute()
-        _sync_community_contacts(sb, survey_data.get('features', []))
+        _sync_community_contacts(sb, contact_feats)
 
         if failed_geocodes:
             print(f"[upload/survey] {len(failed_geocodes)} addresses failed geocoding: {failed_geocodes[:10]}")
         return json_response(self, 200, {
             'status':          'ok',
             'points':          n,
+            'contact_points':  len(contact_feats),
+            'field_points':    len(field_feats),
             'filename':        filename,
             'failed_geocodes': failed_geocodes,
         })

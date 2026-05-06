@@ -3,6 +3,7 @@ import unittest
 from api.survey_logic import (
     build_validation_summary,
     compute_struct_score,
+    symptom_frequency_score,
 )
 
 
@@ -14,6 +15,11 @@ class ProcessingAnalysisTests(unittest.TestCase):
             "QID141": "Critical- Uninhabitable without repairs.",
         })
         self.assertGreaterEqual(score, 90)
+
+    def test_symptom_frequency_annually(self):
+        self.assertEqual(symptom_frequency_score("annually"), 1)
+        self.assertEqual(symptom_frequency_score("Annual"), 1)
+        self.assertEqual(symptom_frequency_score("once per year"), 1)
 
     def test_validation_summary_contract_fields(self):
         iaq_features = [
@@ -55,6 +61,7 @@ class ProcessingAnalysisTests(unittest.TestCase):
             "total_completed_contacts",
             "matched_iaq_responses",
             "match_rate_pct",
+            "coverage_pct",
             "unmatched_iaq",
             "match_details",
             "unmatched_by_street",
@@ -64,7 +71,8 @@ class ProcessingAnalysisTests(unittest.TestCase):
         self.assertEqual(v["matched_iaq_responses"], 1)
         self.assertEqual(v["unmatched_iaq"], 1)
         self.assertEqual(v["total_completed_contacts"], 1)
-        self.assertEqual(v["match_rate_pct"], 100.0)
+        self.assertEqual(v["match_rate_pct"], 50.0)
+        self.assertEqual(v["coverage_pct"], 100.0)
         self.assertEqual(v["unmatched_by_street"].get("Pine St"), 1)
 
 if __name__ == "__main__":

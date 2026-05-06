@@ -65,6 +65,37 @@ def compute_struct_score(parts: dict) -> int:
     return round(min(score, 100))
 
 
+def symptom_frequency_score(val) -> int:
+    """Map symptom frequency text to 0–4 for the health vulnerability composite.
+
+    Numeric Qualtrics exports are recoded to labels like ``annually``; that word
+    does not contain ``year``, so ``annual`` is matched explicitly alongside
+    ``year`` (e.g. ``once per year``).
+    """
+    if val is None:
+        return 0
+    try:
+        if isinstance(val, float) and val != val:  # NaN
+            return 0
+    except Exception:
+        pass
+    try:
+        v = str(val).strip().lower()
+    except Exception:
+        return 0
+    if not v or v in ("nan", "none", "nat"):
+        return 0
+    if "weekly" in v:
+        return 4
+    if "month" in v:
+        return 3
+    if "season" in v:
+        return 2
+    if "year" in v or "annual" in v:
+        return 1
+    return 0
+
+
 def nearest_contact_distance_m(iaq_lon: float, iaq_lat: float, contact_features: list) -> float | None:
     best = None
     for cf in contact_features:
@@ -110,7 +141,13 @@ def build_validation_summary(iaq_features: list, contact_features: list) -> dict
     )
     matched_iaq = sum(1 for d in match_details if d.get("matched"))
     unmatched_iaq = max(total_iaq - matched_iaq, 0)
-    match_rate = round((matched_iaq / total_completed_contacts) * 100, 1) if total_completed_contacts else 0.0
+    # % of IAQ surveys matched to a completed contact (same parcel).
+    match_rate = round((matched_iaq / total_iaq) * 100, 1) if total_iaq else 0.0
+    # % of completed canvass contacts that have at least one confirmed IAQ pairing
+    # (same numerator; denominator from community layer — mirrors app.py coverage_pct).
+    coverage_pct = (
+        round((matched_iaq / total_completed_contacts) * 100, 1) if total_completed_contacts else 0.0
+    )
 
     return {
         "total_iaq_responses": total_iaq,
@@ -118,6 +155,7 @@ def build_validation_summary(iaq_features: list, contact_features: list) -> dict
         "matched_iaq_responses": matched_iaq,
         "unmatched_iaq": unmatched_iaq,
         "match_rate_pct": match_rate,
+        "coverage_pct": coverage_pct,
         "match_details": match_details,
         "unmatched_by_street": dict(unmatched_by_street),
     }
