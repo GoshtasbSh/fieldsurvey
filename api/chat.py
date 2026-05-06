@@ -352,8 +352,24 @@ class handler(BaseHTTPRequestHandler):
             return
 
         message = (body.get("message") or "").strip()
-        history = body.get("history") or []
-        map_state = body.get("map_state") or "unknown"
+        raw_history = body.get("history") or []
+        map_state_raw = body.get("map_state") or ""
+        # Validate map_state against known values to prevent prompt injection
+        _VALID_MAP_STATES = {
+            "default", "street_highlight", "iaq_filter", "choropleth",
+            "heatmap", "clusters", "contact_filter", "unknown", "",
+        }
+        map_state = map_state_raw if map_state_raw in _VALID_MAP_STATES else "unknown"
+        # Sanitise history: validate role and cap per-message content length
+        _VALID_ROLES = {"user", "assistant"}
+        history = []
+        for h in (raw_history[-5:] if isinstance(raw_history, list) else []):
+            role = h.get("role") if isinstance(h, dict) else None
+            content = h.get("content") if isinstance(h, dict) else None
+            if role not in _VALID_ROLES:
+                role = "user"
+            if content:
+                history.append({"role": role, "content": str(content)[:2000]})
         if not message:
             json_response(self, 400, {"error": "No message provided"})
             return
@@ -395,11 +411,8 @@ class handler(BaseHTTPRequestHandler):
             .replace("{data}",      json.dumps(ctx, separators=(",", ":")))
         )
         msgs = [{"role": "system", "content": system}]
-        for h in history[-5:]:
-            role = h.get("role") or "user"
-            content = h.get("content") or ""
-            if content:
-                msgs.append({"role": role, "content": content})
+        for h in history:
+            msgs.append({"role": h["role"], "content": h["content"]})
         msgs.append({"role": "user", "content": message})
 
         try:

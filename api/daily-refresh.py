@@ -228,7 +228,7 @@ def _run_refresh() -> dict:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="data_type").execute()
     except Exception as e:
-        pass  # non-fatal — blob already saved
+        print(f"[daily-refresh] analysis recompute failed: {e}")
 
     return {"refreshed": True, "new_field_points": len(new_rows),
             "total_points": len(features), "label": label,
@@ -236,13 +236,11 @@ def _run_refresh() -> dict:
 
 
 def _cron_authorized(handler_obj) -> bool:
-    """Bearer CRON_SECRET check. Constant-time. Fails closed in production
-    if CRON_SECRET is unset."""
+    """Bearer CRON_SECRET check. Constant-time. Fails closed if CRON_SECRET
+    is unset — no environment-variable backdoors."""
     secret = os.environ.get("CRON_SECRET", "")
     if not secret:
-        if os.environ.get("VERCEL_ENV") == "production":
-            return False
-        return os.environ.get("KEYSTONE_ALLOW_UNAUTH_CRON") == "1"
+        return False
     got = handler_obj.headers.get("authorization", "") or handler_obj.headers.get("Authorization", "")
     expected = f"Bearer {secret}"
     return _hmac.compare_digest(got or "", expected)

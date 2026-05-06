@@ -11,13 +11,15 @@ import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
 from _lib import (
     supabase_admin, supabase_anon, json_response, require_admin,
-    merge_preserve_analysis,
+    require_team_member, merge_preserve_analysis,
 )
 from _processing import compute_contact_analysis
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if require_team_member(self) is None:
+            return
         sb = supabase_admin() or supabase_anon()
         if not sb:
             json_response(self, 200, [])
@@ -78,8 +80,8 @@ class handler(BaseHTTPRequestHandler):
                     {"data_type": "analysis", "payload": contact_analysis},
                     on_conflict="data_type",
                 ).execute()
-            except Exception:
-                pass
+            except Exception as _e:
+                print(f"[versions] analysis recompute on restore failed: {_e}")
             json_response(self, 200, {
                 "restored": True,
                 "type":     "community_contact",

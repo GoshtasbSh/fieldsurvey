@@ -1523,6 +1523,19 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     """
     raw, qid_to_col_idx = _read_qualtric_csv(csv_bytes)
 
+    # Diagnostic: log key QID → column mappings so Vercel function logs
+    # can confirm which columns are being read for each question block.
+    _diag_qids = {k: v for k, v in qid_to_col_idx.items()
+                  if any(k.startswith(p) for p in
+                         ('QID195', 'QID124', 'QID181', 'QID178', 'QID176',
+                          'QID211', 'QID219', 'QID47', 'QID100', 'QID17',
+                          'QID19', 'QID21', 'QID194'))}
+    print(f"[iaq-debug] qid_to_col_idx ({len(qid_to_col_idx)} total): {_diag_qids}")
+    print(f"[iaq-debug] CSV has {len(raw.columns)} columns, {len(raw)} data rows")
+    # Also print ALL discovered QIDs so we can identify unknown demographics
+    _all_qids_sorted = sorted(qid_to_col_idx.items(), key=lambda x: x[1])
+    print(f"[iaq-debug] ALL QIDs: {_all_qids_sorted}")
+
     if 'Finished' not in raw.columns:
         raise ValueError(
             "CSV is missing the 'Finished' column. "
@@ -1625,9 +1638,9 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
         ownership = 'Owner' if 'owner' in ow_raw else ('Renter' if 'renter' in ow_raw else 'Other')
         raw_addr  = ' '.join(str(q212).split()) if q212 and str(q212).strip().lower() not in (
             '', 'ttt', 'nan', 'read to respondent') else ''
-        # Normalise column names for the IAQ-scorer raw inputs (Qualtrics
-        # sometimes emits non-breaking spaces instead of regular spaces).
-        _row_nr = {str(k).replace('\xa0', ' '): v for k, v in row.items()}
+        # Normalise column names: strip whitespace + replace \xa0 so both
+        # 'Cooking' and 'Cooking ' resolve to the same key (matches _nr fix).
+        _row_nr = {str(k).replace('\xa0', ' ').strip(): v for k, v in row.items()}
 
         features.append({
             'type': 'Feature',
@@ -1662,7 +1675,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
                 'cooling_window_unit':str(_row_nr.get('Cooling System _2', '') or ''),
                 'cooling_fan':        str(_row_nr.get('Cooling System _3', '') or ''),
                 'cooling_none':       str(_row_nr.get('Cooling System _4', '') or ''),
-                'cooking_method':     str(_row_nr.get('Cooking ', '')           or ''),
+                'cooking_method':     str(_row_nr.get('Cooking', '')            or ''),
                 'coord_source':       coord_source,
                 'raw_address':        raw_addr,
                 'iaq_matched':        False,
@@ -1686,6 +1699,18 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
             'matched' if f['properties'].get('iaq_matched') else 'iaq_only'
         )
 
+    # Diagnostic: show sample extracted values for key analysis fields
+    # across the first 3 features so Vercel logs can confirm extraction.
+    if features:
+        _sample = features[:3]
+        for _fi, _sf in enumerate(_sample):
+            _sp = _sf['properties']
+            print(f"[iaq-debug] feature[{_fi}] intv_roof_walls={_sp.get('intv_roof_walls')!r}"
+                  f" intv_ccua_water={_sp.get('intv_ccua_water')!r}"
+                  f" exp_flooding={_sp.get('exp_flooding')!r}"
+                  f" car_access={_sp.get('car_access')!r}"
+                  f" education={_sp.get('education')!r}")
+
     # Strip PII (raw_address) before returning / persisting
     for f in features:
         f['properties'].pop('raw_address', None)
@@ -1695,6 +1720,11 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     # by spatial-matching the clicked contact to its IAQ feature in iaqData.
     # The numeric helper years_in_hre_num is dropped (analysis-only).
     analysis = _compute_iaq_analysis(features)
+    print(f"[iaq-debug] pct_want sample: { {k: v for k, v in (analysis.get('interventions') or {}).get('pct_want', {}).items()} }")
+    print(f"[iaq-debug] pct_yes sample:  { {k: v for k, v in (analysis.get('experiences') or {}).get('pct_yes', {}).items()} }")
+    # Store QID map summary in analysis for dashboard-visible diagnostics
+    analysis['_qid_map_size'] = len(qid_to_col_idx)
+    analysis['_col_count']    = len(raw.columns)
     for f in features:
         f['properties'].pop('years_in_hre_num', None)
     geojson = {'type': 'FeatureCollection', 'features': features}

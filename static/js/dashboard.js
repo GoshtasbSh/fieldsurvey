@@ -117,20 +117,40 @@ function initMap() {
   map.on('load', loadData);
 }
 
+// Authenticated fetch helper — sends Bearer token when a Supabase session
+// exists. Falls back to an unauthenticated request silently. Used so team
+// members receive the full (un-stripped) response from endpoints that
+// implement the public-vs-member two-tier pattern.
+let _cachedSession = null;
+async function _authFetch(url, opts = {}) {
+  try {
+    if (!_cachedSession && sbClient?.auth) {
+      _cachedSession = (await sbClient.auth.getSession()).data?.session;
+    }
+    if (_cachedSession?.access_token) {
+      return fetch(url, {
+        ...opts,
+        headers: { ...(opts.headers || {}), 'Authorization': `Bearer ${_cachedSession.access_token}` },
+      });
+    }
+  } catch { /* fall through */ }
+  return fetch(url, opts);
+}
+
 // IAQ points come in two flavours:
 //   - /api/iaq-points       (public, per-respondent answers stripped)
-//   - /api/iaq-points-full  (auth-gated, includes answers for the popup tab)
+//   - /api/iaq-points?full=1 (auth-gated, includes answers for the popup tab)
 // Try the full endpoint first when the user has a Supabase session, fall
 // back to the public one otherwise. Anonymous viewers still get the map
 // dots + risk scores; only the per-question popup tab is blank.
 async function fetchIaqPoints() {
   try {
-    const session = (sbClient && sbClient.auth)
-      ? (await sbClient.auth.getSession()).data?.session
-      : null;
-    if (session?.access_token) {
+    if (!_cachedSession && sbClient?.auth) {
+      _cachedSession = (await sbClient.auth.getSession()).data?.session;
+    }
+    if (_cachedSession?.access_token) {
       const r = await fetch('/api/iaq-points?full=1', {
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
+        headers: { 'Authorization': `Bearer ${_cachedSession.access_token}` },
       });
       if (r.ok) return r;
     }
@@ -142,7 +162,7 @@ async function fetchIaqPoints() {
 async function loadData() {
   try {
     const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
-      fetch('/api/survey-points'),
+      _authFetch('/api/survey-points'),
       fetch('/api/parcels'),
       fetch('/api/analysis'),
       fetchIaqPoints(),
@@ -221,8 +241,9 @@ async function refreshAllData() {
     // means we'll be safe even if a future CDN config gets it wrong.
     const _b = `_=${Date.now()}`;
     const noCache = { cache: 'no-cache' };
+    _cachedSession = null; // force session re-read on explicit refresh
     const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
-      fetch(`/api/survey-points?${_b}`, noCache),
+      _authFetch(`/api/survey-points?${_b}`, noCache),
       fetch(`/api/parcels?${_b}`, noCache),
       fetch(`/api/analysis?${_b}`, noCache),
       fetchIaqPoints(),

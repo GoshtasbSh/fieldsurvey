@@ -26,6 +26,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 import json
 import os
+import re
 import sys
 import pathlib
 
@@ -52,12 +53,10 @@ def _get_client_ip(self) -> str:
 def _hash_ip(ip: str) -> str:
     if not ip:
         return ""
-    salt = (
-        os.environ.get("KEYSTONE_IP_HASH_SALT")
-        or os.environ.get("CRON_SECRET")
-        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or "fallback-salt"
-    )
+    salt = os.environ.get("KEYSTONE_IP_HASH_SALT") or ""
+    if not salt:
+        # No salt configured — omit hash rather than cascade to other secrets
+        return ""
     return hashlib.sha256((salt + "|" + ip).encode("utf-8")).hexdigest()[:32]
 
 
@@ -73,17 +72,33 @@ def _today_utc():
 
 
 def _fetch_today_code(sb) -> str | None:
+    """Return today's invite code, also accepting yesterday's code for the
+    first hour after UTC midnight (~7–8 PM ET) so evening field work isn't
+    cut off the moment the calendar rolls over."""
     try:
-        today = _today_utc().isoformat()
-        r = sb.table("invite_codes").select("code").eq("date", today).limit(1).execute()
+        now_utc = datetime.now(timezone.utc)
+        dates = [now_utc.date().isoformat()]
+        if now_utc.hour == 0:
+            dates.append((now_utc - timedelta(days=1)).date().isoformat())
+        r = (sb.table("invite_codes")
+               .select("code,date")
+               .in_("date", dates)
+               .order("date", desc=True)
+               .limit(1)
+               .execute())
         rows = r.data or []
         return (rows[0] or {}).get("code") if rows else None
     except Exception:
         return None
 
 
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE,
+)
+
 def _load_session(sb, session_id: str) -> dict | None:
-    if not session_id or len(session_id) != 36:
+    if not session_id or not _UUID_RE.match(session_id):
         return None
     try:
         r = (sb.table("field_guest_sessions")

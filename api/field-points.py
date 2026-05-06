@@ -49,8 +49,9 @@ class handler(BaseHTTPRequestHandler):
                 if len(batch) < PAGE:
                     break
                 offset += PAGE
-        except Exception:
-            json_response(self, 200, empty_geojson(), cache="no-store")
+        except Exception as _e:
+            print(f"[field-points] Supabase fetch error: {_e}")
+            json_response(self, 503, {"error": "data unavailable"}, cache="no-store")
             return
 
         features = []

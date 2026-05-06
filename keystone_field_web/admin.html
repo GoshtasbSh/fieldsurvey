@@ -214,7 +214,7 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
   <span class="topbar-title">KeyStone Field — Admin</span>
   <div class="topbar-spacer"></div>
   <button class="topbar-theme" id="theme-btn" title="Toggle theme">◐</button>
-  <a href="index.html" class="topbar-back">← Map</a>
+  <a href="/field" class="topbar-back">← Map</a>
 </header>
 
 <!-- Access-denied screen for non-admin team members -->
@@ -224,7 +224,7 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
     You are signed in but you don’t have the <b>admin</b> role on this project.
     Ask one of the project admins to promote you, or return to the dashboard.
   </p>
-  <a href="index.html" class="btn btn-primary" style="text-decoration:none;">← Back to Map</a>
+  <a href="/field" class="btn btn-primary" style="text-decoration:none;">← Back to Map</a>
   <button class="btn btn-outline" id="deny-signout" style="margin-left:6px;">Sign out</button>
 </div>
 
@@ -444,7 +444,7 @@ function showAccessDenied() {
   document.getElementById('main-admin').style.display  = 'none';
   document.getElementById('deny-signout').addEventListener('click', async () => {
     try { await sb.auth.signOut(); } catch {}
-    window.location.replace('login.html');
+    window.location.replace('/login');
   });
 }
 
@@ -468,12 +468,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { window.location.replace('login.html'); return; }
+  if (!session) { window.location.replace('/login'); return; }
   MY_UID  = session.user?.id || null;
   MY_ROLE = await fetchMyRole();
   if (!MY_ROLE) {
     // signed in but never claimed — send them back to claim flow
-    window.location.replace('login.html');
+    window.location.replace('/login');
     return;
   }
   if (MY_ROLE !== 'admin') {
@@ -753,7 +753,7 @@ async function handleUploadWithFile(type, file) {
 
   try {
     const { data: { session } } = await sb.auth.getSession();
-    if (!session) { window.location.replace('login.html'); return; }
+    if (!session) { window.location.replace('/login'); return; }
 
     const endpoint = type === 'community' ? '/api/upload?type=survey' : '/api/upload?type=iaq';
     const fd = new FormData();

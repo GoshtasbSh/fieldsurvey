@@ -850,7 +850,7 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
           <div class="online-lbl" id="sb-online">Online</div>
         </div>
         <button class="signout-btn" id="signout-btn">Sign Out</button>
-        <a href="admin.html" class="admin-link">⚙ Admin &amp; Data Upload</a>
+        <a href="/admin" class="admin-link">⚙ Admin &amp; Data Upload</a>
       </div>
     </div>
   </aside>
@@ -1287,7 +1287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { window.location.replace('login.html'); return; }
+  if (!session) { window.location.replace('/login'); return; }
   const u = session.user;
   const name = u.user_metadata?.full_name || u.email.split('@')[0];
   const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -1330,7 +1330,7 @@ async function loadGuestPoints() {
 function handleGuestExpired() {
   alert('Your guest session has ended. Sign in again with today’s code to continue.');
   clearGuestSession();
-  window.location.replace('login.html');
+  window.location.replace('/login');
 }
 function startGuestHeartbeat() {
   // Best-effort: every 4 minutes while the tab is visible.
@@ -3775,11 +3775,11 @@ async function signOut() {
   if (IS_GUEST) {
     // Ephemeral session — just clear and bounce back to login.
     clearGuestSession();
-    window.location.replace('login.html');
+    window.location.replace('/login');
     return;
   }
   if (sb) await sb.auth.signOut();
-  window.location.replace('login.html');
+  window.location.replace('/login');
 }
 
 /* ── GPS-FIRST ADD POINT ── */
