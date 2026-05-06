@@ -150,6 +150,178 @@ RELOC_FIELDS = (
     'reloc_factor_inh', 'reloc_factor_oth',
 )
 
+# ── Qualtrics recode → text-label translation tables ─────────────────────────
+# Qualtrics can export surveys in two modes:
+#   "Text" (April 15 style)  — stores the choice label as the cell value ("Like",
+#                               "Never or rarely", "Single Wide Mobile Home", …).
+#   "Numeric recode" (May 4 style) — stores only the integer RecodeValue ("6",
+#                               "3", "1", …). The analysis functions (_pct_want,
+#                               _pct_yes, _freq_score, _compute_struct_score, …)
+#                               all expect text labels, so numeric exports break.
+#
+# _QSF_RECODE_LABELS   — keyed by QID (matrix: base QID, MC: full QID)
+#                         value = {recode_str → label_text}
+#                         Sourced from Keystone_Heights_Survey_-_V1.qsf
+#                         RecodeValues + Choices/Answers for every question
+#                         used in scoring or analysis.
+# _COLNAME_RECODE_LABELS — keyed by CSV column name for custom-named columns
+#                          (Headache, RespIll, Leakage 2_1, etc.) that
+#                          Qualtrics exports with bespoke headers.
+#
+# _is_numeric_recode_export() detects which format is present.
+# _apply_qsf_recode_labels()  translates numeric → text in-place on df_full.
+
+# Matrix questions: scale answers. MC questions: choice options.
+# QID195: Interventions — RecodeValues {key1→1(Dislike), key2→6(Like), key3→7(N/A)}
+# QID124: Experiences   — RecodeValues {1→1(Yes),  2→2(No),   3→3(PNA)}
+# QID181: Reloc factors — RecodeValues {1→1..5→5}  (1-5 Likert)
+_QSF_RECODE_LABELS: dict = {
+    # ── Community matrix questions ───────────────────────────────────────────
+    'QID195': {'1': 'Dislike', '6': 'Like', '7': 'Not Applicable/Unsure'},
+    'QID124': {'1': 'Yes',     '2': 'No',   '3': 'Prefer Not Answer'},
+    'QID181': {'1': 'Not important', '2': 'Slightly important',
+               '3': 'Important',     '4': 'Very Important',
+               '5': 'One of my key concerns'},
+    # ── Demographics ────────────────────────────────────────────────────────
+    # QID178 RecodeValues: choice1→1, choice2→5, choice3→6, choice4→7, 5→8, 6→9
+    'QID178': {'1': 'Less than high school',
+               '5': 'High school diploma or equivalent',
+               '6': 'Some college, no degree',
+               '7': "Bachelor's Degree",
+               '8': 'Graduate Degree',
+               '9': 'Vocational/Technical Licensing or Certification'},
+    # QID176 RecodeValues: 45→1, 48→2, 49→3, 50→4, 51→5
+    'QID176': {'1': 'Employed- Full time', '2': 'Employed - Part time',
+               '3': 'Unemployed',          '4': 'Retired',
+               '5': 'Prefer not to respond'},
+    # ── Well-being & mobility ────────────────────────────────────────────────
+    'QID211': {'1': 'Yes', '2': 'No'},
+    'QID219': {'1': 'Yes', '2': 'No', '3': 'Not Sure', '4': 'Other'},
+    # ── Housing safety ───────────────────────────────────────────────────────
+    'QID21':  {'1': 'Always feel safe',    '2': 'Mostly feel safe',
+               '3': 'Somewhat feel safe',  '4': 'Rarely feel safe',
+               '5': 'Never feel safe'},
+    'QID194': {'1': 'Always feel safe',    '2': 'Mostly feel safe',
+               '3': 'Somewhat feel safe',  '4': 'Rarely feel safe',
+               '5': 'Never feel safe'},
+    # ── Residency & affordability ─────────────────────────────────────────────
+    'QID47':  {'1': 'Less than 1 year', '2': '1-5 years',
+               '3': '6-10 years',       '4': 'Indefinitely', '5': "Don't know"},
+    # QID17 and QID100 intentionally omitted — their RecodeValues produce
+    # duplicate codes across choices (survey design ambiguity).
+    # ── Structural (used by _compute_struct_score) ────────────────────────────
+    'QID192': {'1': '2000-now',    '2': '1980-1999',
+               '3': '1960-1979',  '4': 'Before 1960', '5': "I don't know"},
+    'QID128': {'1': 'Single Wide Mobile Home',  '2': 'Double Wide Mobile Home',
+               '3': 'House built on site',
+               '4': 'Non-traditional structure (camper, shed, etc.)', '5': 'Other'},
+    # QID141 RecodeValues: choice5→1 (Critical), rest sequential 1-4
+    'QID141': {'1': 'Excellent- No repairs needed.',  '2': 'Good- Minor repairs needed.',
+               '3': 'Fair- Some repairs needed.',     '4': 'Poor- Major repairs needed.'},
+}
+
+# Columns exported with custom Qualtrics names (not "QIDNNN" headers).
+# Symptom frequencies: 1=weekly, 2=monthly, 3=seasonally, 4=annually, 5=never.
+_COLNAME_RECODE_LABELS: dict = {
+    'Headache':            {'1': 'weekly', '2': 'monthly', '3': 'seasonally',
+                            '4': 'annually', '5': 'Never or rarely'},
+    'RespIll':             {'1': 'weekly', '2': 'monthly', '3': 'seasonally',
+                            '4': 'annually', '5': 'Never or rarely'},
+    'asthma':              {'1': 'weekly', '2': 'monthly', '3': 'seasonally',
+                            '4': 'annually', '5': 'Never or rarely'},
+    'wheeze':              {'1': 'weekly', '2': 'monthly', '3': 'seasonally',
+                            '4': 'annually', '5': 'Never or rarely'},
+    'Tired':               {'1': 'weekly', '2': 'monthly', '3': 'seasonally',
+                            '4': 'annually', '5': 'Never or rarely'},
+    # Hospital Respiratory: binary Yes/No. Any code ≠ '1' treated as No.
+    'Hospital Respiratory':{'1': 'Yes', '2': 'No', '3': 'No', '4': 'No'},
+    # Ownership: 1=Owner, 2=Renter, 3=Other/Co-own
+    'Ownership':           {'1': 'Owner', '2': 'Renter', '3': 'Other'},
+    # Cooling system age (QID102): 1=<10 yr, 2=10-15 yr, 4=>15 yr
+    # (Answer key 3 was never used; code 3 in data = 10-15 yr variant)
+    'Cooling System _1':   {'1': 'Less than 10 Years', '2': '10 to 15 Years',
+                            '3': '10 to 15 Years',     '4': 'More than 15 Years'},
+    'Cooling System _2':   {'1': 'Less than 10 Years', '2': '10 to 15 Years',
+                            '3': '10 to 15 Years',     '4': 'More than 15 Years'},
+    'Cooling System _3':   {'1': 'Less than 10 Years', '2': '10 to 15 Years',
+                            '3': '10 to 15 Years',     '4': 'More than 15 Years'},
+    'Cooling System _4':   {'1': 'Less than 10 Years', '2': '10 to 15 Years',
+                            '3': '10 to 15 Years',     '4': 'More than 15 Years'},
+}
+
+
+def _is_numeric_recode_export(df_full, qid_to_col_idx: dict) -> bool:
+    """Return True when the CSV uses numeric recode values instead of text labels.
+
+    Checks the Headache and QID195_1 columns: in text exports these contain
+    frequency strings ("weekly", "monthly") or intervention labels ("Like");
+    in numeric exports they contain single-digit integers ("1", "6", "7").
+    """
+    check_pairs = [
+        ('Headache',   None),          # column by name
+        ('QID195_1',   'QID195_1'),    # column by QID
+        ('QID124_1',   'QID124_1'),    # column by QID
+        ('QID178',     'QID178'),      # education: non-sequential recodes
+    ]
+    numeric_hits = 0
+    total_checked = 0
+    for col_name, qid_key in check_pairs:
+        # Resolve column
+        if qid_key and qid_key in qid_to_col_idx:
+            col_idx = qid_to_col_idx[qid_key]
+            if col_idx < len(df_full.columns):
+                col_name = df_full.columns[col_idx]
+        if col_name not in df_full.columns:
+            continue
+        sample = (df_full[col_name]
+                  .dropna().astype(str).str.strip()
+                  .replace('', None).dropna().head(30))
+        if sample.empty:
+            continue
+        n_num = sum(1 for v in sample if v.isdigit() and int(v) <= 20)
+        total_checked += 1
+        if n_num / len(sample) >= 0.6:
+            numeric_hits += 1
+    if not total_checked:
+        return False
+    return numeric_hits / total_checked >= 0.5
+
+
+def _apply_qsf_recode_labels(df_full, qid_to_col_idx: dict) -> None:
+    """Translate numeric recode values → text labels in df_full in-place.
+
+    Uses _QSF_RECODE_LABELS (QID-keyed) and _COLNAME_RECODE_LABELS (name-keyed).
+    After this call df_full looks identical to a Qualtrics text export, so all
+    downstream scoring and analysis code works without modification.
+    """
+    # QID-keyed: apply to every sub-column QIDxxx_N matching the base QID
+    for qid_base, label_map in _QSF_RECODE_LABELS.items():
+        for qid_key, col_idx in qid_to_col_idx.items():
+            if qid_key != qid_base and not qid_key.startswith(qid_base + '_'):
+                continue
+            if col_idx >= len(df_full.columns):
+                continue
+            col = df_full.columns[col_idx]
+            df_full[col] = df_full[col].apply(
+                lambda v, lm=label_map: (
+                    lm.get(str(v).strip(), v) if v is not None and str(v).strip() else v
+                )
+            )
+    # Column-name-keyed: apply by exact column header match
+    # (handles custom Qualtrics names like 'Headache', 'Cooling System _1', …)
+    norm = lambda s: str(s).replace('\xa0', ' ').strip()
+    col_map = {norm(c): c for c in df_full.columns}
+    for col_name, label_map in _COLNAME_RECODE_LABELS.items():
+        actual_col = col_map.get(norm(col_name))
+        if actual_col is None:
+            continue
+        df_full[actual_col] = df_full[actual_col].apply(
+            lambda v, lm=label_map: (
+                lm.get(str(v).strip(), v) if v is not None and str(v).strip() else v
+            )
+        )
+
+
 # Source-question captions for every chart_id rendered in the dashboard.
 # Each entry exposes the Qualtrics ImportId (QID) — the stable identifier
 # Qualtrics writes into row 3 of the CSV ({"ImportId":"QIDxxx_n"}). QIDs
@@ -1552,10 +1724,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     # columns) so we can index by ORIGINAL CSV position for SURVEY_QUESTIONS.
     # df strips PII columns and is what existing name-based code reads.
     df_full = raw[_mask].copy().reset_index(drop=True)
-    df = df_full.copy()
-    if df.empty:
-        # Log diagnostic Finished-column values to Vercel runtime; do NOT
-        # echo CSV cell values back to the HTTP client (avoid PII reflection).
+    if df_full.empty:
         print(f"[iaq] empty-after-Finished filter — sample values: "
               f"{list(raw['Finished'].astype(str).unique()[:8])}")
         raise ValueError(
@@ -1563,6 +1732,13 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
             "Only rows where Finished='True' or Finished=1 are processed."
         )
 
+    # Auto-detect numeric-recode export (May 4 style) and translate to text
+    # labels so all downstream scoring functions work identically to text exports.
+    if _is_numeric_recode_export(df_full, qid_to_col_idx):
+        print("[iaq] Numeric recode export detected — applying QSF label translation")
+        _apply_qsf_recode_labels(df_full, qid_to_col_idx)
+
+    df = df_full.copy()
     df.drop(columns=[c for c in PII_COLS if c in df.columns], inplace=True)
 
     contact_lookup = _build_contact_lookup(contact_features)

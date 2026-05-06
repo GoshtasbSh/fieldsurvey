@@ -32,6 +32,9 @@ from shapely.geometry import shape as _shp_shape, Point as _ShapelyPoint
 from shapely.strtree import STRtree as _STRtree
 import requests
 from contextlib import asynccontextmanager
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).parent / 'api'))
+from _processing import _is_numeric_recode_export, _apply_qsf_recode_labels
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
@@ -1249,8 +1252,7 @@ def process_iaq_survey(csv_bytes: bytes):
     # columns) so we can index by ORIGINAL CSV position for SURVEY_QUESTIONS.
     # df strips PII columns and is what existing name-based code reads.
     df_full = raw[_mask].copy().reset_index(drop=True)
-    df = df_full.copy()
-    if df.empty:
+    if df_full.empty:
         log.warning(
             f"IAQ: empty after Finished filter — sample values: "
             f"{list(raw['Finished'].astype(str).unique()[:8])}"
@@ -1259,7 +1261,13 @@ def process_iaq_survey(csv_bytes: bytes):
             "No completed responses found in the CSV. "
             "Only rows where Finished='True' or Finished=1 are processed."
         )
-    log.info(f"IAQ survey: {len(df)}/{len(raw)} finished responses")
+
+    if _is_numeric_recode_export(df_full, qid_to_col_idx):
+        log.info("IAQ: numeric recode export detected — applying QSF label translation")
+        _apply_qsf_recode_labels(df_full, qid_to_col_idx)
+
+    log.info(f"IAQ survey: {len(df_full)}/{len(raw)} finished responses")
+    df = df_full.copy()
 
     # Drop PII immediately
     df.drop(columns=[c for c in PII_COLS if c in df.columns], inplace=True)
