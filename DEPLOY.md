@@ -45,7 +45,7 @@ The Vercel Functions only read from those two tables at runtime.
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
-   - `ANTHROPIC_API_KEY` *(only needed once `/api/chat` is ported; see Gaps below)*
+   - `GROQ_API_KEY` *(used by `/api/chat` for the survey analyst)*
    - `CRON_SECRET` *(optional — protects `/api/daily-refresh`)*
 3. Deploy.
 
@@ -75,9 +75,8 @@ The Vercel Functions only read from those two tables at runtime.
 
 The following were scoped out of the first deploy:
 
-- **`/api/chat`** — Claude-powered AI survey analyst (streaming). Can be ported
-  to `api/chat.py` with the `anthropic` SDK when needed. Vercel Python supports
-  streaming responses.
+- **`/api/chat`** — LLM-powered survey analyst (Groq). Already ported to
+  `api/chat.py`. Vercel Python supports streaming responses.
 - **`/api/upload/*`** — bulk data ingest. Runs locally via `app.py` + the
   Dashboard Import modal. If field users need to upload from the browser in
   production, port survey + IAQ uploads to `api/upload/survey.py` + `api/upload/iaq.py`

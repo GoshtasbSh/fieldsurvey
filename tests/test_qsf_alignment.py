@@ -11,11 +11,15 @@ class QsfAlignmentTests(unittest.TestCase):
         self.assertIn("critical", QID141_RECODE_LABELS["5"].lower())
 
     def test_qid141_qsf_contains_critical_choice(self):
-        qsf_path = Path(
-            "/Users/goshtasbshahriari/UF Dropbox/Goshtasb Shahriari Mehr/DTSC_Lab/Keystone_Data/Keystone_Heights_Survey_-_V1 (1).qsf"
-        )
+        # Optional integration check: set KEYSTONE_QSF_PATH to point at a
+        # local copy of the Qualtrics .qsf export. Skipped if not provided.
+        import os
+        qsf_env = os.environ.get("KEYSTONE_QSF_PATH")
+        if not qsf_env:
+            self.skipTest("KEYSTONE_QSF_PATH not set")
+        qsf_path = Path(qsf_env)
         if not qsf_path.exists():
-            self.skipTest("QSF file not found on this machine")
+            self.skipTest("QSF file not found at KEYSTONE_QSF_PATH")
 
         obj = json.loads(qsf_path.read_text())
         qid141 = None

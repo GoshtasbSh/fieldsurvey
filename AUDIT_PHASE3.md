@@ -76,7 +76,7 @@ sync between two phones and a desktop browser tab.
 
 ## Pre-flight
 
-- [ ] Phone A signed in at `/login` as admin (`georgeshahriari@gmail.com`).
+- [ ] Phone A signed in at `/login` as admin (your bootstrap admin email).
 - [ ] Phone A on `/admin` → click **Get today's code** → note 6-char code.
 - [ ] Desktop tab open on `/static` → bottom analysis panel visible.
 - [ ] Phone B has cleared its sessionStorage (private window OK).

@@ -236,10 +236,14 @@ ORDER BY total DESC;
 
 
 -- ════════════════════════════════════════════════════════════════════════
--- 7. SEED: Insert initial report config row (edit email after setup)
+-- 7. SEED: Insert initial report config row
+-- ────────────────────────────────────────────────────────────────────────
+-- After running this migration, set the recipient email manually:
+--   UPDATE report_config SET email = 'you@example.com', active = true;
+-- (Or set KEYSTONE_REPORT_EMAIL in your .env and run a one-off seed script.)
 -- ════════════════════════════════════════════════════════════════════════
 INSERT INTO report_config (email, active)
-VALUES ('goshtasbshahriari@gmail.com', true)
+VALUES ('CHANGE_ME@example.com', false)
 ON CONFLICT DO NOTHING;
 
 

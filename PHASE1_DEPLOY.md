@@ -77,7 +77,7 @@ disaster — but easier to avoid).
 ### Step 1 — make sure your account exists
 
 You must already have a Supabase user in `auth.users` for
-`georgeshahriari@gmail.com`. If you've ever signed in to the dashboard
+`YOUR_ADMIN_EMAIL@example.com`. If you've ever signed in to the dashboard
 or the field app before, you're set — skip to Step 2.
 
 If not, sign up at https://your-deploy.vercel.app/login (using whatever
@@ -94,8 +94,9 @@ supabase/migrations/09_team_membership.sql
 
 and click **Run**. This creates `team_members`, `invite_codes`, and the
 `is_admin / claim_membership / get_or_create_today_code / promote_member /
-demote_member / list_team / my_team_role` RPCs. The seed at the bottom
-auto-promotes `georgeshahriari@gmail.com` to admin.
+demote_member / list_team / my_team_role` RPCs. There is no auto-seeded
+admin — promote your bootstrap admin manually with the snippet at the
+bottom of the migration file (substituting your email).
 
 Verify it worked:
 
@@ -103,7 +104,7 @@ Verify it worked:
 SELECT tm.role, u.email
   FROM team_members tm
   JOIN auth.users u ON u.id = tm.id
- WHERE u.email = 'georgeshahriari@gmail.com';
+ WHERE u.email = 'YOUR_ADMIN_EMAIL@example.com';
 ```
 
 You should see one row with `role = admin`.

@@ -12,8 +12,9 @@
 --     demote them back (demote_member) — but never demote the last admin.
 --   * RLS on data tables checks team_members membership; admin-only writes
 --     are enforced in 10_tighten_writes.sql.
---   * Bootstrap admin = georgeshahriari@gmail.com; promotion is recursive
---     thereafter (any admin can promote others).
+--   * Bootstrap admin email is configured via SQL after first deploy
+--     (see seed block at the bottom). Promotion is recursive thereafter
+--     (any admin can promote others).
 -- ════════════════════════════════════════════════════════════════════════
 
 -- ── 1. team_members ────────────────────────────────────────────────────
@@ -221,15 +222,18 @@ REVOKE ALL ON FUNCTION my_team_role() FROM public;
 GRANT EXECUTE ON FUNCTION my_team_role() TO authenticated;
 
 -- ════════════════════════════════════════════════════════════════════════
--- 10. SEED — bootstrap georgeshahriari@gmail.com as admin
+-- 10. SEED — bootstrap admin (configure email manually after first deploy)
 -- ────────────────────────────────────────────────────────────────────────
--- Idempotent. Safe to re-run after the user signs up if they hadn't yet.
--- If the user has not yet signed up, this is a no-op; re-run after sign-up.
--- Match is case-insensitive on the email — Supabase normalises but we
--- guard explicitly so cosmetic case differences don't lock you out.
+-- The first admin must be promoted manually after sign-up. Run this once
+-- in the Supabase SQL Editor with the desired email substituted in:
+--
+--   INSERT INTO team_members (id, role, joined_at)
+--   SELECT id, 'admin', now()
+--     FROM auth.users
+--    WHERE lower(trim(email)) = lower(trim('YOUR_ADMIN_EMAIL@example.com'))
+--   ON CONFLICT (id) DO UPDATE SET role = 'admin';
+--
+-- Match is case-insensitive on the email. Idempotent — safe to re-run.
+-- Once at least one admin exists, all further promotions go through
+-- promote_member() RPC (any admin can promote others).
 -- ════════════════════════════════════════════════════════════════════════
-INSERT INTO team_members (id, role, joined_at)
-SELECT id, 'admin', now()
-  FROM auth.users
- WHERE lower(trim(email)) = 'georgeshahriari@gmail.com'
-ON CONFLICT (id) DO UPDATE SET role = 'admin';
