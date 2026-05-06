@@ -108,8 +108,8 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 # from each feature's properties before responding so individual residents'
 # answers (some of which are sensitive — calling law enforcement, insurance
 # loss, open-text affordability strategy, etc.) never leak via the public
-# endpoint. The auth-gated /api/iaq-points-full preserves them for signed-in
-# dashboard users who need the per-question popup. Must mirror the keys in
+# endpoint. Auth-gated /api/iaq-points?full=1 (team check on Vercel; Bearer JWT
+# on Flask) preserves them for the dashboard popup. Must mirror the keys in
 # api/_processing.SURVEY_QUESTIONS.
 SURVEY_ANSWER_FIELDS = (
     'years_in_hre',

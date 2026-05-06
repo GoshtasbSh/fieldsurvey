@@ -137,13 +137,10 @@ async function _authFetch(url, opts = {}) {
   return fetch(url, opts);
 }
 
-// IAQ points come in two flavours:
-//   - /api/iaq-points            (public, per-respondent answers stripped)
-//   - /api/iaq-points-full       (auth-gated — Flask app.py; Vercel api/iaq-points-full.py)
-//   - /api/iaq-points?full=1     (same payload — legacy Vercel iaq-points.py query flag)
-// Try full payloads first when the user has a Supabase session, fall back to
-// public data. Anonymous viewers still get map dots + risk scores; only the
-// per-question popup tab stays blank without auth.
+// IAQ points:
+//   - /api/iaq-points — public; answers stripped server-side
+//   - /api/iaq-points?full=1 + Bearer — full GeoJSON (Flask + Vercel; avoids a
+//     second serverless file so Hobby stays within the 12-function limit)
 async function fetchIaqPoints() {
   try {
     if (!_cachedSession && sbClient?.auth) {
@@ -151,10 +148,8 @@ async function fetchIaqPoints() {
     }
     if (_cachedSession?.access_token) {
       const headers = { 'Authorization': `Bearer ${_cachedSession.access_token}` };
-      for (const url of ['/api/iaq-points-full', '/api/iaq-points?full=1']) {
-        const r = await fetch(url, { headers });
-        if (r.ok) return r;
-      }
+      const r = await fetch('/api/iaq-points?full=1', { headers });
+      if (r.ok) return r;
     }
   } catch (e) { /* fall through to public */ }
   return fetch('/api/iaq-points');

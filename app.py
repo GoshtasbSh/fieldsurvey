@@ -2513,8 +2513,8 @@ async def api_results():
 def _strip_survey_answers_local(geojson):
     """Mirror of api/_lib.strip_survey_answers — drops per-respondent
     SURVEY_QUESTIONS keys from every feature so the public IAQ endpoint
-    doesn't leak individuals' answers. Auth-gated /api/iaq-points-full
-    serves the un-stripped payload."""
+    doesn't leak individuals' answers. Authenticated ``/api/iaq-points?full=1``
+    (and legacy ``/api/iaq-points-full``) serves the un-stripped payload."""
     if not isinstance(geojson, dict):
         return geojson
     feats_in = geojson.get('features') or []
@@ -2562,23 +2562,36 @@ def _check_auth_header_local(request) -> str | None:
         return None
 
 
-@app.get("/api/iaq-points")
-async def api_iaq_pts():
-    """Public — per-respondent answers stripped before serving."""
-    if not iaq_data:
-        return JSONResponse({"type": "FeatureCollection", "features": []})
-    return JSONResponse(_strip_survey_answers_local(iaq_data))
+def _iaq_wants_full_export(request: Request) -> bool:
+    q = (request.query_params.get("full") or "").strip()
+    return q.lower() in ("1", "true", "yes")
 
 
-@app.get("/api/iaq-points-full")
-async def api_iaq_pts_full(request: Request):
-    """Auth-gated — full payload including per-respondent SURVEY_QUESTIONS
-    answers, used by the dashboard's Survey Answers popup tab."""
+def _iaq_full_geojson_response(request: Request):
+    """Bearer JWT required — full per-respondent answers for dashboard."""
     if _check_auth_header_local(request) is None:
         return JSONResponse({"detail": "Authentication required."}, status_code=401)
     if not iaq_data:
         return JSONResponse({"type": "FeatureCollection", "features": []})
     return JSONResponse(iaq_data)
+
+
+@app.get("/api/iaq-points")
+async def api_iaq_pts(request: Request):
+    """Public default: answers stripped. ``?full=1`` + Bearer JWT returns full
+    GeoJSON (matches Vercel ``api/iaq-points.py`` — single function on Hobby)."""
+    empty = {"type": "FeatureCollection", "features": []}
+    if not iaq_data:
+        return JSONResponse(empty)
+    if _iaq_wants_full_export(request):
+        return _iaq_full_geojson_response(request)
+    return JSONResponse(_strip_survey_answers_local(iaq_data))
+
+
+@app.get("/api/iaq-points-full")
+async def api_iaq_pts_full(request: Request):
+    """Legacy alias — same body as ``/api/iaq-points?full=1``."""
+    return _iaq_full_geojson_response(request)
 
 
 @app.get("/api/iaq-analysis")
