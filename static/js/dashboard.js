@@ -1339,6 +1339,49 @@ function findMatchedIaqFeature(lon, lat, maxMeters) {
   return best;
 }
 
+// Resolve the IAQ feature for a contact point with safety guards:
+// 1) stable response_id match (exact),
+// 2) exact matched coords (1 m),
+// 3) legacy fallback around clicked contact coord (<=5 m) ONLY when
+//    there's exactly one candidate (avoid wrong-neighbor binding).
+function resolveMatchedIaqFeature(contactProps, contactCoords) {
+  const feats = iaqData?.features || [];
+  if (!feats.length) return null;
+  const sp = contactProps || {};
+  const hasMatchBadge = !!sp.has_iaq_survey;
+  if (!hasMatchBadge) return null;
+
+  const targetRespId = String(sp.iaq_response_id || '').trim();
+  if (targetRespId) {
+    const byId = feats.find((f) => String(f?.properties?.response_id || '').trim() === targetRespId);
+    if (byId) return byId;
+  }
+
+  if (sp.iaq_match_lon != null && sp.iaq_match_lat != null) {
+    const byCoord = findMatchedIaqFeature(+sp.iaq_match_lon, +sp.iaq_match_lat, 1);
+    if (byCoord) return byCoord;
+  }
+
+  // Legacy contacts only: conservative fallback on clicked coord.
+  // Never run this for non-matched contacts.
+  const isLegacyMissingLink = (sp.iaq_match_lon == null || sp.iaq_match_lat == null) && !targetRespId;
+  if (!isLegacyMissingLink) return null;
+  if (!Array.isArray(contactCoords) || contactCoords.length < 2) return null;
+  const [lon, lat] = contactCoords;
+  const r = 5; // meters
+  const candidates = [];
+  for (const f of feats) {
+    const c = f?.geometry?.coordinates;
+    if (!Array.isArray(c) || c.length < 2) continue;
+    const dy = (c[1] - lat) * 111320;
+    const dx = (c[0] - lon) * 111320 * Math.cos(lat * Math.PI / 180);
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= r) candidates.push({ f, d });
+  }
+  if (candidates.length !== 1) return null;
+  return candidates[0].f;
+}
+
 // Build the "Survey Answers" popup tab from an IAQ feature. Walks the
 // SURVEY_QUESTIONS metadata baked into the analysis blob (chart_sources +
 // survey_questions) so question text always tracks the canonical Qualtrics
@@ -1356,6 +1399,7 @@ const _IAQ_NON_ANSWER_FIELDS = new Set([
   // Match-status / merge internals
   'match_status', 'iaq_matched', 'has_iaq_survey',
   'iaq_match_lon', 'iaq_match_lat',
+  'iaq_response_id',
   // Qualtrics export metadata
   'response_id', 'recorded_date', 'recordeddate',
   'startdate', 'enddate', 'progress', 'duration',
@@ -1448,18 +1492,14 @@ function buildSurveyAnswersTab(iaqProps) {
   const friendly = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const props = iaqProps || {};
 
-  // Render the COMPLETE survey-question set per category, including
-  // unanswered fields ("—"). This is intentional — the popup is meant
-  // as a full snapshot of the question instrument applied to this
-  // respondent, not just the rows they happened to fill out. Skipping
-  // empties would obscure the difference between "didn't ask" and
-  // "asked, declined to answer".
+  // Render an answered-first survey view. Showing every unanswered row
+  // made the popup look mostly empty for real users, especially on
+  // legacy exports with many placeholder labels.
   // Qualtrics emits placeholder text when a question's scale labels
   // were never customised — e.g. "Click to write Scale Point 1",
   // "Click to write Choice 4". Those are NOT real respondent answers,
-  // so treat them as unanswered. Also filters obvious "no-data"
-  // sentinels (n/a, none, skip) that can leak through CSV cleaning.
-  const _PLACEHOLDER_RE = /^(click to write (scale point|choice)\s*\d*|n\/?a|none|skip(ped)?|no answer|--)$/i;
+  // so treat them as unanswered.
+  const _PLACEHOLDER_RE = /^(click to write (scale point|choice)\s*\d*|skip(ped)?|no answer|--)$/i;
   const isAnswered = (v) => {
     if (v == null) return false;
     const s = String(v).trim();
@@ -1468,31 +1508,35 @@ function buildSurveyAnswersTab(iaqProps) {
     return true;
   };
   const renderRow = (q, v) => {
-    const answered = isAnswered(v);
-    const display  = answered ? String(v) : '—';
     return `<div class="popup-row" style="align-items:flex-start;gap:8px;padding:3px 0">
       <span class="popup-label" style="max-width:58%;font-size:10.5px;line-height:1.35;color:var(--text2);font-weight:400" title="${escapeHtml(q)}">${escapeHtml(q.length > 90 ? q.slice(0, 87) + '…' : q)}</span>
-      <span class="popup-value" style="max-width:42%;text-align:right;font-size:11px;color:${answered ? 'var(--text)' : 'var(--muted)'};font-weight:${answered ? '500' : '400'};font-style:${answered ? 'normal' : 'italic'}">${escapeHtml(display)}</span>
+      <span class="popup-value" style="max-width:42%;text-align:right;font-size:11px;color:var(--text);font-weight:500">${escapeHtml(String(v))}</span>
     </div>`;
   };
 
-  // Render each curated category. Sections always appear, even when
-  // every answer in them is blank, so the field team can see what
-  // the instrument covers at a glance.
+  // Render each curated category with answered rows only. Keep a subtle
+  // "hidden unanswered" count so reviewers can still tell this is a
+  // filtered presentation, not missing data.
   const knownKeys = new Set();
   _IAQ_CATEGORIES.forEach(([, keys]) => keys.forEach(k => knownKeys.add(k)));
 
   const curatedSections = _IAQ_CATEGORIES.map(([title, keys]) => {
-    const rows = keys.map(k => renderRow(qtext[k] || friendly(k), props[k])).join('');
     const answeredCount = keys.reduce((n, k) => n + (isAnswered(props[k]) ? 1 : 0), 0);
+    if (answeredCount === 0) return '';
+    const unansweredCount = keys.length - answeredCount;
+    const rows = keys
+      .filter(k => isAnswered(props[k]))
+      .map(k => renderRow(qtext[k] || friendly(k), props[k]))
+      .join('');
     return `<div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(34,211,238,.15)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <span style="font-size:10.5px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.08em">${escapeHtml(title)}</span>
         <span style="font-size:9.5px;color:var(--muted);font-family:var(--mono)">${answeredCount}/${keys.length}</span>
       </div>
+      ${unansweredCount > 0 ? `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">${unansweredCount} unanswered hidden</div>` : ''}
       ${rows}
     </div>`;
-  }).join('');
+  }).filter(Boolean).join('');
 
   // Anything else on the feature that isn't internal and isn't already
   // claimed by a curated category goes under "Other" — only rendered
@@ -1638,11 +1682,8 @@ async function onPointClick(e) {
     await refreshMyRole();
   }
   const isTeamMember = _myRole === 'admin' || _myRole === 'member';
-  if (isTeamMember) {
-    let iaqFeat = null;
-    if (sp.iaq_match_lon != null && sp.iaq_match_lat != null) {
-      iaqFeat = findMatchedIaqFeature(+sp.iaq_match_lon, +sp.iaq_match_lat, 1);
-    }
+  if (isTeamMember && sp.has_iaq_survey) {
+    const iaqFeat = resolveMatchedIaqFeature(sp, coords);
     if (iaqFeat && iaqFeat.properties) {
       tabs.push({ label: 'Survey Answers', content: buildSurveyAnswersTab(iaqFeat.properties) });
     }

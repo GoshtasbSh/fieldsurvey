@@ -1151,6 +1151,8 @@ def dedup_contacts_at_parcel(features: list, cell_deg: float = 1e-5) -> list:
                         wp["iaq_match_lon"] = lp["iaq_match_lon"]
                     if lp.get("iaq_match_lat") is not None:
                         wp["iaq_match_lat"] = lp["iaq_match_lat"]
+                    if lp.get("iaq_response_id"):
+                        wp["iaq_response_id"] = lp["iaq_response_id"]
                     for k in ("iaq_overall_risk", "iaq_health_score",
                               "iaq_iaq_score", "iaq_struct_score",
                               "iaq_risk_tier"):
@@ -1189,6 +1191,7 @@ def _upgrade_contacts_from_iaq(survey_feats: list, iaq_features: list,
         cf['properties']['iaq_health_score'] = ip.get('health_score', 0)
         cf['properties']['iaq_iaq_score']    = ip.get('iaq_score', 0)
         cf['properties']['iaq_struct_score'] = ip.get('struct_score', 0)
+        cf['properties']['iaq_response_id']  = ip.get('response_id', '')
         # Store the matched IAQ's parcel-rep-point on the contact so the
         # popup can do an O(1) lookup of the IAQ feature for the Survey
         # Answers tab without a fresh spatial search. Replaces the old
@@ -1888,6 +1891,7 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
                 'cooling_none':       str(_row_nr.get('Cooling System _4', '') or ''),
                 'cooking_method':     str(_row_nr.get('Cooking', '')            or ''),
                 'coord_source':       coord_source,
+                'response_id':        str(_row_nr.get('ResponseId', '') or _row_nr.get('Response ID', '') or ''),
                 'raw_address':        raw_addr,
                 'iaq_matched':        False,
                 **survey_extras,
