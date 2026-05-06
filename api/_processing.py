@@ -19,7 +19,8 @@ import urllib.request
 import urllib.parse
 from collections import defaultdict
 from datetime import date
-from math import radians, sin, cos, sqrt, atan2
+from math import radians, sin, cos, sqrt, atan2, isfinite
+from numbers import Integral, Real
 from pathlib import Path
 
 import pandas as pd
@@ -298,6 +299,59 @@ _COLNAME_RECODE_LABELS: dict = {
 }
 
 
+def _normalize_qualtrics_recode_key(v):
+    """Map pandas-parsed choice codes to string keys used in QSF-derived maps.
+
+    Qualtrics numeric exports store bare integers in CSV; ``pd.read_csv`` reads
+    them as int64 / float64. Lookup tables use digit strings only (``'6'`` →
+    ``'Like'``). Using ``str(6.0)`` yields ``'6.0'``, which misses and leaves
+    numbers visible in the dashboard / analysis (May-style exports).
+    """
+    if v is None:
+        return None
+    try:
+        if v is pd.NA:
+            return None
+    except (AttributeError, TypeError):
+        pass
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(v, bool):
+        return None
+
+    if isinstance(v, Integral):
+        return str(int(v))
+
+    if isinstance(v, Real):
+        x = float(v)
+        if isfinite(x) and abs(x - round(x)) < 1e-9:
+            return str(int(round(x)))
+        return str(v).strip()
+
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        x = float(s)
+        if isfinite(x) and abs(x - round(x)) < 1e-9:
+            return str(int(round(x)))
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return s
+
+
+def _translate_recode_cell(v, label_map: dict):
+    key = _normalize_qualtrics_recode_key(v)
+    if key is None:
+        return v
+    mapped = label_map.get(key)
+    return mapped if mapped is not None else v
+
+
 def _is_numeric_recode_export(df_full, qid_to_col_idx: dict) -> bool:
     """Return True when the CSV uses numeric recode values instead of text labels.
 
@@ -367,9 +421,7 @@ def _apply_qsf_recode_labels(df_full, qid_to_col_idx: dict) -> None:
                 continue
             col = df_full.columns[col_idx]
             df_full[col] = df_full[col].apply(
-                lambda v, lm=label_map: (
-                    lm.get(str(v).strip(), v) if v is not None and str(v).strip() else v
-                )
+                lambda v, lm=label_map: _translate_recode_cell(v, lm)
             )
     # Column-name-keyed: apply by exact column header match
     # (handles custom Qualtrics names like 'Headache', 'Cooling System _1', …)
@@ -380,9 +432,7 @@ def _apply_qsf_recode_labels(df_full, qid_to_col_idx: dict) -> None:
         if actual_col is None:
             continue
         df_full[actual_col] = df_full[actual_col].apply(
-            lambda v, lm=label_map: (
-                lm.get(str(v).strip(), v) if v is not None and str(v).strip() else v
-            )
+            lambda v, lm=label_map: _translate_recode_cell(v, lm)
         )
 
 

@@ -1,5 +1,12 @@
 import unittest
 
+import numpy as np
+import pandas as pd
+
+from api._processing import (
+    _apply_qsf_recode_labels,
+    _normalize_qualtrics_recode_key,
+)
 from api.survey_logic import (
     build_validation_summary,
     compute_struct_score,
@@ -8,6 +15,27 @@ from api.survey_logic import (
 
 
 class ProcessingAnalysisTests(unittest.TestCase):
+    def test_normalize_qualtrics_recode_key_handles_float_csv_cells(self):
+        """May exports parsed as float must match QSF maps keyed by '6', not '6.0'."""
+        self.assertEqual(_normalize_qualtrics_recode_key(6.0), "6")
+        self.assertEqual(_normalize_qualtrics_recode_key(np.float64(1.0)), "1")
+        self.assertEqual(_normalize_qualtrics_recode_key(7), "7")
+        self.assertEqual(_normalize_qualtrics_recode_key(" Like "), "Like")
+
+    def test_apply_qsf_recode_labels_numeric_cells(self):
+        df = pd.DataFrame(
+            {
+                "QID195_1": [6.0, 1.0, "Like"],
+                "Headache": [5.0, np.nan, "weekly"],
+            }
+        )
+        qid_map = {"QID195_1": 0, "Headache": 1}
+        _apply_qsf_recode_labels(df, qid_map)
+        self.assertEqual(df["QID195_1"].tolist(), ["Like", "Dislike", "Like"])
+        self.assertTrue(pd.isna(df["Headache"].iloc[1]))
+        self.assertEqual(df["Headache"].iloc[0], "Never or rarely")
+        self.assertEqual(df["Headache"].iloc[2], "weekly")
+
     def test_struct_score_counts_critical_condition(self):
         score = compute_struct_score({
             "QID192": "Before 1960",
