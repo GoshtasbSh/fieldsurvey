@@ -4541,7 +4541,8 @@ function _initResultsCharts(tab, ctx) {
         const isNegative = kl.startsWith('not ') || kl.startsWith('not at');
         if (!isNegative && (
           kl.includes('important') || kl === 'very' ||
-          kl.includes('high') || kl.includes('strongly')
+          kl.includes('high') || kl.includes('strongly') ||
+          kl.includes('concern')  // "One of my key concerns" = 5th/highest option
         )) imp += c;
       });
       relocPct[f] = n > 0 ? Math.round(imp / n * 100) : 0;

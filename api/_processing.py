@@ -1333,6 +1333,7 @@ def _compute_iaq_analysis(features: list) -> dict:
     _NEGATIVE_TOKENS = (
         'not ', "don't", 'do not', 'never', 'no - ', 'no, ',
         'strongly disagree', 'somewhat disagree', 'disagree',
+        'dislike',  # prevents 'like' in 'dislike' false-positive
     )
     _AFFIRM_TOKENS = ('yes', 'agree', 'true')
     _POSITIVE_WANT_TOKENS = (
