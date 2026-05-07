@@ -447,8 +447,10 @@ class handler(BaseHTTPRequestHandler):
             json_response(self, 502, {"error": err_msg})
             return
         except Exception as e:
+            # Log the full error server-side; never echo internals to the
+            # client (would leak Groq URLs / partial JWTs / pandas internals).
             print(f"[chat] {type(e).__name__}: {e}")
-            json_response(self, 500, {"error": f"{type(e).__name__}: {e}"[:300]})
+            json_response(self, 500, {"error": "Chat service error. Please try again."})
             return
 
         # Extract json_actions block; strip it from the visible text

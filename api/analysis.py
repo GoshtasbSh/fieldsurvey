@@ -14,6 +14,7 @@ import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).parent))
 from _lib import (
     load_cached, json_response, supabase_admin, supabase_anon,
+    require_team_member,
 )
 
 
@@ -60,6 +61,13 @@ class handler(BaseHTTPRequestHandler):
         qs = parse_qs(urlparse(self.path).query)
         is_meta = (qs.get("meta", ["0"])[0] or "").lower() in ("1", "true", "yes")
         kind    = (qs.get("type", ["contact"])[0] or "contact").lower()
+
+        # Analysis is desktop-dashboard only. Guests are blocked from the
+        # desktop frontend; we also enforce this at the API boundary so
+        # the analysis blob (which can include resident-level aggregates)
+        # never reaches a non-team caller.
+        if require_team_member(self) is None:
+            return  # 401/403 already written
 
         if is_meta:
             json_response(self, 200, _meta_payload(), cache="no-store")

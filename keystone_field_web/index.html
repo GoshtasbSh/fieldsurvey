@@ -3694,18 +3694,52 @@ function renderExportStats() {
 }
 
 async function emailData() {
-  const addr = document.getElementById('email-addr').value.trim();
+  const addr = (document.getElementById('email-addr').value || '').trim().toLowerCase();
   if (!addr || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
     document.getElementById('email-addr').focus();
     showToast('Enter a valid email address', '#ef4444');
     return;
   }
-  // Download CSV first, then open mailto
-  await downloadCSV('survey');
-  const subject = encodeURIComponent('KeyStone Heights Survey Data – ' + new Date().toLocaleDateString());
-  const body = encodeURIComponent('Hi,\n\nPlease find the attached KeyStone survey CSV (just downloaded to your device).\n\nDate: ' + new Date().toLocaleString() + '\nTotal points: ' + totalPts + '\nCompleted today: ' + (counts['Completed'] || 0));
-  window.location.href = `mailto:${addr}?subject=${subject}&body=${body}`;
-  showToast('CSV downloaded · email client opened', '#34d399');
+  // Send the report directly from the server: builds an XLSX of the
+  // CALLER'S OWN points (members → by collector_id; guests → by
+  // guest_session_id) and emails it to the requested address. Replaces
+  // the previous mailto: + manual-attach flow which leaked nothing
+  // useful but required the user to attach the file by hand.
+  showToast('Sending email…', '#38bdf8');
+  try {
+    let res;
+    if (IS_GUEST) {
+      const gsid = (GUEST && GUEST.session_id) || null;
+      if (!gsid) { showToast('No active guest session.', '#ef4444'); return; }
+      res = await fetch('/api/daily-refresh?action=my-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_email: addr,
+          guest_session_id: gsid,
+        }),
+      });
+    } else {
+      const session = (await sb.auth.getSession()).data.session;
+      if (!session) { showToast('Sign in first.', '#f59e0b'); return; }
+      res = await fetch('/api/daily-refresh?action=my-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + session.access_token,
+        },
+        body: JSON.stringify({ target_email: addr }),
+      });
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      showToast(data.detail || data.info || 'Email send failed.', '#ef4444');
+      return;
+    }
+    showToast('Email sent to ' + addr, '#34d399');
+  } catch (e) {
+    showToast('Network error. Please try again.', '#ef4444');
+  }
 }
 
 async function downloadCSV(table) {
@@ -3714,28 +3748,55 @@ async function downloadCSV(table) {
   try {
     let data, filename, cols;
     if (table === 'survey') {
-      // Export ONLY the current user's field points. Switch to shared-team CSV
-      // later if/when the export panel adds a teammate scope toggle.
-      if (!currentUser?.id) { showToast('Sign in to download your data', '#f59e0b'); return; }
-      const res = await sb.from('field_survey_points')
-        .select('id,lat,lon,status,notes,collector_name,collected_at')
-        .eq('collector_id', currentUser.id)
-        .order('collected_at', { ascending: false }).limit(5000);
-      data = res.data || [];
-      cols = ['id','lat','lon','status','notes','collector_name','collected_at'];
-      filename = `keystone_survey_${currentUser.name.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+      // Guests export only the points THEY collected during this session
+      // (matched by guest_session_id). Authenticated users export their
+      // own points by collector_id. Admins/members can use the desktop
+      // dashboard for full team-wide exports — this app intentionally
+      // limits each surveyor to their own contributions.
+      if (IS_GUEST) {
+        const gsid = (GUEST && GUEST.session_id) || null;
+        if (!gsid) { showToast('No active guest session.', '#f59e0b'); return; }
+        const res = await fetch('/api/guest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'my-points', session_id: gsid }),
+        });
+        const j = await res.json().catch(() => ({}));
+        data = (j && j.points) || [];
+        cols = ['id','lat','lon','status','notes','collector_name','collected_at'];
+        filename = `keystone_survey_${(currentUser?.name || 'guest').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+      } else {
+        if (!currentUser?.id) { showToast('Sign in to download your data', '#f59e0b'); return; }
+        const res = await sb.from('field_survey_points')
+          .select('id,lat,lon,status,notes,collector_name,collected_at')
+          .eq('collector_id', currentUser.id)
+          .order('collected_at', { ascending: false }).limit(5000);
+        data = res.data || [];
+        cols = ['id','lat','lon','status','notes','collector_name','collected_at'];
+        filename = `keystone_survey_${currentUser.name.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+      }
       if (!data.length) {
         showToast('You have no points to download yet', '#f59e0b');
         return;
       }
       showToast(`Downloading ${data.length} of your points…`, '#38bdf8');
     } else if (table === 'community') {
+      // Community + IAQ team-wide exports are admin/member only — guests
+      // would see other surveyors' canvassing data, which leaks PII.
+      if (IS_GUEST) {
+        showToast('Team-wide exports are admin/member only.', '#f59e0b');
+        return;
+      }
       const res = await sb.from('community_contacts')
-        .select('id,address,street_name,lat,lon,status').limit(5000);
+        .select('id,address,street_name,lat,lon,status,source').limit(5000);
       data = res.data || [];
-      cols = ['id','address','street_name','lat','lon','status'];
+      cols = ['id','address','street_name','lat','lon','status','source'];
       filename = 'keystone_community_contacts.csv';
     } else {
+      if (IS_GUEST) {
+        showToast('Team-wide exports are admin/member only.', '#f59e0b');
+        return;
+      }
       const res = await sb.from('iaq_surveys')
         .select('id,lat,lon,risk_tier,overall_risk').limit(5000);
       data = res.data || [];

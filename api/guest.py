@@ -49,10 +49,19 @@ ALLOWED_STATUS = {
 # ── helpers (inlined from former api/guest/_helpers.py) ────────────────
 
 def _get_client_ip(self) -> str:
-    xff = self.headers.get("X-Forwarded-For", "") or ""
+    # On Vercel, X-Vercel-Forwarded-For is set by the platform and cannot
+    # be spoofed by the caller. Prefer it. Fall back to the right-most
+    # X-Forwarded-For token (Vercel always appends the real client IP at
+    # the end), and finally X-Real-IP. Trusting the LEFT-most XFF token —
+    # the previous behaviour — let an attacker rotate per-IP rate-limits
+    # by sending arbitrary header values.
+    vercel_xff = (self.headers.get("X-Vercel-Forwarded-For") or "").strip()
+    if vercel_xff:
+        return vercel_xff.split(",")[-1].strip()
+    xff = (self.headers.get("X-Forwarded-For") or "").strip()
     if xff:
-        return xff.split(",", 1)[0].strip()
-    return self.headers.get("X-Real-IP", "") or ""
+        return xff.split(",")[-1].strip()
+    return (self.headers.get("X-Real-IP") or "").strip()
 
 
 def _hash_ip(ip: str) -> str:

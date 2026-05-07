@@ -142,7 +142,10 @@ form.active{display:block;}
   <div id="stage-auth">
     <div class="tabs">
       <button class="tab active" id="tab-login" onclick="showTab('login')">Sign In</button>
-      <button class="tab" id="tab-register" onclick="showTab('register')">Create Account</button>
+      <!-- "Create Account" is admin-invite only. The button is hidden by default
+           and only revealed when the URL contains a valid ?invite=<token>&email=<x>
+           pair issued by an admin via the Team panel. -->
+      <button class="tab" id="tab-register" onclick="showTab('register')" style="display:none;">Create Account</button>
       <button class="tab" id="tab-guest" onclick="showTab('guest')">Guest</button>
     </div>
 
@@ -270,10 +273,40 @@ async function checkMembershipAndRoute() {
   }
 }
 
+// Invite-token state — populated from URL query params on load.
+let _inviteToken = '';
+let _inviteEmail = '';
+
+async function _applyInviteFromUrl() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const tok = (p.get('invite') || '').trim();
+    const em  = (p.get('email')  || '').trim().toLowerCase();
+    if (!tok || !em) return;
+    if (!sb) return;
+    // Verify the token+email pair before exposing the signup form.
+    const { data, error } = await sb.rpc('verify_member_invite', {
+      p_email: em, p_token: tok,
+    });
+    if (error || !data || data.ok !== true) return;
+    _inviteToken = tok;
+    _inviteEmail = em;
+    document.getElementById('tab-register').style.display = '';
+    const emailField = document.getElementById('reg-email');
+    if (emailField) {
+      emailField.value = em;
+      emailField.readOnly = true;
+      emailField.style.opacity = '0.7';
+    }
+    showTab('register');
+  } catch (e) { /* Ignore — defaults to sign-in only. */ }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSupabaseConfig();
   if (!SUPABASE_URL) return;
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  await _applyInviteFromUrl();
   const { data: { session } } = await sb.auth.getSession();
   if (session) await checkMembershipAndRoute();
 });
@@ -312,10 +345,22 @@ async function doLogin(e) {
 
 async function doRegister(e) {
   e.preventDefault();
-  if (!sb) { showMsg('reg-msg', 'Supabase not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY env vars.', 'error'); return; }
+  if (!sb) { showMsg('reg-msg', 'Supabase not configured.', 'error'); return; }
+  // Account creation is admin-invite only. Refuse if no valid invite is
+  // present in the URL — prevents random visitors from self-registering
+  // and grinding daily codes to gain member access.
+  if (!_inviteToken || !_inviteEmail) {
+    showMsg('reg-msg', 'Account creation is by admin invitation only. ' +
+            'Ask an administrator to send you an invitation email.', 'error');
+    return;
+  }
   const name     = document.getElementById('reg-name').value.trim();
-  const email    = document.getElementById('reg-email').value.trim();
+  const email    = (document.getElementById('reg-email').value || '').trim().toLowerCase();
   const password = document.getElementById('reg-password').value;
+  if (email !== _inviteEmail) {
+    showMsg('reg-msg', 'Email must match the invitation we sent you.', 'error');
+    return;
+  }
   const btn = document.getElementById('reg-btn');
   btn.disabled = true; btn.textContent = 'Creating account…';
   const { data, error } = await sb.auth.signUp({
@@ -325,13 +370,28 @@ async function doRegister(e) {
   if (error) {
     showMsg('reg-msg', error.message, 'error');
     btn.disabled = false; btn.textContent = 'Create Account';
-  } else if (data.session) {
-    // Email confirmation disabled — user is signed in immediately.
-    // Force them through the claim-code stage before they can use the app.
-    await checkMembershipAndRoute();
+    return;
+  }
+  // Redeem the invite — promotes the user to team_members.role='member'.
+  try {
+    const { data: claim, error: claimErr } = await sb.rpc(
+      'claim_membership_via_invite', { p_token: _inviteToken },
+    );
+    if (claimErr || !claim || claim.ok !== true) {
+      showMsg('reg-msg', (claim && claim.error) || claimErr?.message ||
+              'Invite redemption failed.', 'error');
+      btn.disabled = false; btn.textContent = 'Create Account';
+      return;
+    }
+  } catch (err) {
+    showMsg('reg-msg', err.message || 'Network error.', 'error');
     btn.disabled = false; btn.textContent = 'Create Account';
+    return;
+  }
+  if (data.session) {
+    redirectAfterLogin();
   } else {
-    showMsg('reg-msg', 'Account created! You can now sign in.', 'info');
+    showMsg('reg-msg', 'Account created — please sign in.', 'info');
     btn.disabled = false; btn.textContent = 'Create Account';
   }
 }

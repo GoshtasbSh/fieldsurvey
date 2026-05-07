@@ -4,7 +4,9 @@
   "trailingSlash": false,
   "crons": [
     { "path": "/api/daily-refresh", "schedule": "0 4 * * *" },
-    { "path": "/api/daily-refresh", "schedule": "0 5 * * *" }
+    { "path": "/api/daily-refresh", "schedule": "0 5 * * *" },
+    { "path": "/api/daily-refresh?mode=report", "schedule": "0 0 * * *" },
+    { "path": "/api/daily-refresh?mode=report", "schedule": "0 1 * * *" }
   ],
   "functions": {
     "api/upload.py": { "maxDuration": 300 },

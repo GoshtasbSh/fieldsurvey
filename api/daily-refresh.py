@@ -9,7 +9,10 @@ Protected by CRON_SECRET header when called from Vercel's scheduler.
 """
 from http.server import BaseHTTPRequestHandler
 from datetime import datetime, timezone
+from urllib.parse import urlparse, parse_qs
+import json as _json
 import os
+import urllib.request as _urlreq
 from zoneinfo import ZoneInfo
 
 import sys, pathlib
@@ -279,16 +282,82 @@ def _authorized(handler_obj) -> bool:
     return _cron_authorized(handler_obj) or _admin_authorized(handler_obj)
 
 
+def _maybe_dispatch_email_action(handler_obj) -> bool:
+    """If the request carries ?action=invite|my-report|daily-report,
+    delegate to the email-logic module (kept underscore-prefixed so it
+    is NOT counted against the Hobby 12-function cap). Returns True if
+    handled (a response has been written)."""
+    qs = parse_qs(urlparse(handler_obj.path).query)
+    action = (qs.get("action", [""])[0] or "").lower()
+    if not action:
+        return False
+    # Read body (POST). For GET we just pass an empty dict.
+    body: dict = {}
+    try:
+        length = int(handler_obj.headers.get("Content-Length") or "0")
+        if length > 0:
+            raw = handler_obj.rfile.read(length)
+            try:
+                parsed = _json.loads(raw.decode("utf-8") or "{}")
+                if isinstance(parsed, dict):
+                    body = parsed
+            except Exception:
+                body = {}
+    except Exception:
+        body = {}
+    try:
+        from _email_logic import dispatch as _email_dispatch  # type: ignore
+    except Exception:
+        return False
+    return bool(_email_dispatch(handler_obj, action, body))
+
+
 class handler(BaseHTTPRequestHandler):
     def _handle(self):
+        # ── Email-logic actions (invite / my-report / daily-report) ──
+        # These come in BEFORE the refresh authorisation gate because
+        # each handler does its own auth (admin JWT, user JWT, guest
+        # session id, or cron bearer).
+        qs = parse_qs(urlparse(self.path).query)
+        action = (qs.get("action", [""])[0] or "").lower()
+        mode = (qs.get("mode", [""])[0] or "").lower()
+        if action in ("invite", "my-report", "daily-report"):
+            if _maybe_dispatch_email_action(self):
+                return
+            json_response(self, 500, {"error": "email dispatch failed"})
+            return
+        if mode == "report":
+            # Vercel cron triggers at 00:00 UTC (EDT) and 01:00 UTC (EST);
+            # the local-time gate below picks exactly one per DST window.
+            cron_ok = _cron_authorized(self)
+            admin_ok = _admin_authorized(self)
+            if not (cron_ok or admin_ok):
+                json_response(self, 401, {"error": "unauthorized"})
+                return
+            if cron_ok and not admin_ok:
+                now_local = datetime.now(LOCAL_TZ)
+                if now_local.hour != 20:
+                    json_response(self, 200, {
+                        "report": False,
+                        "reason": "outside Florida 20:00 local window",
+                        "local_time": now_local.isoformat(),
+                    })
+                    return
+            # Synthesize an action=daily-report request and delegate.
+            try:
+                from _email_logic import dispatch as _email_dispatch  # type: ignore
+                _email_dispatch(self, "daily-report", {})
+            except Exception as e:
+                json_response(self, 500, {"error": f"{type(e).__name__}"})
+            return
         cron_ok = _cron_authorized(self)
         admin_ok = _admin_authorized(self)
         if not (cron_ok or admin_ok):
             json_response(self, 401, {"error": "unauthorized"})
             return
-        # Cron is scheduled at both 04:00 and 05:00 UTC so DST shifts still
-        # hit local midnight in Florida. Only the invocation that is actually
-        # 00:00 local performs work; the other exits early.
+        # Default: data refresh. Cron is scheduled at both 04:00 and 05:00
+        # UTC so DST shifts still hit local midnight in Florida. Only the
+        # invocation that is actually 00:00 local performs work.
         if cron_ok and not admin_ok:
             now_local = datetime.now(LOCAL_TZ)
             if now_local.hour != 0:

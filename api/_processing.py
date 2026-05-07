@@ -807,36 +807,74 @@ def _parse_years_numeric(v):
         return None
 
 
-def _extract_survey_extras(full_row, qid_to_col_idx: dict | None = None) -> dict:
+def _build_colname_qid_map(df_columns) -> dict:
+    """Reverse map: QID -> column index by scanning DataFrame headers.
+
+    Qualtrics text-format exports often place the QID in the header (e.g.
+    `Intervention - Strengthen the roof and walls...QID195_1`). This map
+    is a robust fallback when the ImportId metadata row is absent or
+    incomplete (most TEXT exports drop it).
+    """
+    out: dict = {}
+    if df_columns is None:
+        return out
+    try:
+        cols = list(df_columns)
+    except Exception:
+        return out
+    qid_re = re.compile(r'(QID\d+(?:_\d+)?(?:_TEXT)?)', re.IGNORECASE)
+    for idx, name in enumerate(cols):
+        if not isinstance(name, str):
+            continue
+        for m in qid_re.findall(name):
+            qid = m.upper()
+            out.setdefault(qid, idx)
+            base = qid[:-5] if qid.endswith('_TEXT') else qid
+            out.setdefault(base, idx)
+    return out
+
+
+def _extract_survey_extras(full_row, qid_to_col_idx: dict | None = None,
+                           df_columns=None,
+                           miss_log: list | None = None) -> dict:
     """Extract every SURVEY_QUESTIONS field from the pre-PII row.
 
     Lookup priority for each field:
-      1. QID (from CSV's ImportId metadata row) — robust to column
-         shuffling between Qualtrics survey versions.
-      2. Hardcoded CSV column index — fallback for legacy exports
-         without ImportId metadata.
+      1. QID via the CSV's ImportId metadata map (numeric exports).
+      2. QID embedded in the column header (text exports often have
+         `QID195_1` appended to the header text).
+      3. Hardcoded CSV column index — last-resort fallback for fully
+         legacy exports without any QID hint.
+
+    Misses are recorded in ``miss_log`` (if provided) so callers can
+    surface them in the analysis output. Without this, format drift
+    between numeric and text exports silently misaligned columns and
+    caused fewer answers to appear in the popup for one of the formats.
 
     Also derives years_in_hre_num for histogram aggregation.
     """
     qmap = qid_to_col_idx or {}
+    cmap = _build_colname_qid_map(df_columns) if df_columns is not None else {}
     out: dict = {}
     for field, meta in SURVEY_QUESTIONS.items():
-        # Tuple may be (idx, qid, text) [new] or (idx, text) [legacy
-        # call-site tolerance — should never happen, but defensive].
+        # Tuple may be (idx, qid, text) [new] or (idx, text) [legacy].
         if len(meta) == 3:
             idx, qid, _text = meta
         else:
             idx, _text = meta
             qid = None
-        # Prefer QID lookup; fall back to the hardcoded column index.
         col = qmap.get(qid) if qid else None
         if col is None and qid:
-            # Try the QID's base form (strip "_TEXT" suffix Qualtrics
-            # adds for free-text variants of an otherwise-numeric Q).
             base = qid[:-5] if qid.endswith('_TEXT') else qid
             col = qmap.get(base)
+        if col is None and qid:
+            # Tertiary: header-text fallback (text-format exports).
+            col = cmap.get(qid) or cmap.get(qid[:-5] if qid.endswith('_TEXT') else qid)
         if col is None:
+            # Final fallback to the historical hardcoded column index.
             col = idx
+            if miss_log is not None and qid:
+                miss_log.append(qid)
         out[field] = _val_at_orig_idx(full_row, col)
     out['years_in_hre_num'] = _parse_years_numeric(out.get('years_in_hre'))
     return out
@@ -1876,10 +1914,17 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
 
     features: list = []
     failed_geocodes: list = []
+    qid_miss_log: list = []
     for i, (_, row) in enumerate(df.iterrows()):
         # Extract survey-question fields by ORIGINAL CSV column index from
         # the pre-PII-drop row; matches indices in SURVEY_QUESTIONS.
-        survey_extras = _extract_survey_extras(df_full.iloc[i], qid_to_col_idx)
+        # Pass df_full.columns so the extractor can recover from missing
+        # ImportId metadata by scanning header text for embedded QIDs —
+        # this is the format-parity fix between numeric and text exports.
+        survey_extras = _extract_survey_extras(
+            df_full.iloc[i], qid_to_col_idx,
+            df_columns=df_full.columns, miss_log=qid_miss_log,
+        )
         health = _compute_health_score(row)
         iaq    = _compute_iaq_score(row)
         struct = _compute_struct_score(row)
@@ -2035,6 +2080,13 @@ def process_iaq_bytes(csv_bytes: bytes, contact_features: list,
     # Store QID map summary in analysis for dashboard-visible diagnostics
     analysis['_qid_map_size'] = len(qid_to_col_idx)
     analysis['_col_count']    = len(raw.columns)
+    # Format-parity diagnostics: QIDs that fell through to the hardcoded
+    # column index because neither ImportId metadata nor header-embedded
+    # QID matched. Empty list = both numeric and text exports resolved
+    # every survey-question field by QID.
+    _qid_misses_unique = sorted({q for q in qid_miss_log if q})
+    analysis['_qid_fallback_qids'] = _qid_misses_unique
+    analysis['_qid_fallback_count'] = len(qid_miss_log)
     for f in features:
         f['properties'].pop('years_in_hre_num', None)
     geojson = {'type': 'FeatureCollection', 'features': features}

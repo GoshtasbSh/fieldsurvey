@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ks-field-v2';
+const CACHE_NAME = 'ks-field-v3';
 const SHELL = [
   './index.html',
   './login.html',
@@ -28,9 +28,13 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
-  // Always network-first for Supabase API calls
+  // Always network-only for Supabase API calls and our /api/* routes.
+  // We deliberately do NOT fall back to the cache: those responses are
+  // user-scoped (Bearer JWT, guest_session_id), so serving a stale
+  // response after a token rotation or user switch would leak the
+  // previous user's data into the new session.
   if (url.includes('supabase.co') || url.includes('/api/')) {
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    e.respondWith(fetch(e.request));
     return;
   }
 

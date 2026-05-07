@@ -388,6 +388,72 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
     </div>
   </div>
 
+  <!-- Invite a new member by email -->
+  <div class="section">
+    <div class="section-head">
+      <span class="section-icon">✉️</span>
+      <div class="section-info">
+        <div class="section-title">Invite a Member by Email</div>
+        <div class="section-sub">
+          Enter a candidate's email; we email them a one-time invitation
+          link. They sign up with that exact email + their own password,
+          and are auto-promoted to <b>member</b>. The link expires in 14 days
+          and self-destructs after first use. This is the only public path
+          to a member account — random visitors cannot self-register.
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="team-tools">
+        <div class="config-field" style="max-width:320px;">
+          <label>Recipient email</label>
+          <input type="email" id="invite-email" placeholder="researcher@example.com" autocomplete="off">
+        </div>
+        <button class="btn btn-primary" id="btn-send-invite">Send Invite</button>
+        <span class="code-meta" id="invite-meta"></span>
+      </div>
+      <div class="team-list" id="invite-list">
+        <div class="code-meta">Loading invitations…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Daily report recipients -->
+  <div class="section">
+    <div class="section-head">
+      <span class="section-icon">📬</span>
+      <div class="section-info">
+        <div class="section-title">Daily Change-Report Recipients</div>
+        <div class="section-sub">
+          Each day at 8 PM Eastern, if the dashboard data changed
+          (community contacts, field points, or IAQ surveys added/edited)
+          we send these recipients two Excel attachments: a unified
+          community-and-field export, and the IAQ survey export. No email
+          is sent on days with no changes. Add as many addresses as you like;
+          tick a row to deactivate it without deleting.
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="team-tools">
+        <div class="config-field" style="max-width:320px;">
+          <label>Add recipient email</label>
+          <input type="email" id="rr-email" placeholder="pi@example.com" autocomplete="off">
+        </div>
+        <div class="config-field" style="max-width:240px;">
+          <label>Label (optional)</label>
+          <input type="text" id="rr-label" placeholder="Primary PI" maxlength="60">
+        </div>
+        <button class="btn btn-primary" id="btn-add-recipient">Add</button>
+        <button class="btn btn-outline" id="btn-send-now" title="Run the daily report once, right now (skips the 'no changes' check).">Send now</button>
+        <span class="code-meta" id="rr-meta"></span>
+      </div>
+      <div class="team-list" id="rr-list">
+        <div class="code-meta">Loading recipients…</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Danger zone -->
   <div class="section">
     <div class="section-head">
@@ -524,6 +590,192 @@ function bindEvents() {
   document.getElementById('btn-load-guests').addEventListener('click', loadGuestSessions);
   // Auto-load today's guests when the admin lands.
   loadGuestSessions();
+  // Member-invite + recipients wiring (added in finalization migration 19).
+  const inviteBtn = document.getElementById('btn-send-invite');
+  if (inviteBtn) inviteBtn.addEventListener('click', sendMemberInvite);
+  const addRrBtn = document.getElementById('btn-add-recipient');
+  if (addRrBtn) addRrBtn.addEventListener('click', addReportRecipient);
+  const sendNowBtn = document.getElementById('btn-send-now');
+  if (sendNowBtn) sendNowBtn.addEventListener('click', sendDailyReportNow);
+  loadInvites();
+  loadReportRecipients();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MEMBER INVITES — admin emails a one-time signup link
+═══════════════════════════════════════════════════════════════ */
+async function sendMemberInvite() {
+  const meta = document.getElementById('invite-meta');
+  const input = document.getElementById('invite-email');
+  const email = (input?.value || '').trim().toLowerCase();
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    if (meta) meta.textContent = 'Enter a valid email.';
+    return;
+  }
+  if (meta) meta.textContent = 'Sending…';
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    if (!session) { if (meta) meta.textContent = 'Sign in first.'; return; }
+    const r = await fetch('/api/daily-refresh?action=invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify({ email }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      if (meta) meta.textContent = data.detail || data.info || ('HTTP ' + r.status);
+      return;
+    }
+    if (input) input.value = '';
+    if (meta) meta.textContent = 'Invite sent to ' + email + '.';
+    loadInvites();
+  } catch (e) {
+    if (meta) meta.textContent = 'Network error.';
+  }
+}
+
+async function loadInvites() {
+  const wrap = document.getElementById('invite-list');
+  if (!wrap) return;
+  try {
+    const { data, error } = await sb.rpc('list_member_invites');
+    if (error) throw error;
+    const rows = data || [];
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="code-meta">No invitations yet.</div>';
+      return;
+    }
+    wrap.innerHTML = rows.map(r => {
+      const exp = r.expires_at ? new Date(r.expires_at).toLocaleDateString() : '';
+      return '<div class="team-row"><div class="team-name">' +
+        _esc(r.email) + '</div>' +
+        '<div class="team-role">' + _esc(r.status) + '</div>' +
+        '<div class="code-meta">expires ' + exp + '</div></div>';
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = '<div class="code-meta">Could not load invitations.</div>';
+  }
+}
+
+function _esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REPORT RECIPIENTS — daily 8 PM ET email distribution list
+═══════════════════════════════════════════════════════════════ */
+async function loadReportRecipients() {
+  const wrap = document.getElementById('rr-list');
+  if (!wrap) return;
+  try {
+    const { data, error } = await sb.from('report_recipients')
+      .select('id,email,label,is_active,created_at')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const rows = data || [];
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="code-meta">No recipients yet. The 8 PM report will be skipped until you add at least one.</div>';
+      return;
+    }
+    wrap.innerHTML = rows.map(r =>
+      '<div class="team-row" data-id="' + _esc(r.id) + '">' +
+      '<div class="team-name">' + _esc(r.email) + '</div>' +
+      '<div class="code-meta">' + _esc(r.label || '') + '</div>' +
+      '<div class="team-role">' + (r.is_active ? 'active' : 'paused') + '</div>' +
+      '<button class="btn btn-outline" data-toggle="' + _esc(r.id) + '">' +
+        (r.is_active ? 'Pause' : 'Resume') + '</button>' +
+      '<button class="btn btn-outline" data-remove="' + _esc(r.id) + '">Remove</button>' +
+      '</div>'
+    ).join('');
+    wrap.querySelectorAll('[data-toggle]').forEach(b => {
+      b.addEventListener('click', () => toggleRecipient(b.getAttribute('data-toggle')));
+    });
+    wrap.querySelectorAll('[data-remove]').forEach(b => {
+      b.addEventListener('click', () => removeRecipient(b.getAttribute('data-remove')));
+    });
+  } catch (e) {
+    wrap.innerHTML = '<div class="code-meta">Could not load recipients.</div>';
+  }
+}
+
+async function addReportRecipient() {
+  const meta = document.getElementById('rr-meta');
+  const email = (document.getElementById('rr-email')?.value || '').trim().toLowerCase();
+  const label = (document.getElementById('rr-label')?.value || '').trim();
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    if (meta) meta.textContent = 'Enter a valid email.';
+    return;
+  }
+  try {
+    const { error } = await sb.from('report_recipients')
+      .insert({ email, label: label || null, is_active: true });
+    if (error) throw error;
+    document.getElementById('rr-email').value = '';
+    document.getElementById('rr-label').value = '';
+    if (meta) meta.textContent = 'Added.';
+    loadReportRecipients();
+  } catch (e) {
+    if (meta) meta.textContent = e.message || 'Add failed.';
+  }
+}
+
+async function toggleRecipient(id) {
+  if (!id) return;
+  try {
+    const { data: cur } = await sb.from('report_recipients')
+      .select('is_active').eq('id', id).single();
+    const next = !(cur?.is_active);
+    const { error } = await sb.from('report_recipients')
+      .update({ is_active: next }).eq('id', id);
+    if (error) throw error;
+    loadReportRecipients();
+  } catch (e) { /* swallow */ }
+}
+
+async function removeRecipient(id) {
+  if (!id) return;
+  if (!confirm('Remove this recipient from the daily report list?')) return;
+  try {
+    const { error } = await sb.from('report_recipients').delete().eq('id', id);
+    if (error) throw error;
+    loadReportRecipients();
+  } catch (e) { /* swallow */ }
+}
+
+async function sendDailyReportNow() {
+  const meta = document.getElementById('rr-meta');
+  if (meta) meta.textContent = 'Sending…';
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    if (!session) { if (meta) meta.textContent = 'Sign in first.'; return; }
+    const r = await fetch('/api/daily-refresh?action=daily-report', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: '{}',
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (meta) meta.textContent = data.detail || data.info || ('HTTP ' + r.status);
+      return;
+    }
+    if (data.status === 'no_changes') {
+      if (meta) meta.textContent = 'No changes since last run — nothing sent.';
+    } else if (data.status === 'sent') {
+      if (meta) meta.textContent = 'Sent to ' + (data.recipients || []).length + ' recipient(s).';
+    } else {
+      if (meta) meta.textContent = 'Status: ' + (data.status || 'unknown');
+    }
+  } catch (e) {
+    if (meta) meta.textContent = 'Network error.';
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
