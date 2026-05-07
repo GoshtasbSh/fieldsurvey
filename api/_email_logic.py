@@ -5,19 +5,31 @@ function (we already sit at the Hobby plan's 12-function ceiling).
 api/daily-refresh.py forwards POST requests with ?action=invite,
 ?action=my-report or ?action=daily-report to dispatch() below.
 
-All outbound mail goes through Resend (RESEND_API_KEY env var).
+Email delivery (preference order, first available wins):
+  1. Gmail SMTP — requires GMAIL_USER + GMAIL_APP_PASSWORD env vars.
+     Free up to 500/day. Sends to ANY recipient. Recommended for
+     small-team / single-PI use where you don't own a verified domain.
+  2. Resend — requires RESEND_API_KEY env var. With `onboarding@resend.dev`
+     (default) delivery is constrained to the Resend account owner; with
+     a verified domain (FROM_EMAIL env var) any recipient works.
 """
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
 import re
+import smtplib
 import sys
 import pathlib
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta, date
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import formataddr, formatdate, make_msgid
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
@@ -79,6 +91,86 @@ def _send_via_resend(*, to: list[str], subject: str, text: str,
         return False, f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}"
     except Exception as e:  # pragma: no cover
         return False, f"{type(e).__name__}"
+
+
+# ── Gmail SMTP wrapper ─────────────────────────────────────────────────────
+# Used when GMAIL_USER + GMAIL_APP_PASSWORD are configured. Sends mail
+# from a dedicated Gmail account (e.g. surveydashboardreport@gmail.com)
+# directly via smtp.gmail.com:587 with STARTTLS. Gmail rewrites the
+# envelope sender to GMAIL_USER for anti-spoofing — the visible From
+# header keeps a friendly display name but the address is GMAIL_USER.
+def _send_via_gmail_smtp(*, to: list[str], subject: str, text: str,
+                        attachments: list[dict] | None = None) -> tuple[bool, str]:
+    user = os.environ.get("GMAIL_USER", "").strip()
+    pwd  = os.environ.get("GMAIL_APP_PASSWORD", "").strip().replace(" ", "")
+    if not user or not pwd:
+        return False, "GMAIL_USER / GMAIL_APP_PASSWORD not configured"
+    recipients = [a for a in to if a]
+    if not recipients:
+        return False, "No recipients"
+
+    msg = MIMEMultipart()
+    # Display name "KeyStone Field" with the dedicated Gmail as the
+    # actual address. Recipients see "KeyStone Field <user@gmail.com>"
+    # and replies route to the project inbox, not the admin's personal one.
+    msg["From"] = formataddr(("KeyStone Field", user))
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=False)
+    msg["Message-ID"] = make_msgid(domain="gmail.com")
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+
+    for att in (attachments or []):
+        filename = att.get("filename") or "attachment.bin"
+        content_b64 = att.get("content") or ""
+        if not content_b64:
+            continue
+        try:
+            content_bytes = base64.b64decode(content_b64)
+        except Exception:
+            continue
+        # Use MIMEApplication so it inherits Content-Transfer-Encoding: base64
+        # and pick the most permissive subtype — Gmail doesn't validate the
+        # MIME type strictly here. Filename attaches the content-disposition.
+        part = MIMEApplication(content_bytes, _subtype="octet-stream")
+        part.add_header("Content-Disposition", "attachment",
+                        filename=filename)
+        msg.attach(part)
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(user, pwd)
+            smtp.sendmail(user, recipients, msg.as_string())
+        return True, f"Sent via Gmail SMTP from {user} to {len(recipients)} recipient(s)"
+    except smtplib.SMTPAuthenticationError as e:
+        return False, f"Gmail SMTP auth failed: {e.smtp_code} {e.smtp_error.decode('utf-8','replace')[:200] if isinstance(e.smtp_error, bytes) else str(e.smtp_error)[:200]}"
+    except smtplib.SMTPException as e:  # pragma: no cover
+        return False, f"Gmail SMTP error: {type(e).__name__}: {str(e)[:200]}"
+    except Exception as e:  # pragma: no cover
+        return False, f"Gmail SMTP failed: {type(e).__name__}: {str(e)[:200]}"
+
+
+# ── Email dispatcher ───────────────────────────────────────────────────────
+# Single entry point used by all _handle_* functions. Picks Gmail SMTP
+# if GMAIL_APP_PASSWORD is set; otherwise falls through to Resend.
+# Matches `_send_via_resend`'s signature exactly so callers don't change.
+def _send_email(*, to: list[str], subject: str, text: str,
+                attachments: list[dict] | None = None) -> tuple[bool, str]:
+    if os.environ.get("GMAIL_APP_PASSWORD", "").strip():
+        ok, info = _send_via_gmail_smtp(to=to, subject=subject, text=text, attachments=attachments)
+        # If Gmail attempt clearly failed at the auth step, still try Resend
+        # as a fallback so a single misconfigured app-password doesn't kill
+        # all outbound mail. Successful sends short-circuit.
+        if ok:
+            return ok, info
+        if os.environ.get("RESEND_API_KEY", "").strip():
+            ok2, info2 = _send_via_resend(to=to, subject=subject, text=text, attachments=attachments)
+            return ok2, f"{info2} (Gmail fallback: {info})"
+        return ok, info
+    return _send_via_resend(to=to, subject=subject, text=text, attachments=attachments)
 
 
 # ── XLSX builder (uses openpyxl, already in requirements.txt) ──────────────
@@ -167,7 +259,7 @@ def _handle_invite(self: "handler", body: dict) -> None:
         f"— KeyStone Field, DTSC Lab\n"
         f"  University of Florida\n"
     )
-    ok, msg = _send_via_resend(to=[target_email], subject=subject, text=text)
+    ok, msg = _send_email(to=[target_email], subject=subject, text=text)
     if ok:
         try:
             sb.rpc("mark_invite_sent", {"p_id": invite_id}).execute()
@@ -294,7 +386,7 @@ def _handle_my_report(self: "handler", body: dict) -> None:
         {"filename": f"my_field_points_{today_str}.xlsx", "content": _b64(xlsx)},
         {"filename": f"my_community_contacts_{today_str}.xlsx", "content": _b64(contacts_xlsx)},
     ]
-    ok, msg = _send_via_resend(to=[target], subject=subject, text=text, attachments=attachments)
+    ok, msg = _send_email(to=[target], subject=subject, text=text, attachments=attachments)
     if not ok:
         return json_response(self, 502, {"detail": "Email send failed.", "info": msg[:200]})
     return json_response(self, 200, {
@@ -460,7 +552,7 @@ def _handle_daily_report(self: "handler", body: dict) -> None:
         {"filename": f"keystone_community_field_{today_str}.xlsx", "content": _b64(contacts_xlsx)},
         {"filename": f"keystone_iaq_surveys_{today_str}.xlsx", "content": _b64(iaq_xlsx)},
     ]
-    ok, msg = _send_via_resend(
+    ok, msg = _send_email(
         to=recipients, subject=subject, text="\n".join(summary_lines),
         attachments=attachments,
     )
