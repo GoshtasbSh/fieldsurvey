@@ -1351,8 +1351,15 @@ def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
         return 0
     upgraded = 0
     for ff in field_features:
-        if ff['properties'].get('status') == 'Completed':
-            continue
+        # NB: previously this loop skipped points whose status was already
+        # 'Completed' — that meant a user-saved mobile pin marked Completed
+        # by the surveyor never picked up the matching Qualtric survey, so
+        # has_iaq_survey stayed false and the popup rendered contact_only
+        # (yellow rim) with no Survey-Answers tab. We now process every
+        # field point: status is preserved if it's already Completed,
+        # but the IAQ enrichment fields + has_iaq_survey + iaq_matched
+        # flag on the IAQ feature are always written when a match exists.
+        already_enriched = bool(ff['properties'].get('has_iaq_survey'))
         f_lon, f_lat = ff['geometry']['coordinates']
         match_iaq = None
 
@@ -1389,7 +1396,14 @@ def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
             ff['properties']['iaq_response_id']  = ip.get('response_id', '')
             ff['properties']['iaq_match_lon']    = ig[0]
             ff['properties']['iaq_match_lat']    = ig[1]
-            upgraded += 1
+            # Flip the IAQ feature itself so the iaq layer can re-classify
+            # this dot from 'iaq_only' (yellow rim) to 'matched' (white
+            # rim). Mirrors what _upgrade_contacts_from_iaq does on the
+            # CSV-contacts side. Caller is responsible for persisting the
+            # iaq_survey blob if it relies on this flag.
+            match_iaq['properties']['iaq_matched'] = True
+            if not already_enriched:
+                upgraded += 1
     return upgraded
 
 

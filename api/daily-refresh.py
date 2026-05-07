@@ -140,9 +140,14 @@ def _run_refresh() -> dict:
     except Exception as e:
         return {"refreshed": False, "reason": f"Could not read field points: {e}"}
 
-    if not new_rows:
-        return {"refreshed": False, "reason": "No new field data since last snapshot",
-                "last_analysis": last_at}
+    # NOTE: even when no new field rows have arrived since the last
+    # snapshot we still fall through and re-run the IAQ matcher against
+    # the cached blob. Reason: the v3 matcher used to skip Completed
+    # field pins, so any Completed pins added historically may still be
+    # missing has_iaq_survey + iaq_matched. This idempotent re-pass
+    # backfills them. We only persist + version-snapshot when something
+    # actually changed (n_iaq_upgraded > 0 OR new_rows > 0 OR iaq blob
+    # flipped) so unchanged invocations remain a no-op.
 
     # Load existing cached community-contact blob and append.
     # NB: must use 'community_contact' — the data_type every read endpoint queries.
@@ -159,19 +164,32 @@ def _run_refresh() -> dict:
     iaq_stored = load_cached("iaq_survey") or {}
     iaq_feats = (iaq_stored.get("geojson") or {}).get("features") or []
     n_iaq_upgraded = 0
-    if iaq_feats and new_features:
+    # Snapshot iaq_matched per IAQ feature so we can detect downstream
+    # flips and persist the iaq_survey blob only when something changed.
+    iaq_matched_before = [bool((f.get("properties") or {}).get("iaq_matched"))
+                          for f in iaq_feats]
+    # Append new rows BEFORE running the matcher — we want the matcher
+    # to also re-evaluate pre-existing field points (e.g. yesterday's
+    # Completed pins that the buggy v3 matcher skipped) so they finally
+    # pick up has_iaq_survey + iaq_matched. The matcher is idempotent.
+    features.extend(new_features)
+    field_features_for_match = [
+        f for f in features
+        if (f.get("properties") or {}).get("source") == "field"
+    ]
+    if iaq_feats and field_features_for_match:
         try:
             # Late import: keeps the daily-refresh function bundle slim
             # when the IAQ blob is empty (no upgrade work to do).
             from _processing import load_parcel_index, _apply_iaq_to_field_features
             parcel_idx = load_parcel_index()
             n_iaq_upgraded = _apply_iaq_to_field_features(
-                new_features, iaq_feats, parcel_idx=parcel_idx)
+                field_features_for_match, iaq_feats, parcel_idx=parcel_idx)
         except Exception as e:
             print(f"[daily-refresh] parcel-aware match unavailable ({e}); "
                   f"falling back to 30 m distance.")
-            for ff in new_features:
-                if ff["properties"].get("status") == "Completed":
+            for ff in field_features_for_match:
+                if ff["properties"].get("has_iaq_survey"):
                     continue
                 f_lon, f_lat = ff["geometry"]["coordinates"]
                 for iaq_f in iaq_feats:
@@ -179,10 +197,10 @@ def _run_refresh() -> dict:
                     if haversine_m(f_lat, f_lon, i_lat, i_lon) <= 30:
                         ff["properties"]["status"] = "Completed"
                         ff["properties"]["has_iaq_survey"] = True
+                        iaq_f["properties"]["iaq_matched"] = True
                         n_iaq_upgraded += 1
                         break
 
-    features.extend(new_features)
     merged = {"type": "FeatureCollection", "features": features}
 
     # Tag every Completed contact / field-as-feature with match_status
@@ -201,7 +219,34 @@ def _run_refresh() -> dict:
     local_day = datetime.now(LOCAL_TZ).date().isoformat()
     label = f"Daily Update {local_day} — {len(new_rows)} new field visits ({len(features)} total)"
 
-    # Persist merged blob + version snapshot
+    # Persist iaq_survey blob if any iaq_matched flag flipped during the
+    # field-point match pass. Without this, the IAQ-only dot keeps its
+    # G3 yellow rim on the map even though a field pin now ground-truths
+    # the parcel as 'matched' (G1, white rim).
+    iaq_matched_after = [bool((f.get("properties") or {}).get("iaq_matched"))
+                         for f in iaq_feats]
+    iaq_blob_changed = (iaq_matched_before != iaq_matched_after)
+    if iaq_blob_changed and iaq_stored:
+        try:
+            iaq_payload = dict(iaq_stored)
+            geo = dict(iaq_payload.get("geojson") or {})
+            geo["features"] = iaq_feats
+            iaq_payload["geojson"] = geo
+            sb.table("keystone_dashboard_data").upsert({
+                "data_type": "iaq_survey",
+                "payload": iaq_payload,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="data_type").execute()
+        except Exception as e:
+            print(f"[daily-refresh] iaq_survey blob persist failed: {e}")
+
+    # Persist merged blob + version snapshot — but only when something
+    # actually changed. Empty refresh ticks (no new rows AND no IAQ
+    # backfill) skip the write so we don't churn the version table.
+    something_changed = bool(new_rows) or n_iaq_upgraded > 0 or iaq_blob_changed
+    if not something_changed:
+        return {"refreshed": False, "reason": "No new field data and no IAQ backfill needed",
+                "last_analysis": last_at}
     try:
         sb.table("keystone_dashboard_data").upsert({
             "data_type": "community_contact",
