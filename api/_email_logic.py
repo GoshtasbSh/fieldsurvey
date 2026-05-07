@@ -28,6 +28,7 @@ from _lib import (  # type: ignore
     require_auth,
     supabase_admin,
     supabase_anon,
+    authed_supabase,
 )
 
 RESEND_API = "https://api.resend.com/emails"
@@ -57,6 +58,11 @@ def _send_via_resend(*, to: list[str], subject: str, text: str,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # Resend sits behind Cloudflare which 1010s requests with the
+            # default `Python-urllib/3.x` UA. Send a legitimate UA so the
+            # API call isn't bot-blocked.
+            "User-Agent": "KeyStone-Field/1.0 (+https://keystone-project-survey-blue.vercel.app)",
+            "Accept": "application/json",
         },
     )
     try:
@@ -119,7 +125,12 @@ def _handle_invite(self: "handler", body: dict) -> None:
     target_email = (body.get("email") or "").strip().lower()
     if not _is_email(target_email):
         return json_response(self, 400, {"detail": "Valid email required."})
-    sb = supabase_admin()
+    # IMPORTANT: create_member_invite is SECURITY DEFINER and reads
+    # auth.uid() to verify the caller is_admin(). Calling it via the
+    # service-role client produces auth.uid()=NULL and the RPC rebuffs
+    # with "Admin role required". Use the authenticated client (caller's
+    # JWT propagated to PostgREST) so auth.uid() resolves to the admin.
+    sb = authed_supabase(self) or supabase_admin()
     if not sb:
         return json_response(self, 503, {"detail": "Supabase unavailable."})
     # Create the invite via SECURITY DEFINER RPC.
