@@ -32,7 +32,14 @@ from _lib import (  # type: ignore
 )
 
 RESEND_API = "https://api.resend.com/emails"
-DEFAULT_FROM = os.environ.get("FROM_EMAIL") or "KeyStone Field <noreply@keystonesurvey.com>"
+# From-address policy:
+#   - If FROM_EMAIL env var is set (operator verified a domain on Resend),
+#     use it. Allows real branded sender once the project owns a domain.
+#   - Otherwise default to Resend's free test sender `onboarding@resend.dev`
+#     which works without any domain verification but ONLY delivers to the
+#     account-owner email registered at resend.com. Good for the single-PI
+#     daily-report use case where the only recipient is the admin.
+DEFAULT_FROM = os.environ.get("FROM_EMAIL") or "KeyStone Field <onboarding@resend.dev>"
 
 
 # ── Resend wrapper ──────────────────────────────────────────────────────────
