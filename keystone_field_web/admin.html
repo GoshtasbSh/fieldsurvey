@@ -312,13 +312,18 @@ button{cursor:pointer;font-family:'Inter',sans-serif;border:none;background:none
     </div>
   </div>
 
-  <!-- Daily report email -->
-  <div class="section">
+  <!-- Daily report email — DEPRECATED.
+       Superseded by the multi-recipient "Daily Change-Report Recipients"
+       section below (table-based, supports multiple admins). The legacy
+       single-email field is hidden so operators don't double-configure.
+       Kept in DOM (display:none) so any code still referencing
+       #report-email / #btn-save-email continues to work. -->
+  <div class="section" style="display:none" data-deprecated="true">
     <div class="section-head">
       <span class="section-icon">📧</span>
       <div class="section-info">
-        <div class="section-title">Daily Report Email</div>
-        <div class="section-sub">CSV of all survey points emailed daily at 8 PM via Supabase Edge Function (deploy <code style="font-family:'IBM Plex Mono',monospace;font-size:10px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:3px;">supabase/functions/daily-report</code>).</div>
+        <div class="section-title">Daily Report Email (legacy)</div>
+        <div class="section-sub">Superseded by the multi-recipient "Daily Change-Report Recipients" section below.</div>
       </div>
     </div>
     <div class="section-body">

@@ -15,7 +15,11 @@ sys.path.append(str(pathlib.Path(__file__).parent))
 from _lib import load_cached, json_response, empty_geojson, _bearer_jwt
 
 
-_PII_FIELDS = {'notes', 'status_detail', 'second_attempt'}
+_PII_FIELDS = {
+    'notes', 'status_detail', 'second_attempt',
+    # Residential address fields are PII for non-team callers.
+    'address', 'matched_address', 'street_name',
+}
 
 
 def _strip_pii(geojson: dict) -> dict:

@@ -1392,6 +1392,9 @@ function initMap(initialPoints) {
     container: 'map',
     style: {
       version: 8,
+      // Required by MapLibre for any layer that uses `text-field`
+      // (survey-labels). Without it the layer addLayer call throws.
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources: {
         'bm-osm':  { type:'raster', tiles:[TILES.osm],       tileSize:256, maxzoom:19, attribution:'© OpenStreetMap contributors' },
         'bm-light':{ type:'raster', tiles:[TILES.light],     tileSize:256, maxzoom:20, attribution:'© CARTO' },

@@ -21,7 +21,9 @@
     { "source": "/admin",            "destination": "/keystone_field_web/admin" },
     { "source": "/dashboard",        "destination": "/static/index.html" },
     { "source": "/dashboard/",       "destination": "/static/index.html" },
-    { "source": "/dashboard/:path*", "destination": "/static/:path*" }
+    { "source": "/dashboard/:path*", "destination": "/static/:path*" },
+    { "source": "/manifest.json",    "destination": "/keystone_field_web/manifest.json" },
+    { "source": "/sw.js",            "destination": "/keystone_field_web/sw.js" }
   ],
   "headers": [
     {

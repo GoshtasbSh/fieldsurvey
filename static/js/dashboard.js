@@ -101,6 +101,10 @@ function initMap() {
     container: 'map',
     style: {
       version: 8,
+      // glyphs URL is required by MapLibre for any layer with a
+      // `text-field` (cluster counts, survey labels). Demotiles is the
+      // upstream MapLibre-hosted PBF font endpoint and is CDN-cached.
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources: { basemap: { type: 'raster', tiles: bm.tiles, tileSize: bm.tileSize || 256, attribution: bm.attr } },
       layers: [{ id: 'basemap-layer', type: 'raster', source: 'basemap' }],
     },
@@ -114,7 +118,36 @@ function initMap() {
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 150 }), 'bottom-left');
   map.addControl(new maplibregl.GeolocateControl(), 'top-right');
 
-  map.on('load', loadData);
+  // Bootstrap the Supabase client + session BEFORE loadData fires, so
+  // every /api/* call carries a Bearer token from the start. Otherwise
+  // /api/analysis (which requires team-member auth) 401s during the
+  // initial render even for signed-in admins.
+  map.on('load', async () => {
+    try { await _bootstrapSupabase(); } catch (e) { console.warn('auth bootstrap failed', e); }
+    loadData();
+  });
+}
+
+// One-shot Supabase client + session loader. Idempotent — safe to call
+// from multiple init paths. Populates `sbClient`, `_cachedSession`, and
+// `currentUserId` so the very first /api/* fetches in loadData() are
+// authenticated.
+let _bootstrapPromise = null;
+function _bootstrapSupabase() {
+  if (_bootstrapPromise) return _bootstrapPromise;
+  _bootstrapPromise = (async () => {
+    try {
+      const r = await fetch('/api/config', { cache: 'no-store' });
+      if (!r.ok) return;
+      const cfg = await r.json();
+      if (!cfg.supabase_url || !cfg.supabase_anon_key || !window.supabase) return;
+      sbClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+      const { data: { session } } = await sbClient.auth.getSession();
+      _cachedSession = session || null;
+      currentUserId  = session?.user?.id || null;
+    } catch (e) { /* viewer-only mode still works */ }
+  })();
+  return _bootstrapPromise;
 }
 
 // Authenticated fetch helper — sends Bearer token when a Supabase session
@@ -161,9 +194,9 @@ async function loadData() {
     const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
       _authFetch('/api/survey-points'),
       fetch('/api/parcels'),
-      fetch('/api/analysis'),
+      _authFetch('/api/analysis'),
       fetchIaqPoints(),
-      fetch('/api/analysis?type=iaq'),
+      _authFetch('/api/analysis?type=iaq'),
     ]);
     const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
     const _safeJson = async (res, fallback) => {
@@ -242,9 +275,9 @@ async function refreshAllData() {
     const [ptsRes, parRes, anaRes, iaqPtsRes, iaqAnaRes] = await Promise.all([
       _authFetch(`/api/survey-points?${_b}`, noCache),
       fetch(`/api/parcels?${_b}`, noCache),
-      fetch(`/api/analysis?${_b}`, noCache),
+      _authFetch(`/api/analysis?${_b}`, noCache),
       fetchIaqPoints(),
-      fetch(`/api/analysis?type=iaq&${_b}`, noCache),
+      _authFetch(`/api/analysis?type=iaq&${_b}`, noCache),
     ]);
     const safe = async (res, fb) => {
       if (!res || !res.ok) return fb;
@@ -2692,7 +2725,7 @@ function setupUI() {
 
 async function loadAnalysisMeta() {
   try {
-    const res = await fetch('/api/analysis?meta=1');
+    const res = await _authFetch('/api/analysis?meta=1');
     if (!res.ok) return;
     const meta = await res.json();
     const badge = document.getElementById('analyzed-badge');
@@ -2808,7 +2841,7 @@ async function restoreVersion(id, label, type) {
 
     // Reload the affected layer
     if (type === 'contact') {
-      const pts = await (await fetch('/api/survey-points')).json();
+      const pts = await (await _authFetch('/api/survey-points')).json();
       surveyData = pts;
       _backfillContactMatchStatus(surveyData);
       map.getSource('survey')?.setData(surveyData);
@@ -2817,7 +2850,7 @@ async function restoreVersion(id, label, type) {
         map.setLayoutProperty('survey-points', 'visibility', 'visible');
         markStep1Done(); unlockIAQStep();
       }
-      const ana = await (await fetch('/api/analysis')).json();
+      const ana = await (await _authFetch('/api/analysis')).json();
       analysisData = ana;
       buildAnalysis();
       fitBounds();
@@ -2825,7 +2858,7 @@ async function restoreVersion(id, label, type) {
       const iaqPts = await (await fetchIaqPoints()).json();
       iaqData = iaqPts;
       _backfillIaqMatchStatus(iaqData);
-      const iaqAna = await (await fetch('/api/analysis?type=iaq')).json();
+      const iaqAna = await (await _authFetch('/api/analysis?type=iaq')).json();
       if (iaqAna.loaded) iaqAnalysis = iaqAna;
       updateIAQOnMap();
       buildSurveyResultsTab(iaqAnalysis);
@@ -2863,13 +2896,13 @@ async function runDailyRefresh() {
       // field layer so the unified count (which dedupes CSV-appended
       // field-as-features against fieldPointsData) reflects everything
       // the cron just merged.
-      const pts = await (await fetch('/api/survey-points')).json();
+      const pts = await (await _authFetch('/api/survey-points')).json();
       surveyData = pts;
       _backfillContactMatchStatus(surveyData);
       map.getSource('survey')?.setData(surveyData);
       map.getSource('survey-clustered')?.setData(surveyData);
       await loadFieldPointsFromServer();
-      const ana = await (await fetch('/api/analysis')).json();
+      const ana = await (await _authFetch('/api/analysis')).json();
       analysisData = ana;
       // stamp + filters keep CSV/field layers from rendering the same
       // pin twice now that field rows live in both sources.
@@ -5473,16 +5506,19 @@ function applyRoleGatedUI() {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? '' : 'none';
   };
-  setVis('btn-team',          isMember);
+  // Per project spec: members see the dashboard read-only. Admin-only
+  // surfaces are upload, daily refresh, AND the Team panel (member
+  // invites + invite-code generation are admin actions). Members and
+  // guests never see them.
+  setVis('btn-team',          isAdmin);
   setVis('btn-import',        isAdmin);
   setVis('btn-daily-refresh', isAdmin);
   // AI chat panel + floating button: team-member only (matches /api/chat
-  // require_team_member). Anon viewers still see all the data; just no
-  // chat panel button to give them a 401 surprise.
+  // require_team_member).
   setVis('chat-btn',          isMember);
-  // Restore-version buttons inside the History modal are rebuilt every
-  // time the modal opens — openHistoryModal() reads _myRole and only
-  // renders restore controls for admins. Nothing to toggle here.
+  // Hide every upload zone for non-admins so members never see Upload UI.
+  document.querySelectorAll('.upload-zone, .upload-card, [data-admin-only]')
+    .forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
 }
 
 function _esc(s) {

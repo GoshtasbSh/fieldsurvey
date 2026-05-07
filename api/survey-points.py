@@ -17,7 +17,10 @@ from _lib import load_cached, json_response, empty_geojson, _bearer_jwt, require
 
 
 # Fields that contain canvassing PII — omitted from the public response.
-_PII_FIELDS = {'notes', 'status_detail', 'second_attempt'}
+_PII_FIELDS = {
+    'notes', 'status_detail', 'second_attempt',
+    'address', 'matched_address', 'street_name',
+}
 
 
 def _strip_pii(geojson: dict) -> dict:

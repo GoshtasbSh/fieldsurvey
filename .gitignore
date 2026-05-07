@@ -19,3 +19,9 @@ graphify-out/
 mockups/
 .claude/
 .vercel
+
+# Audit / QA artifacts — never committed
+audit-*.png
+audit-*.md
+.playwright-mcp/
+.claude-audit/

@@ -1158,10 +1158,14 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;hei
 (async () => {
   const isMobile = window.innerWidth < 768;
   if (isMobile) { window.location.replace('/keystone_field_web/index.html'); return; }
-  // Guest session present in this tab? Let it through — role-gated UI
-  // hides everything a guest shouldn't see.
+  // Guest sessions never see the desktop dashboard — they get bounced
+  // to the field PWA. Per project spec the desktop is admin (full) and
+  // member (read-only, no upload, no team panel) only.
   try {
-    if (sessionStorage.getItem('keystone_guest_session')) return;
+    if (sessionStorage.getItem('keystone_guest_session')) {
+      window.location.replace('/field/');
+      return;
+    }
   } catch { /* sessionStorage blocked → fall through to Supabase check */ }
   try {
     const r = await fetch('/api/config', { cache: 'no-store' });
