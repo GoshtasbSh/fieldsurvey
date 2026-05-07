@@ -1028,6 +1028,23 @@ button{cursor:pointer;font-family:'Inter',system-ui,sans-serif;border:none;backg
       </div>
     </div>
 
+    <!-- Invite a new member by email -->
+    <div class="ma-section">
+      <div class="ma-label">Invite a member by email</div>
+      <div class="ma-row">
+        <input id="mob-admin-invite-email" type="email"
+               placeholder="researcher@example.com"
+               class="ma-input"
+               autocomplete="off"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();mobileAdminSendInvite();}">
+        <button class="ma-btn ma-btn-primary" onclick="mobileAdminSendInvite()">Send invite</button>
+      </div>
+      <div class="ma-meta" id="mob-admin-invite-meta">
+        Sends a one-time signup link to the email address.
+      </div>
+      <div id="mob-admin-invite-list" class="ma-list" style="margin-top:8px"></div>
+    </div>
+
     <!-- Team roster (every signed-up user) -->
     <div class="ma-section">
       <div class="ma-label">All signups
@@ -2325,6 +2342,9 @@ function computeUnifiedFieldCounts() {
 // surveyor sees a breakdown of THEIR collected pins (matches the
 // "0 total · +0 today" line below it).
 let personalCounts = {};
+// Per-user TODAY counts — drives the Export hero ("Completed Today" + breakdown)
+// so each surveyor sees their own day's progress, not the team-wide totals.
+let personalTodayCounts = {};
 
 function recalcCounts(pts) {
   const myId   = currentUser?.id || null;
@@ -2340,10 +2360,15 @@ function recalcCounts(pts) {
   // Survey Legend = MY collected breakdown (per-status). All-time so the
   // PI can review what each surveyor has gathered when they sign in.
   personalCounts = {};
-  Object.keys(STATUS_COLORS).forEach(s => personalCounts[s] = 0);
+  personalTodayCounts = {};
+  Object.keys(STATUS_COLORS).forEach(s => { personalCounts[s] = 0; personalTodayCounts[s] = 0; });
   mine.forEach(p => {
     const s = p.status || 'Unknown';
     if (personalCounts[s] !== undefined) personalCounts[s]++;
+  });
+  mineToday.forEach(p => {
+    const s = p.status || 'Unknown';
+    if (personalTodayCounts[s] !== undefined) personalTodayCounts[s]++;
   });
   // Community Contact Visits panel + top filter chips = unified totals
   // (CSV + field, deduped). Same picture as the desktop dashboard.
@@ -2354,6 +2379,8 @@ function recalcCounts(pts) {
 function updateCountUI(status) {
   // Only called after I save a point, so always bump my own counters.
   if (counts[status] !== undefined) counts[status]++;
+  if (personalCounts[status] !== undefined) personalCounts[status]++;
+  if (personalTodayCounts[status] !== undefined) personalTodayCounts[status]++;
   totalPts++; todayPts++;
   renderCounts();
 }
@@ -3297,7 +3324,62 @@ async function mobileAdminLoadAll() {
       '<div class="ma-empty">Admin role required.</div>';
     return;
   }
-  await Promise.all([mobileAdminLoadRoster(), mobileAdminLoadGuests()]);
+  await Promise.all([mobileAdminLoadRoster(), mobileAdminLoadGuests(), mobileAdminLoadInvites()]);
+}
+
+async function mobileAdminSendInvite() {
+  const input = document.getElementById('mob-admin-invite-email');
+  const meta  = document.getElementById('mob-admin-invite-meta');
+  const email = (input?.value || '').trim().toLowerCase();
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    if (meta) meta.textContent = 'Enter a valid email.';
+    return;
+  }
+  if (meta) meta.textContent = 'Sending…';
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    if (!session) { if (meta) meta.textContent = 'Sign in first.'; return; }
+    const r = await fetch('/api/daily-refresh?action=invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify({ email }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      if (meta) meta.textContent = data.detail || data.info || ('HTTP ' + r.status);
+      return;
+    }
+    if (input) input.value = '';
+    if (meta) meta.textContent = 'Invite sent to ' + email + '.';
+    _maMsg('Invite sent to ' + email, 'ok');
+    await mobileAdminLoadInvites();
+  } catch (e) {
+    if (meta) meta.textContent = 'Network error.';
+  }
+}
+
+async function mobileAdminLoadInvites() {
+  const wrap = document.getElementById('mob-admin-invite-list');
+  if (!wrap || !sb) return;
+  try {
+    const { data, error } = await sb.rpc('list_member_invites');
+    if (error) throw error;
+    const rows = data || [];
+    if (!rows.length) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = rows.map(r => {
+      const exp = r.expires_at ? new Date(r.expires_at).toLocaleDateString() : '';
+      return `<div class="ma-list-row">
+        <div class="ma-name">${_esc(r.email)}</div>
+        <span class="ma-tag">${_esc(r.status)}</span>
+        <span class="ma-pin-ct">expires ${_esc(exp)}</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = '';
+  }
 }
 
 async function mobileAdminGetCode() {
@@ -3455,6 +3537,8 @@ window.mobileAdminDemote              = mobileAdminDemote;
 window.mobileAdminLoadRoster          = mobileAdminLoadRoster;
 window.mobileAdminLoadGuests          = mobileAdminLoadGuests;
 window.mobileAdminRevokeGuest         = mobileAdminRevokeGuest;
+window.mobileAdminSendInvite          = mobileAdminSendInvite;
+window.mobileAdminLoadInvites         = mobileAdminLoadInvites;
 
 async function loadTodayMessages() {
   // Guest path: read via the /api/guest proxy (service-role on the
@@ -3677,16 +3761,17 @@ function timeAgo(iso) {
 function renderExportStats() {
   const heroEl = document.getElementById('exp-today-n');
   if (!heroEl) return;
-  heroEl.textContent = counts['Completed'] || 0;
+  // YOUR completed pins today — not the team-wide total.
+  heroEl.textContent = personalTodayCounts['Completed'] || 0;
 
   // Breakdown by status (your own today) — rendered under the hero number
   const host = document.getElementById('exp-breakdown');
   if (!host) return;
   const nonZero = Object.entries(STATUS_COLORS)
-    .map(([s, c]) => [s, counts[s] || 0, c])
+    .map(([s, c]) => [s, personalTodayCounts[s] || 0, c])
     .filter(([s, n]) => n > 0 && s !== 'Completed');
   if (!nonZero.length) {
-    host.innerHTML = '<span class="exp-breakdown-empty">Completed is your only status today.</span>';
+    host.innerHTML = '<span class="exp-breakdown-empty">No other statuses logged by you today.</span>';
     return;
   }
   host.innerHTML = nonZero
