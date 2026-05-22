@@ -13,18 +13,22 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
-drop policy if exists "profiles_self_read" on public.profiles;
 create policy "profiles_self_read"
   on public.profiles for select to authenticated
   using (auth.uid() = id);
 
-drop policy if exists "profiles_self_update" on public.profiles;
+create policy "profiles_share_member_read"
+  on public.profiles for select to authenticated
+  using (exists (
+    select 1
+    from public.project_members me
+    join public.project_members other on other.project_id = me.project_id
+    where me.user_id = auth.uid() and other.user_id = profiles.id
+  ));
+
 create policy "profiles_self_update"
   on public.profiles for update to authenticated
   using (auth.uid() = id) with check (auth.uid() = id);
-
--- (profiles_share_member_read policy is created later, AFTER project_members
--- table exists — see end of file.)
 
 -- Auto-create profile row on signup
 create or replace function public.handle_new_user()
@@ -98,7 +102,6 @@ returns boolean language sql security definer stable set search_path = public as
 $$;
 
 -- projects RLS -------------------------------------------------------------
-drop policy if exists "projects_read_members_or_public" on public.projects;
 create policy "projects_read_members_or_public"
   on public.projects for select
   using (
@@ -106,18 +109,15 @@ create policy "projects_read_members_or_public"
     or visibility = 'public_read'
   );
 
-drop policy if exists "projects_insert_authenticated" on public.projects;
 create policy "projects_insert_authenticated"
   on public.projects for insert to authenticated
   with check (owner_id = auth.uid());
 
-drop policy if exists "projects_update_admin" on public.projects;
 create policy "projects_update_admin"
   on public.projects for update to authenticated
   using (public.project_role(id) in ('owner','admin'))
   with check (public.project_role(id) in ('owner','admin'));
 
-drop policy if exists "projects_delete_owner" on public.projects;
 create policy "projects_delete_owner"
   on public.projects for delete to authenticated
   using (public.project_role(id) = 'owner');
@@ -139,23 +139,19 @@ create trigger trg_project_owner_membership
   for each row execute function public.add_owner_membership();
 
 -- project_members RLS ------------------------------------------------------
-drop policy if exists "pm_read_members" on public.project_members;
 create policy "pm_read_members"
   on public.project_members for select
   using (public.is_project_member(project_id));
 
-drop policy if exists "pm_insert_admin" on public.project_members;
 create policy "pm_insert_admin"
   on public.project_members for insert to authenticated
   with check (public.project_role(project_id) in ('owner','admin'));
 
-drop policy if exists "pm_update_admin" on public.project_members;
 create policy "pm_update_admin"
   on public.project_members for update to authenticated
   using (public.project_role(project_id) in ('owner','admin'))
   with check (public.project_role(project_id) in ('owner','admin'));
 
-drop policy if exists "pm_delete_admin" on public.project_members;
 create policy "pm_delete_admin"
   on public.project_members for delete to authenticated
   using (public.project_role(project_id) in ('owner','admin'));
@@ -166,7 +162,7 @@ create table if not exists public.project_invites (
   project_id  uuid not null references public.projects(id) on delete cascade,
   email       text not null check (char_length(email) <= 255),
   role        text not null check (role in ('admin','surveyor','viewer')),
-  token       text not null unique default encode(extensions.gen_random_bytes(24), 'hex'),
+  token       text not null unique default encode(gen_random_bytes(24), 'hex'),
   invited_by  uuid not null references public.profiles(id),
   expires_at  timestamptz not null default (now() + interval '14 days'),
   accepted_at timestamptz,
@@ -178,22 +174,18 @@ create index if not exists idx_invites_email on public.project_invites(lower(ema
 
 alter table public.project_invites enable row level security;
 
-drop policy if exists "invites_read_admin" on public.project_invites;
 create policy "invites_read_admin"
   on public.project_invites for select to authenticated
   using (public.project_role(project_id) in ('owner','admin'));
 
-drop policy if exists "invites_insert_admin" on public.project_invites;
 create policy "invites_insert_admin"
   on public.project_invites for insert to authenticated
   with check (public.project_role(project_id) in ('owner','admin') and invited_by = auth.uid());
 
-drop policy if exists "invites_update_admin" on public.project_invites;
 create policy "invites_update_admin"
   on public.project_invites for update to authenticated
   using (public.project_role(project_id) in ('owner','admin'));
 
-drop policy if exists "invites_delete_admin" on public.project_invites;
 create policy "invites_delete_admin"
   on public.project_invites for delete to authenticated
   using (public.project_role(project_id) in ('owner','admin'));
@@ -249,12 +241,10 @@ create index if not exists idx_statuses_project on public.project_statuses(proje
 
 alter table public.project_statuses enable row level security;
 
-drop policy if exists "statuses_read_members_or_public" on public.project_statuses;
 create policy "statuses_read_members_or_public"
   on public.project_statuses for select
   using (public.is_project_member(project_id) or public.is_public_project(project_id));
 
-drop policy if exists "statuses_write_admin" on public.project_statuses;
 create policy "statuses_write_admin"
   on public.project_statuses for all to authenticated
   using (public.project_role(project_id) in ('owner','admin'))
@@ -291,12 +281,10 @@ create table if not exists public.project_settings (
 
 alter table public.project_settings enable row level security;
 
-drop policy if exists "settings_read_members_or_public" on public.project_settings;
 create policy "settings_read_members_or_public"
   on public.project_settings for select
   using (public.is_project_member(project_id) or public.is_public_project(project_id));
 
-drop policy if exists "settings_write_admin" on public.project_settings;
 create policy "settings_write_admin"
   on public.project_settings for all to authenticated
   using (public.project_role(project_id) in ('owner','admin'))
@@ -329,18 +317,3 @@ drop trigger if exists trg_projects_touch on public.projects;
 create trigger trg_projects_touch
   before update on public.projects
   for each row execute function public.touch_updated_at();
-
--- Deferred cross-table profiles policy --------------------------------------
--- This must come AFTER project_members is defined, since the policy
--- predicate references that table. Lets members of the same project see
--- each other's profile rows (name, avatar) so the Members page and chat
--- can show who's who without leaking other users.
-drop policy if exists "profiles_share_member_read" on public.profiles;
-create policy "profiles_share_member_read"
-  on public.profiles for select to authenticated
-  using (exists (
-    select 1
-    from public.project_members me
-    join public.project_members other on other.project_id = me.project_id
-    where me.user_id = auth.uid() and other.user_id = profiles.id
-  ));
