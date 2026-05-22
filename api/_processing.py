@@ -10,6 +10,7 @@ so each stateless Vercel invocation builds its own short-lived index.
 """
 from __future__ import annotations
 
+import copy
 import re
 import io
 import json
@@ -1349,6 +1350,13 @@ def _apply_iaq_to_field_features(field_features: list, iaq_features: list,
     """
     if not iaq_features:
         return 0
+    # Defensive deep-copy: callers may pass a cached/shared list of IAQ
+    # features that is also referenced by other request paths. We mutate
+    # match_iaq.properties.iaq_matched below; without this copy, two
+    # concurrent daily-refresh ticks would race on the same in-memory
+    # GeoJSON object. The caller is responsible for persisting the IAQ
+    # blob (see daily-refresh.py); this function only returns counts.
+    iaq_features = [copy.deepcopy(f) for f in iaq_features]
     upgraded = 0
     for ff in field_features:
         # NB: previously this loop skipped points whose status was already

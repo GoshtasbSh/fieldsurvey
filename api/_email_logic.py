@@ -16,6 +16,7 @@ Email delivery (preference order, first available wins):
 from __future__ import annotations
 
 import base64
+import hmac
 import io
 import json
 import os
@@ -404,7 +405,8 @@ def _cron_authorized(handler: BaseHTTPRequestHandler) -> bool:
     if not secret:
         return False
     got = (handler.headers.get("Authorization") or "").strip()
-    return got == f"Bearer {secret}"
+    # Constant-time comparison to prevent timing attacks against CRON_SECRET.
+    return hmac.compare_digest(got, f"Bearer {secret}")
 
 
 def _handle_daily_report(self: "handler", body: dict) -> None:
