@@ -89,7 +89,7 @@ The product replaces the single-purpose Keystone Field app with a generic, multi
 | Maps | MapLibre GL JS + OpenStreetMap tiles |
 | Auth + DB + Realtime + Storage | Supabase |
 | Server APIs | Next.js Route Handlers (TS) + Vercel Python serverless |
-| Email | Resend (new API key, not Keystone's) |
+| Email | Gmail SMTP via nodemailer (Keystone's primary path; uses a dedicated Gmail App Password) |
 | Geocoding | Nominatim (free) |
 | Hosting | Vercel (new project) |
 | CI | GitHub Actions (typecheck, lint, build, E2E) |
@@ -102,7 +102,7 @@ The product replaces the single-purpose Keystone Field app with a generic, multi
 - Offline IndexedDB outbox + replay flow from `keystone_field_web/index.html`
 - Service-worker tile caching from `keystone_field_web/sw.js`
 - Realtime chat + presence channel patterns
-- Resend transactional email pattern from `api/_email_logic.py`
+- Gmail SMTP transactional email pattern from `api/_email_logic.py::_send_via_gmail_smtp` (the Keystone primary path; Resend was a fallback we drop)
 - Qualtrics CSV parse + address matching from `api/_processing.py` / `api/iaq-points.py`
 - RLS hardening lessons from migrations 17–22 (no public service-role exposure, deny-by-default, security-definer helpers)
 
@@ -344,7 +344,7 @@ export function detectClient() {
 ### 5.3 Primary user flows
 
 1. **Sign up & first project** — sign-up → email confirm → empty home → create-project (name + center) → empty map.
-2. **Invite teammate** — Members page → invite email + role → token email via Resend → invitee clicks `/invite/[token]` → signup-if-needed → membership row added.
+2. **Invite teammate** — Members page → invite email + role → token email via Gmail SMTP → invitee clicks `/invite/[token]` → signup-if-needed → membership row added.
 3. **Surveyor adds point (offline-safe)** — `/p/[id]/field` → tap + → fill sheet → save → if offline: queued in IndexedDB + photos held as blobs; if online: direct write + Storage upload → realtime broadcast to dashboard.
 4. **Admin imports Qualtrics CSV** — `/p/[id]/import` → drag CSV → Python serverless parses & matches → preview matched/unmatched → review unmatched → commit → `survey_responses` written.
 5. **Make project public read-only** — Settings → Visibility toggle → typed-name confirm → shareable `/public/[id]` URL.
@@ -506,7 +506,7 @@ Single thread. Realtime via Supabase channel. Avatar + name + timestamp; today/y
 
 ### 7.7 Members (`/p/[id]/members`)
 
-Member rows: avatar, name, email, role, joined. Invite member (sheet: email + role). Pending invites with Resend/Revoke. Role change dropdown (owner/admin only). Owner row → Transfer ownership. Leave project button (non-owner).
+Member rows: avatar, name, email, role, joined. Invite member (sheet: email + role). Pending invites with Re-send/Revoke. Role change dropdown (owner/admin only). Owner row → Transfer ownership. Leave project button (non-owner).
 
 ### 7.8 Settings (`/p/[id]/settings`)
 
@@ -537,7 +537,7 @@ Deliverables:
 - Home page (project card grid: Owned, Member of, + New)
 - Create-project flow (name + geocoded map center)
 - Project shell (sidebar desktop / tab bar mobile, device auto-routing)
-- Members page + invite email via Resend
+- Members page + invite email via Gmail SMTP
 - Account + delete account
 - Email templates (invite, password reset, welcome)
 - CI green: typecheck, lint, smoke Playwright on auth + create
@@ -623,7 +623,7 @@ Keep: `.git/`, `.gitignore` (cleaned), `.claude/`, new `legacy/keystone-snapshot
 - `supabase/migrations/001_init.sql`
 - `api/py/__init__.py` + stub function
 - New `vercel.json` (TS + Python runtime, empty cron section)
-- New `.env.example` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `NEXT_PUBLIC_APP_URL`)
+- New `.env.example` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `EMAIL_FROM_NAME`, `NEXT_PUBLIC_APP_URL`)
 - New `README.md` (FieldSurvey overview + setup)
 - New `DEPLOY.md` and `SETUP.md` (provisioning steps)
 
@@ -647,10 +647,14 @@ Keep: `.git/`, `.gitignore` (cleaned), `.claude/`, new `legacy/keystone-snapshot
 - Deploy → confirm preview URL
 - Custom domain later
 
-### 10.3 Resend
+### 10.3 Gmail App Password (outbound email via Gmail SMTP)
 
-- Reuse Resend account but create a NEW API key for FieldSurvey
-- Sender: `onboarding@resend.dev` to start; switch to project domain later
+Same pattern as Keystone (`api/_email_logic.py::_send_via_gmail_smtp`).
+
+- Pick or create a dedicated Gmail account (e.g. `fieldsurvey-mail@gmail.com`). Recipients see this as the sender of all FieldSurvey mail.
+- Enable 2-Step Verification at https://myaccount.google.com/security
+- Generate an App Password at https://myaccount.google.com/apppasswords (app name "FieldSurvey"), copy the 16-character string.
+- Env vars: `GMAIL_USER=<address>`, `GMAIL_APP_PASSWORD=<16-char>`, `EMAIL_FROM_NAME=FieldSurvey` (optional display-name override).
 
 ### 10.4 Isolation verification
 
@@ -705,7 +709,7 @@ Baseline:
 - Decide which OpenStreetMap tile provider to use by default (osm.org direct, MapTiler free tier, Stadia free tier) before M2 — affects production stability under load.
 - Decide reverse-geocoding rate-limit strategy for Nominatim (cache per project; rate cap per user).
 - Confirm Supabase region preference before provisioning.
-- Choose a sender email domain when ready (currently `onboarding@resend.dev`).
+- Decide whether to keep the dedicated Gmail address as the long-term sender, or migrate later to a verified custom domain (SendGrid/Amazon SES) for higher volume.
 
 ---
 

@@ -4,9 +4,9 @@
 
 **Goal:** Take this repo (currently a copy of KeyStone), wipe Keystone code, provision separate Supabase + Vercel infra, and stand up a Next.js 15 app where a person can sign up, create empty projects, invite teammates by email, and accept invites — with device auto-routing between desktop and mobile shells.
 
-**Architecture:** Next.js 15 App Router monorepo (single `app/` tree serves both desktop and mobile via responsive layouts and a device-detection redirect). Supabase Postgres + Auth + RLS for data and identity. Resend for transactional email. TypeScript everywhere. shadcn/ui + Tailwind for primitives.
+**Architecture:** Next.js 15 App Router monorepo (single `app/` tree serves both desktop and mobile via responsive layouts and a device-detection redirect). Supabase Postgres + Auth + RLS for data and identity. Gmail SMTP via nodemailer for transactional email. TypeScript everywhere. shadcn/ui + Tailwind for primitives.
 
-**Tech Stack:** Next.js 15.x, React 19, TypeScript 5.x, Tailwind CSS 3.x, shadcn/ui, Supabase JS SDK v2, MapLibre GL JS 4.x, Lucide React, Resend, Vitest, Playwright.
+**Tech Stack:** Next.js 15.x, React 19, TypeScript 5.x, Tailwind CSS 3.x, shadcn/ui, Supabase JS SDK v2, MapLibre GL JS 4.x, Lucide React, Gmail SMTP via nodemailer, Vitest, Playwright.
 
 **Reference design spec:** `docs/superpowers/specs/2026-05-21-fieldsurvey-design.md`
 
@@ -262,24 +262,36 @@ Run:
 vercel env add NEXT_PUBLIC_SUPABASE_URL
 vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY
 vercel env add SUPABASE_SERVICE_ROLE_KEY
-vercel env add RESEND_API_KEY
+vercel env add GMAIL_USER
+vercel env add GMAIL_APP_PASSWORD
+vercel env add EMAIL_FROM_NAME
 vercel env add NEXT_PUBLIC_APP_URL
 ```
 For each: paste value, choose "Production, Preview, Development". `NEXT_PUBLIC_APP_URL` is `http://localhost:3000` for Development and the Vercel preview/production URL for the others.
 
 ---
 
-### Task B3: Create new Resend API key
+### Task B3: Generate Gmail App Password
 
 **Files:** none (external service)
 
-- [ ] **Step 1: User signs into resend.com and creates a new API key**
+Uses the same pattern as Keystone (`api/_email_logic.py::_send_via_gmail_smtp`). A dedicated Gmail account becomes the canonical FieldSurvey sender; we authenticate to `smtp.gmail.com:587` with a 16-character App Password.
 
-API Keys → **Create API Key** → name `fieldsurvey-prod` → permission `Full access` → copy into `.env.local` and Vercel as `RESEND_API_KEY`.
+- [ ] **Step 1: User creates / picks the dedicated Gmail account**
 
-- [ ] **Step 2: Default sender domain**
+Use a dedicated Gmail address (e.g. `fieldsurvey-mail@gmail.com`) — NOT your personal one. Recipients will see `"FieldSurvey" <that-address@gmail.com>` on every outbound mail. Sign into that account in the browser.
 
-Start with `onboarding@resend.dev`. The agent will hard-code this default; the user can swap to their own verified domain later in `lib/email.ts`.
+- [ ] **Step 2: User enables 2-Step Verification**
+
+https://myaccount.google.com/security → 2-Step Verification → ON. Required before App Passwords can be generated.
+
+- [ ] **Step 3: User generates the App Password**
+
+https://myaccount.google.com/apppasswords → enter app name `FieldSurvey` → Create → copy the 16-char string Google shows. Paste into `.env.local`:
+- `GMAIL_USER=<the dedicated gmail address>`
+- `GMAIL_APP_PASSWORD=<the 16-char app password>` (spaces are stripped by our code)
+
+Optional: set `EMAIL_FROM_NAME=FieldSurvey` (display name on outbound mail). Defaults to "FieldSurvey" if omitted.
 
 ---
 
@@ -296,7 +308,9 @@ The user writes this file at the project root:
 NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
-RESEND_API_KEY=re_<resend-key>
+GMAIL_USER=<dedicated-gmail-address>
+GMAIL_APP_PASSWORD=<16-char-app-password>
+EMAIL_FROM_NAME=FieldSurvey
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
@@ -307,7 +321,9 @@ Create file `.env.example`:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-RESEND_API_KEY=
+GMAIL_USER=
+GMAIL_APP_PASSWORD=
+EMAIL_FROM_NAME=FieldSurvey
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
@@ -392,7 +408,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `package.json`, `package-lock.json`
 
-- [ ] **Step 1: Install Supabase JS, MapLibre, Lucide, Resend, zod, date-fns**
+- [ ] **Step 1: Install Supabase JS, MapLibre, Lucide, nodemailer, zod, date-fns**
 
 Run:
 ```bash
@@ -401,11 +417,12 @@ npm install \
   @supabase/ssr@^0.5 \
   maplibre-gl@^4.7 \
   lucide-react@^0.471 \
-  resend@^4 \
+  nodemailer@^6 \
   zod@^3.23 \
   date-fns@^4 \
   clsx@^2 \
   tailwind-merge@^2
+npm install -D @types/nodemailer@^6
 ```
 
 - [ ] **Step 2: Install dev dependencies for tests**
@@ -427,7 +444,7 @@ npx playwright install --with-deps chromium
 Run:
 ```bash
 git add package.json package-lock.json
-git -c commit.gpgsign=false commit -m "feat(deps): add Supabase, MapLibre, Resend, Vitest, Playwright
+git -c commit.gpgsign=false commit -m "feat(deps): add Supabase, MapLibre, nodemailer (Gmail SMTP), Vitest, Playwright
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -2371,25 +2388,81 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 1: Create the email helper**
 
-Create `lib/email.ts`:
+Create `lib/email.ts` — Gmail SMTP via nodemailer (ports the Keystone `_send_via_gmail_smtp` pattern to TypeScript):
 ```ts
 import "server-only";
-import { Resend } from "resend";
+import nodemailer, { type Transporter } from "nodemailer";
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
-const FROM = "FieldSurvey <onboarding@resend.dev>";
+let cachedTransporter: Transporter | null = null;
+
+function getTransporter(): Transporter {
+  if (cachedTransporter) return cachedTransporter;
+  const user = (process.env.GMAIL_USER ?? "").trim();
+  const pass = (process.env.GMAIL_APP_PASSWORD ?? "").trim().replace(/\s+/g, "");
+  if (!user || !pass) {
+    throw new Error("GMAIL_USER / GMAIL_APP_PASSWORD not configured");
+  }
+  cachedTransporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false, // STARTTLS upgrade
+    auth: { user, pass },
+  });
+  return cachedTransporter;
+}
+
+function fromHeader(): string {
+  const name = (process.env.EMAIL_FROM_NAME ?? "FieldSurvey").trim();
+  const user = (process.env.GMAIL_USER ?? "").trim();
+  // Display name + dedicated Gmail address; Gmail rewrites the envelope
+  // sender to GMAIL_USER for anti-spoofing. Same pattern as Keystone's
+  // formataddr(("KeyStone Field", user)).
+  return `"${name.replace(/"/g, '\\"')}" <${user}>`;
+}
+
+export type SendEmailArgs = {
+  to: string | string[];
+  subject: string;
+  text: string;
+  html?: string;
+};
+
+export async function sendEmail(args: SendEmailArgs): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  try {
+    const info = await getTransporter().sendMail({
+      from: fromHeader(),
+      to: Array.isArray(args.to) ? args.to.join(", ") : args.to,
+      subject: args.subject,
+      text: args.text,
+      html: args.html,
+    });
+    return { ok: true, messageId: info.messageId };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export async function sendInviteEmail(args: { to: string; projectName: string; inviterName: string; acceptUrl: string }) {
-  return resend.emails.send({
-    from: FROM,
-    to: args.to,
-    subject: `${args.inviterName} invited you to ${args.projectName}`,
-    html: `
-      <p>${args.inviterName} invited you to the FieldSurvey project <strong>${args.projectName}</strong>.</p>
-      <p><a href="${args.acceptUrl}">Accept invite</a></p>
-      <p>This link expires in 14 days.</p>
-    `,
-  });
+  const subject = `${args.inviterName} invited you to ${args.projectName}`;
+  const text = [
+    `Hello,`,
+    ``,
+    `${args.inviterName} invited you to the FieldSurvey project "${args.projectName}".`,
+    ``,
+    `Accept the invite: ${args.acceptUrl}`,
+    ``,
+    `This link expires in 14 days.`,
+    ``,
+    `— FieldSurvey`,
+  ].join("\n");
+  const html = `
+    <p>Hello,</p>
+    <p><strong>${args.inviterName}</strong> invited you to the FieldSurvey project <strong>${args.projectName}</strong>.</p>
+    <p><a href="${args.acceptUrl}" style="display:inline-block;padding:10px 16px;background:#38bdf8;color:#0d1117;text-decoration:none;border-radius:6px;font-weight:600">Accept invite</a></p>
+    <p style="color:#8b949e;font-size:13px">Or paste this URL into your browser: <code>${args.acceptUrl}</code></p>
+    <p style="color:#8b949e;font-size:13px">This link expires in 14 days.</p>
+  `;
+  return sendEmail({ to: args.to, subject, text, html });
 }
 ```
 
@@ -2561,7 +2634,7 @@ export default async function MembersPage({ params }: { params: Promise<{ projec
 Run:
 ```bash
 git add app/p/\[projectId\]/members lib/email.ts
-git -c commit.gpgsign=false commit -m "feat(members): list + invite flow with Resend email
+git -c commit.gpgsign=false commit -m "feat(members): list + invite flow with Gmail SMTP email
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -2899,7 +2972,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_FROM_NAME: FieldSurvey
           NEXT_PUBLIC_APP_URL: http://localhost:3000
 ```
 
@@ -2986,14 +3061,14 @@ Open SaaS for general spatial surveys. Each user creates one or more survey proj
 - Next.js 15 (App Router) + TypeScript + React 19
 - Tailwind CSS + shadcn/ui
 - Supabase (Auth, Postgres, RLS, Realtime, Storage)
-- Resend (email)
+- Gmail SMTP via nodemailer (email)
 - MapLibre GL JS (M2)
 - Vercel hosting
 
 ## Quick start
 
 ```bash
-cp .env.example .env.local   # paste your Supabase/Resend keys
+cp .env.example .env.local   # paste your Supabase + Gmail App Password
 npm install
 npm run dev
 ```
@@ -3012,7 +3087,7 @@ Create `SETUP.md`:
 ```markdown
 # FieldSurvey Setup
 
-These steps provision a fresh Supabase + Vercel + Resend environment for FieldSurvey. They are intentionally separate from the original KeyStone instances.
+These steps provision a fresh Supabase + Vercel + Gmail App Password for FieldSurvey. They are intentionally separate from the original KeyStone instances.
 
 ## 1. Supabase
 
@@ -3028,13 +3103,16 @@ These steps provision a fresh Supabase + Vercel + Resend environment for FieldSu
 
 1. `npm i -g vercel`
 2. `vercel link` (Create new project → name `fieldsurvey`)
-3. `vercel env add` for each: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `NEXT_PUBLIC_APP_URL`
+3. `vercel env add` for each: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `EMAIL_FROM_NAME`, `NEXT_PUBLIC_APP_URL`
 
-## 3. Resend
+## 3. Gmail App Password (for outbound email)
 
-1. Create a new API key named `fieldsurvey-prod`
-2. Add to Vercel and `.env.local` as `RESEND_API_KEY`
-3. Default sender: `onboarding@resend.dev` (swap to your own verified domain later)
+Same pattern as Keystone (`api/_email_logic.py::_send_via_gmail_smtp`):
+
+1. Pick or create a dedicated Gmail account (e.g. `fieldsurvey-mail@gmail.com`) — recipients will see all outbound FieldSurvey mail as coming from this address.
+2. Enable **2-Step Verification** at https://myaccount.google.com/security
+3. Generate an App Password at https://myaccount.google.com/apppasswords (app name: "FieldSurvey"). Copy the 16-character string.
+4. In `.env.local` and Vercel: `GMAIL_USER=<the gmail address>`, `GMAIL_APP_PASSWORD=<the 16-char password>`, `EMAIL_FROM_NAME=FieldSurvey`.
 
 ## 4. Local
 
@@ -3087,7 +3165,7 @@ Before declaring M1 done, run through these by hand against the deployed preview
 - [ ] Click *Get started* → create an account with a real email.
 - [ ] Confirm email → land on `/home` empty state.
 - [ ] Click *Create your first project* → name + geocode address → land on `/p/[id]/map` (desktop) or `/p/[id]/field` (mobile).
-- [ ] Members page → invite a second email → receive Resend email.
+- [ ] Members page → invite a second email → receive the invite email (sent via Gmail SMTP).
 - [ ] Open the invite link in an incognito window → create the second account → land in the project.
 - [ ] On the laptop you see both members in the Members page.
 - [ ] Visit `/p/[id]` on a phone — auto-redirects to `/field`.
