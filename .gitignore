@@ -1,27 +1,42 @@
-.DS_Store
-~$*
-venv/
-__pycache__/
-*.pyc
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+.next/
+out/
+dist/
+build/
+
+# Environment
 .env
 .env.local
-output/*.csv
-output/*.json
-output/*.geojson
-!output/parcels_keystone.geojson
-output/uploaded_*
-data/Parcels.gdb/
-data/*.csv
-data/*.xlsx
-data/*.xls
-output/iaq_*
-graphify-out/
-mockups/
-.claude/
-.vercel
+.env*.local
 
-# Audit / QA artifacts — never committed
-audit-*.png
-audit-*.md
-.playwright-mcp/
-.claude-audit/
+# Vercel
+.vercel/
+
+# Python (for api/py/ functions only)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+
+# Misc
+*.log
