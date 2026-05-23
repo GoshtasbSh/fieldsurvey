@@ -1,10 +1,15 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
-import { isMobileUserAgent } from "@/lib/device";
+import { detectDeviceServer } from "@/lib/device";
 
-export default async function ProjectIndex({ params }: { params: Promise<{ projectId: string }> }) {
+/**
+ * Device-aware entry for a project. Mobile → /field, desktop → /map.
+ */
+export default async function ProjectIndex({
+  params,
+}: {
+  params: Promise<{ projectId: string }>;
+}) {
   const { projectId } = await params;
-  const h = await headers();
-  const ua = h.get("user-agent") || "";
-  redirect(isMobileUserAgent(ua) ? `/p/${projectId}/field` : `/p/${projectId}/map`);
+  const device = await detectDeviceServer();
+  redirect(`/p/${projectId}/${device === "mobile" ? "field" : "map"}`);
 }

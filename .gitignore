@@ -43,3 +43,4 @@ test-results/
 graphify-out/
 supabase/.temp/
 tsconfig.tsbuildinfo
+.superpowers/
