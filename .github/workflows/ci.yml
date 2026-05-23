@@ -11,7 +11,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22+ has native WebSocket, which @supabase/realtime-js
+          # requires for client instantiation (used by happy-path E2E).
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run typecheck
