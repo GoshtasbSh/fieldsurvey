@@ -18,7 +18,18 @@
 import { test, expect, request as pwRequest } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-test.skip(!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY, "needs Supabase + service-role env");
+// Skip on CI: this test mutates the real Supabase project (creates a user,
+// project, point, response), has a race window between sign-up form submit
+// and admin.listUsers(), and depends on the shared remote project not being
+// under contention. It's useful as a local manual verification before a
+// release, not as a per-commit CI gate. Set RUN_HAPPY_PATH=1 to force it on
+// CI when you want to validate a release.
+test.skip(
+  !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    (!!process.env.CI && !process.env.RUN_HAPPY_PATH),
+  "needs Supabase + service-role env; skipped on CI by default",
+);
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SVC = process.env.SUPABASE_SERVICE_ROLE_KEY!;
