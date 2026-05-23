@@ -96,7 +96,6 @@ export function DesktopRightRail({
           <Scroll>
             <AnalyzeTab
               matchCounts={matchCounts}
-              statuses={statuses}
               hourly={hourly}
               dow={dow}
               surveyors={surveyors}
@@ -227,10 +226,9 @@ function PulseTab({
 // ──────────────────────────────────────────────────────────────────────────────
 
 function AnalyzeTab({
-  matchCounts, statuses, hourly, dow, surveyors, coverage,
+  matchCounts, hourly, dow, surveyors, coverage,
 }: {
   matchCounts: MatchStatusCounts;
-  statuses: StatusRow[];
   hourly: HourBucket[];
   dow: DowBucket[];
   surveyors: SurveyorBrief[];
@@ -242,7 +240,7 @@ function AnalyzeTab({
       {/* Match status composition */}
       <Card title="Response match composition">
         <div className="flex items-center gap-4">
-          <DonutBreakdown statuses={statuses} total={total} matchCounts={matchCounts} />
+          <DonutBreakdown total={total} matchCounts={matchCounts} />
           <div className="flex flex-col gap-1.5 min-w-0">
             <MatchLegendRow color="#ffffff" label="M1 Matched" n={matchCounts.m1_count} total={total} />
             <MatchLegendRow color="#fde047" label="F1 Field only" n={matchCounts.f1_count} total={total} />
@@ -439,7 +437,7 @@ function ActivitySparkline({ buckets, showToday }: { buckets: DailyBucket[]; sho
   );
 }
 
-function DonutBreakdown({ statuses, total, matchCounts }: { statuses: StatusRow[]; total: number; matchCounts: MatchStatusCounts }) {
+function DonutBreakdown({ total, matchCounts }: { total: number; matchCounts: MatchStatusCounts }) {
   let offset = 0;
   const m1Pct = total > 0 ? (matchCounts.m1_count / total) * 100 : 0;
   const f1Pct = total > 0 ? (matchCounts.f1_count / total) * 100 : 0;
