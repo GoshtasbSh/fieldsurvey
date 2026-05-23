@@ -4,13 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Monitor, LogOut, MapPin, CloudUpload } from "lucide-react";
 import { SyncQueuePanel } from "@/components/mobile/sync-queue-panel";
+import { OfflineMapSection } from "@/components/mobile/offline-map-section";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 import { DEVICE_PREF_COOKIE } from "@/lib/device.client";
 
 type MoreTab = "menu" | "queue" | "mypoints";
 type MyPointSummary = { today: number; total: number };
 
-export function MorePanel({ projectId, projectName, myStats }: { projectId: string; projectName: string; myStats: MyPointSummary }) {
+export function MorePanel({ projectId, projectName, myStats, center }: { projectId: string; projectName: string; myStats: MyPointSummary; center: { lat: number; lon: number } }) {
   const router = useRouter();
   const [view, setView] = useState<MoreTab>("menu");
 
@@ -52,6 +53,7 @@ export function MorePanel({ projectId, projectName, myStats }: { projectId: stri
 
       <MenuRow Icon={CloudUpload} label="Sync queue" desc="Pending and failed offline points" onClick={() => setView("queue")} />
       <MenuRow Icon={MapPin}      label="My points" desc={`${myStats.today} today · ${myStats.total} total`} onClick={() => setView("mypoints")} />
+      <OfflineMapSection center={center} />
       <MenuRow Icon={Monitor}     label="Switch to desktop" desc="Open the full dashboard" onClick={switchToDesktop} />
       <MenuRow Icon={LogOut}      label="Sign out" desc="" onClick={signOut} tone="danger" />
     </div>

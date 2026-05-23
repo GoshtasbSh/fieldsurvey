@@ -81,7 +81,7 @@ export function MapShell(props: Props) {
         />
 
         <div className="relative overflow-hidden bg-[oklch(14%_0.012_250)]">
-          <MaplibreMap center={[props.center.lon, props.center.lat]} zoom={props.center.zoom ?? 14} features={filtered} statusColors={statusColors} selectedId={selectedId} onSelect={setSelectedId} />
+          <MaplibreMap center={[props.center.lon, props.center.lat]} zoom={props.center.zoom ?? 14} features={filtered} statusColors={statusColors} selectedId={selectedId} onSelect={setSelectedId} layers={left.layers} />
           <CommandCapsule onAdd={() => setAddOpen(true)} onImport={() => router.push(`/p/${props.projectId}/import`)} />
           <ActiveFiltersStrip activeMatch={left.activeMatch} activeStatuses={activeStatusChips} onClearMatch={() => left.setActiveMatch(null)} onClearStatus={(id) => { const next = new Set(left.activeStatusIds); next.delete(id); left.setActiveStatusIds(next); }} onClearAll={() => { left.setActiveMatch(null); left.setActiveStatusIds(new Set()); }} />
           <MapLegend counts={props.matchCounts} />

@@ -10,6 +10,7 @@ import { MobileAddSheet } from "@/components/mobile/add-sheet";
 import { MorePanel } from "@/components/mobile/more-panel";
 import { useOutboxCount } from "@/components/mobile/sync-queue-panel";
 import { MobilePointSheet } from "@/components/mobile/point-sheet";
+import { IosInstallBanner } from "@/components/mobile/ios-install-banner";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import type { ChatMessage } from "@/lib/queries/chat";
 import type { MatchStatusRow } from "@/lib/match/status";
@@ -83,7 +84,7 @@ export function MobileFieldShell({ projectId, projectName, currentUserId, center
             ? <ChatPanel projectId={projectId} currentUserId={currentUserId} members={chatMembers} initial={initialChat} />
             : <FieldPlaceholder text="Sign in to chat" />
         )}
-        {tab === "more" && <MorePanel projectId={projectId} projectName={projectName} myStats={myStats} />}
+        {tab === "more" && <MorePanel projectId={projectId} projectName={projectName} myStats={myStats} center={center} />}
       </main>
 
       <nav className="z-30 grid h-[58px] grid-cols-3 border-t border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -94,6 +95,7 @@ export function MobileFieldShell({ projectId, projectName, currentUserId, center
 
       <MobileAddSheet open={addOpen} projectId={projectId} statuses={statuses} initialCoords={{ lat: center.lat, lon: center.lon }} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); router.refresh(); }} />
       <MobilePointSheet pointId={selectedPointId} open={!!selectedPointId} onClose={() => setSelectedPointId(null)} onDeleted={() => router.refresh()} />
+      <IosInstallBanner />
     </>
   );
 }

@@ -44,3 +44,4 @@ graphify-out/
 supabase/.temp/
 tsconfig.tsbuildinfo
 .superpowers/
+.vercel

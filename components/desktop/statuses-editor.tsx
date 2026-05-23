@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
+import { Plus, Trash2, ArrowUp, ArrowDown, Loader2, GripVertical } from "lucide-react";
 
 type Status = {
   id: string;
@@ -19,6 +19,8 @@ export function StatusesEditor({ projectId, initial }: { projectId: string; init
   const router = useRouter();
   const [rows, setRows] = useState<Status[]>(initial);
   const [busy, setBusy] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
 
   async function save() {
     setBusy(true);
@@ -33,57 +35,81 @@ export function StatusesEditor({ projectId, initial }: { projectId: string; init
     } finally { setBusy(false); }
   }
 
-  function update(id: string, patch: Partial<Status>) {
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  }
+  function update(id: string, patch: Partial<Status>) { setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r))); }
   function add() {
-    setRows((rs) => [
-      ...rs,
-      { id: `new_${Math.random().toString(36).slice(2, 9)}`, label: "New status", color: DEFAULT_COLORS[rs.length % DEFAULT_COLORS.length], icon: null, sort_order: rs.length, is_default: false },
-    ]);
+    setRows((rs) => [...rs, { id: `new_${Math.random().toString(36).slice(2, 9)}`, label: "New status", color: DEFAULT_COLORS[rs.length % DEFAULT_COLORS.length], icon: null, sort_order: rs.length, is_default: false }]);
   }
   function move(id: string, dir: -1 | 1) {
+    setRows((rs) => { const i = rs.findIndex((x) => x.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= rs.length) return rs; const out = [...rs]; [out[i], out[j]] = [out[j], out[i]]; return out; });
+  }
+  function remove(id: string) { setRows((rs) => rs.filter((r) => r.id !== id)); }
+
+  // ── Drag handlers (native HTML5) ────────────────────────────────────
+  function onDragStart(e: React.DragEvent, id: string) {
+    setDragId(id);
+    e.dataTransfer.effectAllowed = "move";
+    // Required for Firefox to start the drag
+    e.dataTransfer.setData("text/plain", id);
+  }
+  function onDragOver(e: React.DragEvent, id: string) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (id !== overId) setOverId(id);
+  }
+  function onDragLeave(id: string) { if (overId === id) setOverId(null); }
+  function onDrop(e: React.DragEvent, targetId: string) {
+    e.preventDefault();
+    const sourceId = dragId;
+    setDragId(null); setOverId(null);
+    if (!sourceId || sourceId === targetId) return;
     setRows((rs) => {
-      const i = rs.findIndex((x) => x.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= rs.length) return rs;
+      const src = rs.findIndex((x) => x.id === sourceId);
+      const tgt = rs.findIndex((x) => x.id === targetId);
+      if (src < 0 || tgt < 0) return rs;
       const out = [...rs];
-      [out[i], out[j]] = [out[j], out[i]];
+      const [moved] = out.splice(src, 1);
+      out.splice(tgt, 0, moved);
       return out;
     });
-  }
-  function remove(id: string) {
-    setRows((rs) => rs.filter((r) => r.id !== id));
   }
 
   return (
     <div className="mt-4 space-y-2">
-      {rows.map((s, i) => (
-        <div key={s.id} className="grid grid-cols-[28px_1fr_120px_28px_28px_28px] items-center gap-2 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2">
-          <span className="font-mono text-[11px] text-[oklch(58%_0.014_250)] text-center tabular-nums">{i + 1}</span>
-          <input
-            value={s.label}
-            onChange={(e) => update(s.id, { label: e.target.value })}
-            className="rounded border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-2 py-1 text-[13px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]"
-          />
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={s.color}
-              onChange={(e) => update(s.id, { color: e.target.value })}
-              className="h-6 w-10 cursor-pointer rounded border border-[oklch(28%_0.02_250/0.55)] bg-transparent"
-            />
-            <input
-              value={s.color}
-              onChange={(e) => update(s.id, { color: e.target.value })}
-              className="w-20 rounded border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-1.5 py-0.5 font-mono text-[10px]"
-            />
+      {rows.map((s, i) => {
+        const isDragging = dragId === s.id;
+        const isOver = overId === s.id && dragId !== s.id;
+        return (
+          <div
+            key={s.id}
+            draggable
+            onDragStart={(e) => onDragStart(e, s.id)}
+            onDragOver={(e) => onDragOver(e, s.id)}
+            onDragLeave={() => onDragLeave(s.id)}
+            onDrop={(e) => onDrop(e, s.id)}
+            onDragEnd={() => { setDragId(null); setOverId(null); }}
+            className={`grid grid-cols-[20px_28px_1fr_120px_28px_28px_28px] items-center gap-2 rounded-lg border bg-[oklch(20%_0.016_250)] p-2 transition ${
+              isDragging
+                ? "opacity-50 border-[oklch(78%_0.155_234/0.5)] shadow-[0_12px_24px_-8px_oklch(0%_0_0/0.5)]"
+                : isOver
+                  ? "border-dashed border-[oklch(78%_0.155_234/0.5)] bg-[oklch(78%_0.155_234/0.08)]"
+                  : "border-[oklch(28%_0.02_250/0.55)]"
+            }`}
+          >
+            <span className="cursor-grab text-[oklch(42%_0.014_250)] hover:text-[oklch(78%_0.155_234)] active:cursor-grabbing" aria-label="Drag to reorder">
+              <GripVertical className="h-4 w-4" strokeWidth={1.7} />
+            </span>
+            <span className="font-mono text-[11px] text-[oklch(58%_0.014_250)] text-center tabular-nums">{i + 1}</span>
+            <input value={s.label} onChange={(e) => update(s.id, { label: e.target.value })} className="rounded border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-2 py-1 text-[13px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
+            <div className="flex items-center gap-2">
+              <input type="color" value={s.color} onChange={(e) => update(s.id, { color: e.target.value })} className="h-6 w-10 cursor-pointer rounded border border-[oklch(28%_0.02_250/0.55)] bg-transparent" />
+              <input value={s.color} onChange={(e) => update(s.id, { color: e.target.value })} className="w-20 rounded border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-1.5 py-0.5 font-mono text-[10px]" />
+            </div>
+            <button onClick={() => move(s.id, -1)} disabled={i === 0} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] disabled:opacity-30" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
+            <button onClick={() => move(s.id, 1)} disabled={i === rows.length - 1} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
+            <button onClick={() => remove(s.id)} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(68%_0.21_25)] hover:bg-[oklch(68%_0.21_25/0.15)]" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
           </div>
-          <button onClick={() => move(s.id, -1)} disabled={i === 0} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
-          <button onClick={() => move(s.id, 1)} disabled={i === rows.length - 1} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
-          <button onClick={() => remove(s.id)} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(68%_0.21_25)] hover:bg-[oklch(68%_0.21_25/0.15)]"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
-        </div>
-      ))}
+        );
+      })}
       <div className="flex gap-2 pt-2">
         <button onClick={add} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[oklch(28%_0.02_250/0.55)] px-3 py-2 font-display text-[11px] font-bold text-[oklch(76%_0.012_250)] hover:border-[oklch(78%_0.155_234/0.5)] hover:text-[oklch(78%_0.155_234)]">
           <Plus className="h-3.5 w-3.5" strokeWidth={1.7} /> Add status
@@ -93,6 +119,7 @@ export function StatusesEditor({ projectId, initial }: { projectId: string; init
           Save
         </button>
       </div>
+      <p className="text-[10.5px] text-[oklch(58%_0.014_250)] mt-1">Drag the handle to reorder, or use the arrow buttons for keyboard access.</p>
     </div>
   );
 }
