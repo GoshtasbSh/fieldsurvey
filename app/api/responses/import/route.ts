@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
   const secret = process.env.INTERNAL_API_SECRET;
   if (secret) {
     try {
-      const pyUrl = new URL("/api/py/match-responses", req.url);
+      const pyUrl = new URL("/api/py/match_responses", req.url);
       pyUrl.searchParams.set("project_id", body.project_id);
       void fetch(pyUrl, { method: "POST", headers: { "X-Internal-Secret": secret } });
     } catch { /* ignore */ }

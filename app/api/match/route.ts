@@ -18,9 +18,10 @@ export async function POST(req: NextRequest) {
   if (role !== "owner" && role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   // Forward to the Python serverless with the shared internal secret.
+  // Path is the file path Vercel auto-detects from api/py/match_responses.py
   const secret = process.env.INTERNAL_API_SECRET;
   if (!secret) return NextResponse.json({ error: "INTERNAL_API_SECRET not configured" }, { status: 500 });
-  const pyUrl = new URL("/api/py/match-responses", req.url);
+  const pyUrl = new URL("/api/py/match_responses", req.url);
   pyUrl.searchParams.set("project_id", projectId);
   const r = await fetch(pyUrl, { method: "POST", headers: { "X-Internal-Secret": secret } });
   const body = await r.text();

@@ -1,11 +1,3 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/py/match_responses.py": {
-      "runtime": "python3.12"
-    }
-  },
-  "rewrites": [
-    { "source": "/api/py/match-responses", "destination": "/api/py/match_responses" }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }
