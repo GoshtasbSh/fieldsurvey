@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import maplibregl, { type Map, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MATCH_RING } from "@/lib/match/status";
@@ -14,6 +14,12 @@ export type LayerVisibility = {
   boundary?: boolean;
 };
 
+export type MapHandle = {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  flyToCurrentLocation: () => void;
+};
+
 type Props = {
   center: [number, number];
   zoom: number;
@@ -25,18 +31,16 @@ type Props = {
   layers?: LayerVisibility;
 };
 
-const OSM_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-  sources: {
-    osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors", maxzoom: 19 },
-  },
-  layers: [{ id: "osm-tiles", type: "raster", source: "osm", paint: { "raster-saturation": -0.55, "raster-brightness-min": 0.05, "raster-contrast": 0.1 } }],
-};
+// OpenFreeMap "dark" style — free, no API key, CORS-open, vector quality.
+// CartoDB basemaps.cartocdn.com deprecated (returns 404 for all tiles as of 2026).
+const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
 
 const DEFAULT_LAYERS: LayerVisibility = { points: true, heatmap: false, clusters: false, boundary: false };
 
-export function MaplibreMap({ center, zoom, features, statusColors, selectedId, onSelect, layers = DEFAULT_LAYERS }: Props) {
+export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
+  { center, zoom, features, statusColors, selectedId, onSelect, layers = DEFAULT_LAYERS },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
 
@@ -45,9 +49,34 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
   // a single source cluster flag toggles clustering for that source).
   const fcRaw = useMemo(() => toGeoJSON(features, statusColors), [features, statusColors]);
 
+  useImperativeHandle(ref, () => ({
+    zoomIn: () => mapRef.current?.zoomIn(),
+    zoomOut: () => mapRef.current?.zoomOut(),
+    flyToCurrentLocation: () => {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          mapRef.current?.flyTo({
+            center: [pos.coords.longitude, pos.coords.latitude],
+            zoom: 16,
+            duration: 1200,
+          });
+        },
+        undefined,
+        { enableHighAccuracy: true, timeout: 8000 },
+      );
+    },
+  }));
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = new maplibregl.Map({ container: containerRef.current, style: OSM_STYLE, center, zoom, attributionControl: false });
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: BASEMAP_STYLE,
+      center,
+      zoom,
+      attributionControl: false,
+    });
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
     map.on("load", () => {
@@ -65,7 +94,6 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
         paint: {
           "heatmap-weight": 1,
           "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 1, 18, 4],
-          // sky → cyan → green → yellow → red density gradient
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
             0, "rgba(56, 189, 248, 0)",
@@ -90,16 +118,11 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
         paint: {
           "circle-color": [
             "step", ["get", "point_count"],
-            "#34d399",  // < 25 = green
-            25, "#38bdf8", // 25–100 = sky
-            100, "#a78bfa", // 100+ = violet
+            "#34d399",
+            25, "#38bdf8",
+            100, "#a78bfa",
           ],
-          "circle-radius": [
-            "step", ["get", "point_count"],
-            18,
-            25, 24,
-            100, 32,
-          ],
+          "circle-radius": ["step", ["get", "point_count"], 18, 25, 24, 100, 32],
           "circle-stroke-width": 2,
           "circle-stroke-color": "#0d1117",
           "circle-opacity": 0.9,
@@ -118,9 +141,6 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
         },
         paint: { "text-color": "#0d1117" },
       });
-      // Singletons inside the clustered source (rendered the same as the
-      // un-clustered layer so we don't duplicate styling — but only when
-      // clusters mode is the active visualization)
       map.addLayer({
         id: "ms-cluster-singleton",
         type: "circle",
@@ -190,32 +210,43 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
       map.on("mouseenter", "ms-points-bg", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "ms-points-bg", () => { map.getCanvas().style.cursor = ""; });
 
-      // Click a cluster → zoom in to expand it
       map.on("click", "ms-cluster-bubble", async (e) => {
         const f = e.features?.[0];
         if (!f) return;
         const clusterId = f.properties?.cluster_id;
         const src = map.getSource("ms-points-clustered") as GeoJSONSource;
         try {
-          const zoom = await src.getClusterExpansionZoom(clusterId as number);
+          const z = await src.getClusterExpansionZoom(clusterId as number);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const coords = (f.geometry as any).coordinates as [number, number];
-          map.easeTo({ center: coords, zoom });
+          map.easeTo({ center: coords, zoom: z });
         } catch { /* ignore */ }
       });
       map.on("mouseenter", "ms-cluster-bubble", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "ms-cluster-bubble", () => { map.getCanvas().style.cursor = ""; });
 
-      // Apply initial layer visibility
       applyLayerVisibility(map, layers);
     });
 
+    // Resize map whenever the outer wrapper changes dimensions (panel collapse/expand)
+    const wrapper = containerRef.current?.parentElement;
+    let ro: ResizeObserver | null = null;
+    if (wrapper) {
+      ro = new ResizeObserver(() => {
+        if (mapRef.current) mapRef.current.resize();
+      });
+      ro.observe(wrapper);
+    }
+
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; };
+    return () => {
+      ro?.disconnect();
+      map.remove();
+      mapRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Push new data to both sources whenever features change
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
@@ -223,7 +254,6 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
     (map.getSource("ms-points-clustered") as GeoJSONSource | undefined)?.setData(fcRaw);
   }, [fcRaw]);
 
-  // Highlight the selected pin
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
@@ -232,28 +262,30 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
     }
   }, [selectedId]);
 
-  // React to layer-visibility changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
     applyLayerVisibility(map, layers);
   }, [layers]);
 
-  return <div ref={containerRef} className="absolute inset-0" />;
-}
+  // MapLibre GL adds `.maplibregl-map { position: relative }` to the container,
+  // which overrides `position: absolute`. Wrapping isolates our layout from that.
+  return (
+    <div className="absolute inset-0">
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+});
 
 function applyLayerVisibility(map: Map, layers: LayerVisibility) {
   const setVis = (id: string, vis: boolean) => {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis ? "visible" : "none");
   };
-  // Points layer set
   setVis("ms-points-bg", layers.points);
   setVis("ms-points", layers.points);
   setVis("ms-points-r1", layers.points);
   setVis("ms-points-selected", layers.points);
-  // Heatmap
   setVis("ms-heat", layers.heatmap);
-  // Clusters (and the singletons that live in the clustered source)
   setVis("ms-cluster-bubble", layers.clusters);
   setVis("ms-cluster-count", layers.clusters);
   setVis("ms-cluster-singleton", layers.clusters);

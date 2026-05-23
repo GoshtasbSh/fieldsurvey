@@ -1,6 +1,8 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 
 export type DailyBucket = { day: string; total: number };
+export type HourBucket = { hour: number; total: number };
+export type DowBucket = { dow: number; total: number };
 export type SurveyorRow = { collector_id: string | null; name: string; count: number };
 export type CoverageMetrics = {
   match_rate_pct: number;
@@ -84,4 +86,34 @@ export async function getCoverageMetrics(projectId: string): Promise<CoverageMet
   }
 
   return { match_rate_pct, median_accuracy_m, photo_coverage_pct, density_per_km2 };
+}
+
+/** Count points by hour of day (UTC). Returns 24 buckets, 0–23. */
+export async function getHourlyDistribution(projectId: string): Promise<HourBucket[]> {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb.from("points") as any)
+    .select("collected_at")
+    .eq("project_id", projectId) as { data: Array<{ collected_at: string }> | null };
+  const counts = new Array(24).fill(0) as number[];
+  for (const r of data ?? []) {
+    const h = new Date(r.collected_at).getUTCHours();
+    counts[h]++;
+  }
+  return counts.map((total, hour) => ({ hour, total }));
+}
+
+/** Count points by day of week (0=Sun … 6=Sat, UTC). Returns 7 buckets. */
+export async function getDayOfWeekDistribution(projectId: string): Promise<DowBucket[]> {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb.from("points") as any)
+    .select("collected_at")
+    .eq("project_id", projectId) as { data: Array<{ collected_at: string }> | null };
+  const counts = new Array(7).fill(0) as number[];
+  for (const r of data ?? []) {
+    const d = new Date(r.collected_at).getUTCDay();
+    counts[d]++;
+  }
+  return counts.map((total, dow) => ({ dow, total }));
 }

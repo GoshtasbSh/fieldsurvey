@@ -69,7 +69,7 @@ export async function getMatchStatusFeatures(projectId: string): Promise<MatchSt
   const sb = await createServerSupabase();
   const { data } = await sb
     .from("v_match_status")
-    .select("point_id, response_id, project_id, status_id, status_label, lat, lon, is_matched, match_status")
+    .select("point_id, response_id, project_id, status_id, status_label, lat, lon, is_matched, match_status, collected_at")
     .eq("project_id", projectId);
   return (data ?? []) as MatchStatusRow[];
 }

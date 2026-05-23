@@ -11,7 +11,12 @@ export async function signInAction(formData: FormData) {
 
   const sb = await createServerSupabase();
   const { error } = await sb.auth.signInWithPassword(parsed.data);
-  if (error) return { error: error.message };
+  if (error) {
+    const msg = error.message.toLowerCase().includes("email not confirmed")
+      ? "Email not confirmed. Ask the admin to enable instant sign-in, or check your inbox for the confirmation link."
+      : error.message;
+    return { error: msg };
+  }
   redirect("/home");
 }
 

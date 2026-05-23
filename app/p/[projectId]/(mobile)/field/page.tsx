@@ -50,7 +50,7 @@ export default async function MobileFieldPage({ params }: { params: Promise<{ pr
       projectName={res.project.name}
       currentUserId={user?.id ?? null}
       center={{ lat: res.project.center_lat, lon: res.project.center_lon, zoom: res.project.default_zoom ?? 14 }}
-      statuses={statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, count: s.count, pct: s.pct }))}
+      statuses={statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, icon: s.icon ?? null, count: s.count, pct: s.pct }))}
       chatMembers={chatMembers}
       initialChat={initialChat}
       features={safeFeatures}

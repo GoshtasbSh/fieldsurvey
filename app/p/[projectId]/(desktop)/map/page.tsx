@@ -1,6 +1,6 @@
 import { getProjectForUser } from "@/lib/queries/project";
 import { getStatusBreakdown, getMatchStatusCounts, getMatchStatusFeatures } from "@/lib/queries/points";
-import { getDailyActivity, getSurveyorLeaderboard, getCoverageMetrics } from "@/lib/queries/analytics";
+import { getDailyActivity, getSurveyorLeaderboard, getCoverageMetrics, getHourlyDistribution, getDayOfWeekDistribution } from "@/lib/queries/analytics";
 import { listChatMessages, listProjectMembers } from "@/lib/queries/chat";
 import { getProjectCaps } from "@/lib/queries/caps";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -15,11 +15,18 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
   const sb = await createServerSupabase();
   const { data: { user } } = await sb.auth.getUser();
 
-  const [statuses, matchCounts, features, daily, surveyors, coverage, chatMembers, initialChat, caps] = await Promise.all([
+  const [
+    statuses, matchCounts, features,
+    daily, hourly, dow,
+    surveyors, coverage,
+    chatMembers, initialChat, caps,
+  ] = await Promise.all([
     getStatusBreakdown(projectId),
     getMatchStatusCounts(projectId),
     getMatchStatusFeatures(projectId),
     getDailyActivity(projectId, 14),
+    getHourlyDistribution(projectId),
+    getDayOfWeekDistribution(projectId),
     getSurveyorLeaderboard(projectId),
     getCoverageMetrics(projectId),
     listProjectMembers(projectId),
@@ -38,12 +45,14 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
         projectName={res.project.name}
         currentUserId={user?.id ?? null}
         center={{ lat: res.project.center_lat, lon: res.project.center_lon, zoom: res.project.default_zoom ?? 14 }}
-        statuses={statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, count: s.count, pct: s.pct }))}
+        statuses={statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, icon: s.icon ?? null, count: s.count, pct: s.pct }))}
         matchCounts={{ m1_count: matchCounts.m1_count ?? 0, f1_count: matchCounts.f1_count ?? 0, r1_count: matchCounts.r1_count ?? 0, total_with_status: matchCounts.total_with_status ?? 0 }}
         features={features}
         pointsTotal={pointsTotal}
         todayDelta={todayDelta}
         daily={daily}
+        hourly={hourly}
+        dow={dow}
         surveyors={surveyors}
         coverage={coverage}
         chatMembers={chatMembers}

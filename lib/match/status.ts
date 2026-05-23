@@ -69,6 +69,7 @@ export type MatchStatusRow = {
   status_label: string | null;
   lat: number;
   lon: number;
+  collected_at: string | null;
   is_matched: boolean;
   match_status: MatchStatus | null;
 };
