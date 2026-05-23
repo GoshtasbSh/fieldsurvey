@@ -1,0 +1,93 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Monitor, LogOut, MapPin, CloudUpload } from "lucide-react";
+import { SyncQueuePanel } from "@/components/mobile/sync-queue-panel";
+import { createBrowserSupabase } from "@/lib/supabase/client";
+import { DEVICE_PREF_COOKIE } from "@/lib/device.client";
+
+type MoreTab = "menu" | "queue" | "mypoints";
+type MyPointSummary = { today: number; total: number };
+
+export function MorePanel({ projectId, projectName, myStats }: { projectId: string; projectName: string; myStats: MyPointSummary }) {
+  const router = useRouter();
+  const [view, setView] = useState<MoreTab>("menu");
+
+  async function signOut() {
+    const sb = createBrowserSupabase();
+    await sb.auth.signOut();
+    router.push("/sign-in");
+  }
+
+  function switchToDesktop() {
+    document.cookie = `${DEVICE_PREF_COOKIE}=desktop; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+    router.push(`/p/${projectId}/map`);
+  }
+
+  if (view === "queue") return (
+    <>
+      <PanelHeader title="Sync queue" onBack={() => setView("menu")} />
+      <SyncQueuePanel projectId={projectId} />
+    </>
+  );
+
+  if (view === "mypoints") return (
+    <>
+      <PanelHeader title="My points" onBack={() => setView("menu")} />
+      <div className="p-4 space-y-3">
+        <StatTile label="Today" value={String(myStats.today)} />
+        <StatTile label="All time" value={String(myStats.total)} />
+        <p className="text-[11px] text-[oklch(58%_0.014_250)]">Tap the Map tab to see them plotted.</p>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="p-4 space-y-2">
+      <div className="rounded-xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-4">
+        <div className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">Project</div>
+        <div className="mt-1 font-display text-[14px] font-extrabold">{projectName}</div>
+      </div>
+
+      <MenuRow Icon={CloudUpload} label="Sync queue" desc="Pending and failed offline points" onClick={() => setView("queue")} />
+      <MenuRow Icon={MapPin}      label="My points" desc={`${myStats.today} today · ${myStats.total} total`} onClick={() => setView("mypoints")} />
+      <MenuRow Icon={Monitor}     label="Switch to desktop" desc="Open the full dashboard" onClick={switchToDesktop} />
+      <MenuRow Icon={LogOut}      label="Sign out" desc="" onClick={signOut} tone="danger" />
+    </div>
+  );
+}
+
+function PanelHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="flex items-center gap-2 border-b border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-3 py-2.5">
+      <button onClick={onBack} className="inline-flex h-8 px-2 items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(20%_0.016_250)] text-[12px] font-semibold">← Back</button>
+      <h2 className="flex-1 text-center font-display text-[13px] font-extrabold pr-12">{title}</h2>
+    </div>
+  );
+}
+
+function MenuRow({ Icon, label, desc, onClick, tone }: { Icon: typeof Monitor; label: string; desc: string; onClick: () => void; tone?: "danger" }) {
+  const labelCls = tone === "danger" ? "text-[oklch(68%_0.21_25)]" : "text-[oklch(96%_0.008_250)]";
+  return (
+    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-3 text-left active:bg-[oklch(20%_0.016_250)]">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[oklch(20%_0.016_250)]">
+        <Icon className={`h-4 w-4 ${tone === "danger" ? "text-[oklch(68%_0.21_25)]" : "text-[oklch(78%_0.155_234)]"}`} strokeWidth={1.7} />
+      </span>
+      <div className="flex-1">
+        <div className={`font-display text-[13px] font-bold ${labelCls}`}>{label}</div>
+        {desc && <div className="text-[11px] text-[oklch(58%_0.014_250)]">{desc}</div>}
+      </div>
+      <span className="text-[oklch(58%_0.014_250)] text-[14px]">›</span>
+    </button>
+  );
+}
+
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-3">
+      <div className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">{label}</div>
+      <div className="mt-1 font-display text-[24px] font-extrabold tabular-nums">{value}</div>
+    </div>
+  );
+}
