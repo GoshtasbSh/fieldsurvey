@@ -7,6 +7,10 @@ import { putOutboxPoint, putOutboxPhoto } from "@/lib/offline/idb";
 import { drainOutbox } from "@/lib/offline/sync";
 import type { StatusRow } from "@/components/desktop/left-rail";
 
+// All blob URLs ever created in this form are tracked so we can revoke
+// them on unmount — preventing the Blob backing each File from being
+// held in memory after navigation.
+
 type Props = {
   projectId: string;
   statuses: StatusRow[];
@@ -38,6 +42,16 @@ export function AddPointForm({ projectId, statuses, initialLat, initialLon, onSa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const activeUrlsRef = useRef<Set<string>>(new Set());
+
+  // Revoke any object URLs still live when the form unmounts
+  useEffect(() => {
+    const urls = activeUrlsRef.current;
+    return () => {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      urls.clear();
+    };
+  }, []);
 
   // GPS watch — high accuracy, single shot if no manual coords given
   useEffect(() => {
@@ -71,7 +85,9 @@ export function AddPointForm({ projectId, statuses, initialLat, initialLon, onSa
     if (!files) return;
     const next: PhotoLocal[] = [];
     for (const f of Array.from(files).slice(0, 8)) {
-      next.push({ id: newClientId(), blob: f, url: URL.createObjectURL(f) });
+      const url = URL.createObjectURL(f);
+      activeUrlsRef.current.add(url);
+      next.push({ id: newClientId(), blob: f, url });
     }
     setPhotos((p) => [...p, ...next].slice(0, 8));
   }
@@ -79,7 +95,10 @@ export function AddPointForm({ projectId, statuses, initialLat, initialLon, onSa
   function removePhoto(id: string) {
     setPhotos((p) => {
       const target = p.find((x) => x.id === id);
-      if (target) URL.revokeObjectURL(target.url);
+      if (target) {
+        URL.revokeObjectURL(target.url);
+        activeUrlsRef.current.delete(target.url);
+      }
       return p.filter((x) => x.id !== id);
     });
   }

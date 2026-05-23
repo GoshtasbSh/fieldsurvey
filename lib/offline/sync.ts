@@ -30,8 +30,11 @@ export async function drainOutbox(projectId?: string): Promise<{ synced: number;
     for (const row of rows) {
       if (row.attempts >= MAX_ATTEMPTS) continue;
       const backoff = BACKOFF_MS[Math.min(row.attempts, BACKOFF_MS.length - 1)];
-      // crude per-row backoff: skip if last_error is recent
-      if (row.last_error && Date.now() - row.created_at < backoff && row.attempts > 0) continue;
+      // Per-row backoff measured from the last failed attempt, not from
+      // when the row was first queued. Without this, an old offline point
+      // that started failing minutes ago would be retried on every drain.
+      const lastAttempt = row.last_attempt_at ?? row.created_at;
+      if (row.attempts > 0 && Date.now() - lastAttempt < backoff) continue;
       try {
         await syncOne(row);
         await deleteOutboxPoint(row.client_id);
@@ -43,6 +46,7 @@ export async function drainOutbox(projectId?: string): Promise<{ synced: number;
           ...row,
           attempts: row.attempts + 1,
           last_error: e instanceof Error ? e.message : String(e),
+          last_attempt_at: Date.now(),
         });
       }
     }
@@ -53,7 +57,9 @@ export async function drainOutbox(projectId?: string): Promise<{ synced: number;
 }
 
 async function syncOne(row: OutboxPointRow): Promise<void> {
-  // 1. Upload photos
+  // 1. Upload photos. The server uses photo_id as the storage path
+  // segment so a retry overwrites the same object instead of creating
+  // orphans. upsert=true on the bucket side.
   const photoPaths: string[] = [];
   for (const photoId of row.photo_blob_ids) {
     const photo = await getOutboxPhoto(photoId);
@@ -62,6 +68,7 @@ async function syncOne(row: OutboxPointRow): Promise<void> {
     form.set("file", photo.blob, `${photoId}.jpg`);
     form.set("project_id", row.project_id);
     form.set("client_point_id", row.client_id);
+    form.set("photo_id", photoId);
     const res = await fetch("/api/points/photo-upload", { method: "POST", body: form });
     if (!res.ok) throw new Error(`photo upload ${res.status}`);
     const { path } = (await res.json()) as { path: string };

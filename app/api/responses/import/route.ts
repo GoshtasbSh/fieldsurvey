@@ -47,15 +47,32 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
 
-  // Insert responses in chunks
-  const rowsToInsert = body.rows.map((r) => ({
-    project_id: body.project_id,
-    source: body.source,
-    raw_data: r,
-    address_used: String(r[body.address_column] ?? "").trim() || null,
-    external_id: body.external_id_column ? String(r[body.external_id_column] ?? "").trim() || null : null,
-    imported_by: user.id,
-  }));
+  // Insert responses in chunks. If an external_id column was specified
+  // but a row has an empty value, surface the error instead of silently
+  // falling back to null (which would bypass the partial unique index
+  // and create duplicates on re-import).
+  let blankExternalIds = 0;
+  const rowsToInsert = body.rows.map((r) => {
+    let externalId: string | null = null;
+    if (body.external_id_column) {
+      const raw = String(r[body.external_id_column] ?? "").trim();
+      if (!raw) blankExternalIds += 1;
+      externalId = raw || null;
+    }
+    return {
+      project_id: body.project_id,
+      source: body.source,
+      raw_data: r,
+      address_used: String(r[body.address_column] ?? "").trim() || null,
+      external_id: externalId,
+      imported_by: user.id,
+    };
+  });
+  if (body.external_id_column && blankExternalIds > 0) {
+    return NextResponse.json({
+      error: `${blankExternalIds} rows have an empty value in the "${body.external_id_column}" column. Pick a different column or fix the CSV.`,
+    }, { status: 400 });
+  }
 
   let inserted = 0;
   const chunk = 500;
@@ -75,12 +92,15 @@ export async function POST(req: NextRequest) {
     external_id_column: body.external_id_column ?? null,
   }).eq("project_id", body.project_id);
 
-  // Trigger the matcher (best-effort, async)
-  try {
-    const pyUrl = new URL("/api/py/match-responses", req.url);
-    pyUrl.searchParams.set("project_id", body.project_id);
-    void fetch(pyUrl, { method: "POST" });
-  } catch { /* ignore */ }
+  // Trigger the matcher (best-effort, async) with the shared internal secret
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (secret) {
+    try {
+      const pyUrl = new URL("/api/py/match-responses", req.url);
+      pyUrl.searchParams.set("project_id", body.project_id);
+      void fetch(pyUrl, { method: "POST", headers: { "X-Internal-Secret": secret } });
+    } catch { /* ignore */ }
+  }
 
   await sbAny.from("survey_imports").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", imp?.id);
   return NextResponse.json({ import_id: imp?.id, inserted });

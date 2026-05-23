@@ -31,6 +31,7 @@ import urllib.request
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
 SERVICE_ROLE = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+INTERNAL_SECRET = os.environ.get("INTERNAL_API_SECRET", "")
 
 CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 
@@ -185,6 +186,15 @@ def run_match(project_id: str):
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
+            # Auth: shared secret in X-Internal-Secret header. The Next.js
+            # auth shim at /api/match sets this; direct calls without the
+            # header are rejected to prevent service-role abuse.
+            supplied = self.headers.get("X-Internal-Secret", "")
+            if not INTERNAL_SECRET or supplied != INTERNAL_SECRET:
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b'{"error":"unauthorized"}')
+                return
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             project_id = (q.get("project_id") or [""])[0]
             if not project_id:

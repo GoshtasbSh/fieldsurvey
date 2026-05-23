@@ -2,8 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { z } from "zod";
 
+// New rows from the editor are tagged `new_<random>`; existing rows are
+// real UUIDs. Both shapes must validate so the same payload is sent in
+// either case.
+const NEW_ID = /^new_[a-z0-9]+$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const StatusInput = z.object({
-  id: z.string(),
+  id: z.string().refine((s) => UUID.test(s) || NEW_ID.test(s), "id must be a UUID or new_*"),
   label: z.string().min(1).max(40),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   icon: z.string().nullable().optional(),
@@ -43,10 +48,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ proj
   // Insert new
   if (newOnes.length) await sbAny.from("project_statuses").insert(newOnes);
 
-  // Delete any that disappeared
+  // Delete any rows the editor removed. PostgREST `in.` expects an
+  // unquoted comma list for UUID columns; wrapping each in quotes would
+  // make Postgres treat them as identifiers. UUID format is enforced by
+  // the Zod schema above so direct interpolation is safe here.
   const keptIds = existing.map((s) => s.id);
   if (keptIds.length) {
-    await sbAny.from("project_statuses").delete().eq("project_id", projectId).not("id", "in", `(${keptIds.map((x) => `"${x}"`).join(",")})`);
+    await sbAny.from("project_statuses").delete().eq("project_id", projectId).not("id", "in", `(${keptIds.join(",")})`);
+  } else {
+    // If the user removed everything, delete all
+    await sbAny.from("project_statuses").delete().eq("project_id", projectId);
   }
   return NextResponse.json({ ok: true });
 }

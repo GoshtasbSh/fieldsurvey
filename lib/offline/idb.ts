@@ -25,6 +25,8 @@ export type OutboxPointRow = {
   attempts: number;
   last_error: string | null;
   created_at: number;
+  /** Wall-clock time of the most recent failed attempt — used for backoff. */
+  last_attempt_at?: number;
 };
 
 export type OutboxPhotoRow = {

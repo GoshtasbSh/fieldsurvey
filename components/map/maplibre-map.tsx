@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import maplibregl, { type Map, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MATCH_RING } from "@/lib/match/status";
@@ -58,8 +58,10 @@ export function MaplibreMap({ center, zoom, features, statusColors, selectedId, 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
 
-  // Build a GeoJSON FeatureCollection from rows
-  const fc = featuresToGeoJSON(features, statusColors);
+  // Build a GeoJSON FeatureCollection from rows — memoized so unrelated
+  // re-renders (e.g. router.refresh from RealtimeWatcher) don't trigger
+  // a WebGL re-draw of all points.
+  const fc = useMemo(() => featuresToGeoJSON(features, statusColors), [features, statusColors]);
 
   // Initialize map once
   useEffect(() => {

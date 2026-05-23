@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, Inter, IBM_Plex_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegister } from "@/components/sw-register";
@@ -24,7 +24,14 @@ export const metadata: Metadata = {
   title: "FieldSurvey",
   description: "Run spatial surveys with your team.",
   manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
   themeColor: "#38bdf8",
+  width: "device-width",
+  initialScale: 1,
+  // PWA install + iOS safe-area
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

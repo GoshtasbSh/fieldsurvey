@@ -17,10 +17,12 @@ export async function POST(req: NextRequest) {
   const { data: role } = await (sb as any).rpc("project_role", { p_project: projectId });
   if (role !== "owner" && role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  // Forward to the Python serverless
+  // Forward to the Python serverless with the shared internal secret.
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) return NextResponse.json({ error: "INTERNAL_API_SECRET not configured" }, { status: 500 });
   const pyUrl = new URL("/api/py/match-responses", req.url);
   pyUrl.searchParams.set("project_id", projectId);
-  const r = await fetch(pyUrl, { method: "POST" });
+  const r = await fetch(pyUrl, { method: "POST", headers: { "X-Internal-Secret": secret } });
   const body = await r.text();
   return new NextResponse(body, { status: r.status, headers: { "content-type": "application/json" } });
 }

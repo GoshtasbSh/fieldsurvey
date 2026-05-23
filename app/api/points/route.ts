@@ -66,9 +66,16 @@ export async function POST(req: NextRequest) {
 
   if (error || !point) return NextResponse.json({ error: error?.message ?? "insert failed" }, { status: 500 });
 
-  // Attach photo rows
+  // Attach photo rows. Validate each path so a malicious client can't
+  // attach a storage object from another project. Expected shape:
+  //   {project_id}/{client_id}/{photo_id}.{ext}
   if (body.photo_paths?.length) {
-    const rows = body.photo_paths.map((p) => ({
+    const expectedPrefix = `${body.project_id}/${body.client_id}/`;
+    const valid = body.photo_paths.filter((p) => p.startsWith(expectedPrefix) && !p.includes(".."));
+    if (valid.length < body.photo_paths.length) {
+      return NextResponse.json({ error: "invalid photo_paths" }, { status: 400 });
+    }
+    const rows = valid.map((p) => ({
       point_id: point.id,
       storage_path: p,
       uploaded_by: user.id,
