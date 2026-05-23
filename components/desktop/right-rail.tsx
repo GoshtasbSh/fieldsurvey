@@ -3,20 +3,19 @@
 import { useState, type ReactNode } from "react";
 import { Activity, BarChart3, Users, MousePointer2 } from "lucide-react";
 import type { MatchStatusCounts } from "@/lib/match/status";
+import { ChatPanel } from "@/components/chat/chat-panel";
+import type { ChatMessage } from "@/lib/queries/chat";
 import type { StatusRow } from "./left-rail";
 
 export type RightRailTab = "pulse" | "analyze" | "team" | "inspect";
-
 export type SurveyorBrief = { collector_id: string | null; name: string; count: number };
 export type DailyBucket = { day: string; total: number };
-export type CoverageMetrics = {
-  match_rate_pct: number;
-  median_accuracy_m: number | null;
-  photo_coverage_pct: number;
-  density_per_km2: number | null;
-};
+export type CoverageMetrics = { match_rate_pct: number; median_accuracy_m: number | null; photo_coverage_pct: number; density_per_km2: number | null };
+export type ChatMember = { user_id: string; display_name: string; email: string; avatar_url: string | null };
 
 type Props = {
+  projectId: string;
+  currentUserId: string | null;
   matchCounts: MatchStatusCounts;
   statuses: StatusRow[];
   pointsTotal: number;
@@ -25,9 +24,11 @@ type Props = {
   daily?: DailyBucket[];
   surveyors?: SurveyorBrief[];
   coverage?: CoverageMetrics;
+  chatMembers?: ChatMember[];
+  initialChat?: ChatMessage[];
 };
 
-export function DesktopRightRail({ matchCounts, statuses, pointsTotal, todayDelta, unreadChats, daily = [], surveyors = [], coverage }: Props) {
+export function DesktopRightRail({ projectId, currentUserId, matchCounts, statuses, pointsTotal, todayDelta, unreadChats, daily = [], surveyors = [], coverage, chatMembers = [], initialChat = [] }: Props) {
   const [tab, setTab] = useState<RightRailTab>("pulse");
   return (
     <aside className="flex w-[360px] flex-col overflow-hidden border-l border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]">
@@ -40,11 +41,7 @@ export function DesktopRightRail({ matchCounts, statuses, pointsTotal, todayDelt
         ] as const).map(({ key, label, Icon, badge }) => {
           const on = tab === key;
           return (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`relative flex flex-col items-center gap-1 rounded-[10px] px-0 py-2 transition ${on ? "bg-[oklch(78%_0.155_234/0.12)] text-[oklch(78%_0.155_234)]" : "text-[oklch(58%_0.014_250)] hover:bg-[oklch(20%_0.016_250)] hover:text-[oklch(76%_0.012_250)]"}`}
-            >
+            <button key={key} onClick={() => setTab(key)} className={`relative flex flex-col items-center gap-1 rounded-[10px] px-0 py-2 transition ${on ? "bg-[oklch(78%_0.155_234/0.12)] text-[oklch(78%_0.155_234)]" : "text-[oklch(58%_0.014_250)] hover:bg-[oklch(20%_0.016_250)] hover:text-[oklch(76%_0.012_250)]"}`}>
               <Icon className="h-[17px] w-[17px]" strokeWidth={1.7} />
               <span className="font-display text-[10.5px] font-bold">{label}</span>
               {typeof badge === "number" && badge > 0 && (
@@ -56,14 +53,23 @@ export function DesktopRightRail({ matchCounts, statuses, pointsTotal, todayDelt
         })}
       </nav>
 
-      <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto p-4">
-        {tab === "pulse" && <PulseTab matchCounts={matchCounts} statuses={statuses} pointsTotal={pointsTotal} todayDelta={todayDelta} />}
-        {tab === "analyze" && <AnalyzeTab matchCounts={matchCounts} statuses={statuses} daily={daily} surveyors={surveyors} coverage={coverage} />}
-        {tab === "team" && <TeamTab surveyors={surveyors} />}
+      {/* Each tab content gets its own scroll container; Team chat manages its own scroll */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {tab === "pulse" && <Scroll><PulseTab matchCounts={matchCounts} statuses={statuses} pointsTotal={pointsTotal} todayDelta={todayDelta} /></Scroll>}
+        {tab === "analyze" && <Scroll><AnalyzeTab matchCounts={matchCounts} statuses={statuses} daily={daily} surveyors={surveyors} coverage={coverage} /></Scroll>}
+        {tab === "team" && (
+          currentUserId
+            ? <ChatPanel projectId={projectId} currentUserId={currentUserId} members={chatMembers} initial={initialChat} />
+            : <Placeholder label="Sign in to chat" />
+        )}
         {tab === "inspect" && <Placeholder label="Click a pin on the map to inspect it" />}
       </div>
     </aside>
   );
+}
+
+function Scroll({ children }: { children: ReactNode }) {
+  return <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto p-4">{children}</div>;
 }
 
 function PulseTab({ matchCounts, statuses, pointsTotal, todayDelta }: { matchCounts: MatchStatusCounts; statuses: StatusRow[]; pointsTotal: number; todayDelta: number }) {
@@ -94,9 +100,7 @@ function PulseTab({ matchCounts, statuses, pointsTotal, todayDelta }: { matchCou
             <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[oklch(58%_0.014_250)]">Points collected</div>
             <div className="font-display text-[40px] font-extrabold leading-none tracking-[-0.025em] tabular-nums">{pointsTotal}</div>
           </div>
-          {todayDelta > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[oklch(76%_0.16_158/0.3)] bg-[oklch(76%_0.16_158/0.14)] px-2.5 py-1 font-mono text-[11px] font-bold text-[oklch(76%_0.16_158)]">▲ +{todayDelta} today</span>
-          )}
+          {todayDelta > 0 && <span className="inline-flex items-center gap-1.5 rounded-full border border-[oklch(76%_0.16_158/0.3)] bg-[oklch(76%_0.16_158/0.14)] px-2.5 py-1 font-mono text-[11px] font-bold text-[oklch(76%_0.16_158)]">▲ +{todayDelta} today</span>}
         </div>
         <div className="mt-3 grid grid-cols-3 gap-1.5 border-t border-[oklch(50%_0.025_250/0.18)] pt-3">
           <KpiTile v={`${Math.round((matchCounts.m1_count / Math.max(pointsTotal, 1)) * 100)}%`} l="Done" />
@@ -123,12 +127,8 @@ function PulseTab({ matchCounts, statuses, pointsTotal, todayDelta }: { matchCou
 function AnalyzeTab({ matchCounts, statuses, daily, surveyors, coverage }: { matchCounts: MatchStatusCounts; statuses: StatusRow[]; daily: DailyBucket[]; surveyors: SurveyorBrief[]; coverage?: CoverageMetrics }) {
   return (
     <>
-      <Card title="Daily activity (14d)">
-        <ActivitySparkline buckets={daily} />
-      </Card>
-      <Card title="Status breakdown">
-        <DonutBreakdown statuses={statuses} total={matchCounts.total_with_status + matchCounts.r1_count} />
-      </Card>
+      <Card title="Daily activity (14d)"><ActivitySparkline buckets={daily} /></Card>
+      <Card title="Status breakdown"><DonutBreakdown statuses={statuses} total={matchCounts.total_with_status + matchCounts.r1_count} /></Card>
       <Card title="Surveyor productivity">
         {surveyors.length === 0 ? <p className="text-[11px] text-[oklch(58%_0.014_250)]">No collectors yet.</p> : (
           <div className="space-y-2">
@@ -140,9 +140,7 @@ function AnalyzeTab({ matchCounts, statuses, daily, surveyors, coverage }: { mat
                   <span className="font-mono text-[11px] font-bold text-[oklch(58%_0.014_250)] tabular-nums">{i + 1}</span>
                   <div>
                     <div className="text-[12px] font-semibold text-[oklch(96%_0.008_250)]">{s.name}</div>
-                    <div className="mt-1 h-1 rounded-full bg-[oklch(24%_0.018_250)] overflow-hidden">
-                      <div className="h-full rounded-full bg-[oklch(78%_0.155_234)]" style={{ width: `${pct}%` }} />
-                    </div>
+                    <div className="mt-1 h-1 rounded-full bg-[oklch(24%_0.018_250)] overflow-hidden"><div className="h-full rounded-full bg-[oklch(78%_0.155_234)]" style={{ width: `${pct}%` }} /></div>
                   </div>
                   <span className="font-mono text-[12px] font-bold tabular-nums">{s.count}</span>
                 </div>
@@ -165,28 +163,6 @@ function AnalyzeTab({ matchCounts, statuses, daily, surveyors, coverage }: { mat
   );
 }
 
-function TeamTab({ surveyors }: { surveyors: SurveyorBrief[] }) {
-  return (
-    <Card title="Surveyors">
-      {!surveyors.length ? <p className="text-[11px] text-[oklch(58%_0.014_250)]">No surveyors have collected points yet.</p> : (
-        <div className="space-y-3">
-          {surveyors.map((s, i) => (
-            <div key={s.collector_id ?? `u_${i}`} className="flex items-center gap-3 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[oklch(72%_0.18_305)] to-[oklch(78%_0.155_234)] inline-flex items-center justify-center text-[11px] font-bold text-[oklch(14%_0.012_250)]">
-                {s.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
-              </div>
-              <div className="flex-1">
-                <div className="text-[12.5px] font-semibold text-[oklch(96%_0.008_250)]">{s.name}</div>
-                <div className="text-[10.5px] text-[oklch(58%_0.014_250)] font-mono">{s.count} points</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
 function Card({ title, children, framed, tone }: { title: ReactNode; children: ReactNode; framed?: boolean; tone?: "warn" }) {
   const cls = tone === "warn" ? "border-[oklch(86%_0.18_88/0.25)] bg-[linear-gradient(135deg,oklch(20%_0.06_88/0.4),oklch(18%_0.05_305/0.5))]" : "border-[oklch(28%_0.02_250/0.55)] bg-[oklch(22%_0.02_250)]";
   return (
@@ -197,7 +173,6 @@ function Card({ title, children, framed, tone }: { title: ReactNode; children: R
     </div>
   );
 }
-
 function AttentionTile({ pinClass, label, count, desc, cta, tone }: { pinClass: string; label: string; count: number; desc: string; cta: string; tone: "warn" | "violet" }) {
   const numCls = tone === "warn" ? "text-[oklch(82%_0.17_86)]" : "text-[oklch(72%_0.18_305)]";
   const ctaCls = tone === "warn" ? "text-[oklch(82%_0.17_86)]" : "text-[oklch(72%_0.18_305)]";
@@ -211,66 +186,36 @@ function AttentionTile({ pinClass, label, count, desc, cta, tone }: { pinClass: 
     </div>
   );
 }
-
 function KpiTile({ v, l, tone }: { v: string; l: string; tone?: "accent" | "violet" }) {
   const cls = tone === "accent" ? "text-[oklch(78%_0.155_234)]" : tone === "violet" ? "text-[oklch(72%_0.18_305)]" : "text-[oklch(96%_0.008_250)]";
-  return (
-    <div className="flex flex-col">
-      <span className={`font-mono text-[14.5px] font-semibold tabular-nums ${cls}`}>{v}</span>
-      <span className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{l}</span>
-    </div>
-  );
+  return <div className="flex flex-col"><span className={`font-mono text-[14.5px] font-semibold tabular-nums ${cls}`}>{v}</span><span className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{l}</span></div>;
 }
-
 function CovTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5">
-      <div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{label}</div>
-      <div className="mt-1 font-display text-[18px] font-extrabold tabular-nums">{value}</div>
-    </div>
-  );
+  return <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5"><div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{label}</div><div className="mt-1 font-display text-[18px] font-extrabold tabular-nums">{value}</div></div>;
 }
-
 function ActivitySparkline({ buckets }: { buckets: DailyBucket[] }) {
   if (!buckets.length) return <p className="text-[11px] text-[oklch(58%_0.014_250)]">No activity yet.</p>;
   const max = Math.max(1, ...buckets.map((b) => b.total));
   return (
     <svg width="100%" height="84" viewBox={`0 0 ${buckets.length * 20} 84`} preserveAspectRatio="none">
-      {buckets.map((b, i) => {
-        const h = Math.round((b.total / max) * 70);
-        return <rect key={b.day} x={i * 20 + 2} y={80 - h} width="16" height={Math.max(h, 1)} rx="2" fill="oklch(78% 0.155 234 / 0.6)" />;
-      })}
+      {buckets.map((b, i) => { const h = Math.round((b.total / max) * 70); return <rect key={b.day} x={i * 20 + 2} y={80 - h} width="16" height={Math.max(h, 1)} rx="2" fill="oklch(78% 0.155 234 / 0.6)" />; })}
     </svg>
   );
 }
-
 function DonutBreakdown({ statuses, total }: { statuses: StatusRow[]; total: number }) {
   let offset = 0;
   return (
     <div className="grid grid-cols-[100px_1fr] items-center gap-3">
       <svg viewBox="0 0 36 36" className="-rotate-90">
         <circle cx="18" cy="18" r="15.91549" fill="transparent" stroke="oklch(28% 0.02 250 / 0.5)" strokeWidth="3.5" />
-        {statuses.map((s) => {
-          const pct = total > 0 ? (s.count / total) * 100 : 0;
-          const dash = `${pct} ${100 - pct}`;
-          const el = <circle key={s.id} cx="18" cy="18" r="15.91549" fill="transparent" stroke={s.color} strokeWidth="3.5" strokeDasharray={dash} strokeDashoffset={`-${offset}`} />;
-          offset += pct;
-          return el;
-        })}
+        {statuses.map((s) => { const pct = total > 0 ? (s.count / total) * 100 : 0; const el = <circle key={s.id} cx="18" cy="18" r="15.91549" fill="transparent" stroke={s.color} strokeWidth="3.5" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset={`-${offset}`} />; offset += pct; return el; })}
       </svg>
       <div className="space-y-1">
-        {statuses.map((s) => (
-          <div key={s.id} className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
-            <span className="flex-1 text-[11px] text-[oklch(76%_0.012_250)]">{s.label}</span>
-            <span className="font-mono text-[10.5px] tabular-nums text-[oklch(96%_0.008_250)]">{s.count}</span>
-          </div>
-        ))}
+        {statuses.map((s) => <div key={s.id} className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: s.color }} /><span className="flex-1 text-[11px] text-[oklch(76%_0.012_250)]">{s.label}</span><span className="font-mono text-[10.5px] tabular-nums text-[oklch(96%_0.008_250)]">{s.count}</span></div>)}
       </div>
     </div>
   );
 }
-
 function Placeholder({ label }: { label: string }) {
   return <div className="flex flex-1 items-center justify-center text-center text-[12px] text-[oklch(58%_0.014_250)]"><span>{label}</span></div>;
 }

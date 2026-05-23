@@ -7,18 +7,24 @@ import { Plus, Map as MapIcon, Users, MoreHorizontal, ChevronLeft } from "lucide
 import type { StatusRow } from "@/components/desktop/left-rail";
 import type { StatusColorMap } from "@/components/map/maplibre-map";
 import { MobileAddSheet } from "@/components/mobile/add-sheet";
+import { ChatPanel } from "@/components/chat/chat-panel";
+import type { ChatMessage } from "@/lib/queries/chat";
 import { registerSyncTriggers } from "@/lib/offline/sync";
 
 const MaplibreMap = dynamic(() => import("@/components/map/maplibre-map").then((m) => m.MaplibreMap), { ssr: false });
 
+type ChatMember = { user_id: string; display_name: string; email: string; avatar_url: string | null };
 type Props = {
   projectId: string;
   projectName: string;
+  currentUserId: string | null;
   center: { lat: number; lon: number; zoom: number };
   statuses: StatusRow[];
+  chatMembers: ChatMember[];
+  initialChat: ChatMessage[];
 };
 
-export function MobileFieldShell({ projectId, projectName, center, statuses }: Props) {
+export function MobileFieldShell({ projectId, projectName, currentUserId, center, statuses, chatMembers, initialChat }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<"map" | "team" | "more">("map");
   const [activeStatusIds, setActiveStatusIds] = useState<Set<string>>(new Set());
@@ -44,26 +50,11 @@ export function MobileFieldShell({ projectId, projectName, center, statuses }: P
           <>
             <MaplibreMap center={[center.lon, center.lat]} zoom={center.zoom ?? 14} features={[]} statusColors={statusColors} selectedId={null} onSelect={() => {}} />
             <div className="absolute left-2 right-2 top-2 z-20 flex gap-1.5 overflow-x-auto rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(14%_0.012_250/0.78)] p-1.5 backdrop-blur-[20px]">
-              <button
-                onClick={() => setActiveStatusIds(new Set())}
-                className={`flex-shrink-0 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${activeStatusIds.size === 0 ? "bg-[oklch(78%_0.155_234/0.18)] text-[oklch(78%_0.155_234)]" : "text-[oklch(76%_0.012_250)]"}`}
-              >
-                All
-              </button>
+              <button onClick={() => setActiveStatusIds(new Set())} className={`flex-shrink-0 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${activeStatusIds.size === 0 ? "bg-[oklch(78%_0.155_234/0.18)] text-[oklch(78%_0.155_234)]" : "text-[oklch(76%_0.012_250)]"}`}>All</button>
               {statuses.map((s) => {
                 const on = activeStatusIds.has(s.id);
                 return (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      const next = new Set(activeStatusIds);
-                      if (next.has(s.id)) next.delete(s.id);
-                      else next.add(s.id);
-                      setActiveStatusIds(next);
-                    }}
-                    className={`flex-shrink-0 inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${on ? "text-[oklch(96%_0.008_250)]" : "text-[oklch(76%_0.012_250)] hover:text-[oklch(96%_0.008_250)]"}`}
-                    style={on ? { background: `${s.color}26` } : undefined}
-                  >
+                  <button key={s.id} onClick={() => { const next = new Set(activeStatusIds); if (next.has(s.id)) next.delete(s.id); else next.add(s.id); setActiveStatusIds(next); }} className={`flex-shrink-0 inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${on ? "text-[oklch(96%_0.008_250)]" : "text-[oklch(76%_0.012_250)] hover:text-[oklch(96%_0.008_250)]"}`} style={on ? { background: `${s.color}26` } : undefined}>
                     <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
                     {s.label}
                     <span className="font-mono text-[10px] tabular-nums text-[oklch(58%_0.014_250)]">{s.count}</span>
@@ -71,17 +62,16 @@ export function MobileFieldShell({ projectId, projectName, center, statuses }: P
                 );
               })}
             </div>
-
-            <button
-              onClick={() => setAddOpen(true)}
-              aria-label="Add point"
-              className="absolute bottom-[80px] right-5 z-20 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)] shadow-[0_8px_24px_-4px_oklch(78%_0.155_234/0.55),0_0_0_6px_oklch(78%_0.155_234/0.12),inset_0_1px_0_oklch(100%_0_0/0.35)] active:scale-95 transition"
-            >
+            <button onClick={() => setAddOpen(true)} aria-label="Add point" className="absolute bottom-[80px] right-5 z-20 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)] shadow-[0_8px_24px_-4px_oklch(78%_0.155_234/0.55),0_0_0_6px_oklch(78%_0.155_234/0.12),inset_0_1px_0_oklch(100%_0_0/0.35)] active:scale-95 transition">
               <Plus className="h-6 w-6" strokeWidth={2.5} />
             </button>
           </>
         )}
-        {tab === "team" && <FieldPlaceholder text="Team activity + chat — coming next slice" />}
+        {tab === "team" && (
+          currentUserId
+            ? <ChatPanel projectId={projectId} currentUserId={currentUserId} members={chatMembers} initial={initialChat} />
+            : <FieldPlaceholder text="Sign in to chat" />
+        )}
         {tab === "more" && <FieldPlaceholder text="Sync queue · My points · Switch view · Sign out" />}
       </main>
 
@@ -91,14 +81,7 @@ export function MobileFieldShell({ projectId, projectName, center, statuses }: P
         <TabBtn label="More" Icon={MoreHorizontal} on={tab === "more"} onClick={() => setTab("more")} />
       </nav>
 
-      <MobileAddSheet
-        open={addOpen}
-        projectId={projectId}
-        statuses={statuses}
-        initialCoords={{ lat: center.lat, lon: center.lon }}
-        onClose={() => setAddOpen(false)}
-        onSaved={() => { setAddOpen(false); router.refresh(); }}
-      />
+      <MobileAddSheet open={addOpen} projectId={projectId} statuses={statuses} initialCoords={{ lat: center.lat, lon: center.lon }} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); router.refresh(); }} />
     </>
   );
 }

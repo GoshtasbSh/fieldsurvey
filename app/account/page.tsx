@@ -38,6 +38,20 @@ export default async function AccountPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          Choose which emails FieldSurvey can send you.
+        </CardContent>
+        <CardFooter>
+          <a href="/account/notifications" className="inline-flex items-center gap-2 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-4 py-2 font-display text-[12px] font-bold text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)]">
+            Manage preferences →
+          </a>
+        </CardFooter>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Profile</CardTitle>
         </CardHeader>
         <form

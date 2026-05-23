@@ -1,6 +1,7 @@
 import { getProjectForUser } from "@/lib/queries/project";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { StatusesEditor } from "@/components/desktop/statuses-editor";
+import { VisibilityToggle } from "@/components/desktop/visibility-toggle";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
@@ -17,15 +18,20 @@ export default async function SettingsPage({ params }: { params: Promise<{ proje
     .order("sort_order");
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
+    <main className="mx-auto max-w-3xl px-6 py-10 space-y-6">
       <Link href={`/p/${projectId}/map`} className="text-[12px] text-[oklch(58%_0.014_250)] hover:text-[oklch(78%_0.155_234)]">← Back to map</Link>
-      <h1 className="mt-3 font-display text-2xl font-extrabold">Project settings</h1>
-      <section className="mt-6 rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-5">
+      <h1 className="font-display text-2xl font-extrabold">Project settings</h1>
+
+      <section className="rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-5">
         <h2 className="font-display text-[15px] font-bold">Statuses</h2>
-        <p className="mt-1 text-[12px] text-[oklch(58%_0.014_250)]">
-          Statuses are project-specific. The color you choose here is what the map pins use.
-        </p>
+        <p className="mt-1 text-[12px] text-[oklch(58%_0.014_250)]">Statuses are project-specific. The color you choose here is what the map pins use.</p>
         <StatusesEditor projectId={projectId} initial={statuses ?? []} />
+      </section>
+
+      <section className="rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-5">
+        <h2 className="font-display text-[15px] font-bold">Visibility</h2>
+        <p className="mt-1 text-[12px] text-[oklch(58%_0.014_250)]">Make this project read-only public so anyone with the URL can view the map, status counts, and pins. Chat and PII never leave the team.</p>
+        <VisibilityToggle projectId={projectId} initial={res.project.visibility as "private" | "public_read"} projectName={res.project.name} />
       </section>
     </main>
   );
