@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, Inter, IBM_Plex_Mono } from "next/font/google";
 import { Toaster } from "sonner";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -22,6 +23,8 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "FieldSurvey",
   description: "Run spatial surveys with your team.",
+  manifest: "/manifest.json",
+  themeColor: "#38bdf8",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -30,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans antialiased">
         {children}
         <Toaster position="top-right" richColors />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

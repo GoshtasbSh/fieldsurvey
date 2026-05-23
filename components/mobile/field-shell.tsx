@@ -1,10 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Map as MapIcon, Users, MoreHorizontal, ChevronLeft } from "lucide-react";
 import type { StatusRow } from "@/components/desktop/left-rail";
 import type { StatusColorMap } from "@/components/map/maplibre-map";
+import { MobileAddSheet } from "@/components/mobile/add-sheet";
+import { registerSyncTriggers } from "@/lib/offline/sync";
 
 const MaplibreMap = dynamic(() => import("@/components/map/maplibre-map").then((m) => m.MaplibreMap), { ssr: false });
 
@@ -15,21 +18,19 @@ type Props = {
   statuses: StatusRow[];
 };
 
-/**
- * Mobile field shell — ported from keystone_field_web/index.html.
- * NEVER renders survey-response data (no M1/F1/R1 rings, no R1 glyphs).
- * Tabs: Map / Team / More — surveyor-facing only.
- */
-export function MobileFieldShell({ projectName, center, statuses }: Props) {
+export function MobileFieldShell({ projectId, projectName, center, statuses }: Props) {
+  const router = useRouter();
   const [tab, setTab] = useState<"map" | "team" | "more">("map");
   const [activeStatusIds, setActiveStatusIds] = useState<Set<string>>(new Set());
+  const [addOpen, setAddOpen] = useState(false);
   const statusColors: StatusColorMap = useMemo(() => Object.fromEntries(statuses.map((s) => [s.id, s.color])), [statuses]);
+
+  useEffect(() => registerSyncTriggers(projectId), [projectId]);
 
   return (
     <>
-      {/* TOP BAR */}
       <header className="z-30 flex h-12 items-center gap-2 border-b border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-3">
-        <button className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[oklch(76%_0.012_250)] hover:bg-[oklch(20%_0.016_250)]" aria-label="Back">
+        <button className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[oklch(76%_0.012_250)] hover:bg-[oklch(20%_0.016_250)]" aria-label="Back" onClick={() => router.push("/home")}>
           <ChevronLeft className="h-5 w-5" strokeWidth={1.7} />
         </button>
         <h1 className="flex-1 truncate font-display text-[14px] font-extrabold tracking-tight">{projectName}</h1>
@@ -38,25 +39,14 @@ export function MobileFieldShell({ projectName, center, statuses }: Props) {
         </div>
       </header>
 
-      {/* BODY */}
       <main className="relative flex-1 overflow-hidden">
         {tab === "map" && (
           <>
-            <MaplibreMap
-              center={[center.lon, center.lat]}
-              zoom={center.zoom ?? 14}
-              features={[]}
-              statusColors={statusColors}
-              selectedId={null}
-              onSelect={() => {}}
-            />
-            {/* Status filter chip strip — Keystone fc-* parity */}
+            <MaplibreMap center={[center.lon, center.lat]} zoom={center.zoom ?? 14} features={[]} statusColors={statusColors} selectedId={null} onSelect={() => {}} />
             <div className="absolute left-2 right-2 top-2 z-20 flex gap-1.5 overflow-x-auto rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(14%_0.012_250/0.78)] p-1.5 backdrop-blur-[20px]">
               <button
                 onClick={() => setActiveStatusIds(new Set())}
-                className={`flex-shrink-0 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${
-                  activeStatusIds.size === 0 ? "bg-[oklch(78%_0.155_234/0.18)] text-[oklch(78%_0.155_234)]" : "text-[oklch(76%_0.012_250)]"
-                }`}
+                className={`flex-shrink-0 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${activeStatusIds.size === 0 ? "bg-[oklch(78%_0.155_234/0.18)] text-[oklch(78%_0.155_234)]" : "text-[oklch(76%_0.012_250)]"}`}
               >
                 All
               </button>
@@ -71,9 +61,7 @@ export function MobileFieldShell({ projectName, center, statuses }: Props) {
                       else next.add(s.id);
                       setActiveStatusIds(next);
                     }}
-                    className={`flex-shrink-0 inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${
-                      on ? "text-[oklch(96%_0.008_250)]" : "text-[oklch(76%_0.012_250)] hover:text-[oklch(96%_0.008_250)]"
-                    }`}
+                    className={`flex-shrink-0 inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-display text-[11px] font-bold transition ${on ? "text-[oklch(96%_0.008_250)]" : "text-[oklch(76%_0.012_250)] hover:text-[oklch(96%_0.008_250)]"}`}
                     style={on ? { background: `${s.color}26` } : undefined}
                   >
                     <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
@@ -84,10 +72,10 @@ export function MobileFieldShell({ projectName, center, statuses }: Props) {
               })}
             </div>
 
-            {/* FAB — Keystone-faithful sky-blue button, bottom-right above tab bar */}
             <button
-              className="absolute bottom-[80px] right-5 z-20 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)] shadow-[0_8px_24px_-4px_oklch(78%_0.155_234/0.55),0_0_0_6px_oklch(78%_0.155_234/0.12),inset_0_1px_0_oklch(100%_0_0/0.35)] active:scale-95 transition"
+              onClick={() => setAddOpen(true)}
               aria-label="Add point"
+              className="absolute bottom-[80px] right-5 z-20 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)] shadow-[0_8px_24px_-4px_oklch(78%_0.155_234/0.55),0_0_0_6px_oklch(78%_0.155_234/0.12),inset_0_1px_0_oklch(100%_0_0/0.35)] active:scale-95 transition"
             >
               <Plus className="h-6 w-6" strokeWidth={2.5} />
             </button>
@@ -97,12 +85,20 @@ export function MobileFieldShell({ projectName, center, statuses }: Props) {
         {tab === "more" && <FieldPlaceholder text="Sync queue · My points · Switch view · Sign out" />}
       </main>
 
-      {/* TAB BAR — 3 tabs (Keystone parity, NO Export tab on mobile per scope memo) */}
       <nav className="z-30 grid h-[58px] grid-cols-3 border-t border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         <TabBtn label="Map" Icon={MapIcon} on={tab === "map"} onClick={() => setTab("map")} />
         <TabBtn label="Team" Icon={Users} on={tab === "team"} onClick={() => setTab("team")} />
         <TabBtn label="More" Icon={MoreHorizontal} on={tab === "more"} onClick={() => setTab("more")} />
       </nav>
+
+      <MobileAddSheet
+        open={addOpen}
+        projectId={projectId}
+        statuses={statuses}
+        initialCoords={{ lat: center.lat, lon: center.lon }}
+        onClose={() => setAddOpen(false)}
+        onSaved={() => { setAddOpen(false); router.refresh(); }}
+      />
     </>
   );
 }
