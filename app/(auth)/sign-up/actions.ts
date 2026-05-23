@@ -21,7 +21,7 @@ export async function signUpAction(formData: FormData): Promise<SignUpResult> {
   if (!parsed.success) return { error: "Please enter a valid email and a password (8+ chars)." };
 
   const sb = await createServerSupabase();
-  const { error } = await sb.auth.signUp({
+  const { data, error } = await sb.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
@@ -30,5 +30,11 @@ export async function signUpAction(formData: FormData): Promise<SignUpResult> {
     },
   });
   if (error) return { error: error.message };
+
+  // When email confirmation is OFF in Supabase Auth, signUp returns a live
+  // session — log the user straight in and skip the "check email" screen.
+  // When confirmation is ON, data.session is null and we route to the
+  // check-email page so the user knows to open the inbox.
+  if (data.session) redirect("/home");
   redirect("/sign-up/check-email");
 }
