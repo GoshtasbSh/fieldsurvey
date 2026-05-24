@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Monitor, LogOut, MapPin, CloudUpload } from "lucide-react";
+import { LogOut, MapPin, CloudUpload } from "lucide-react";
 import { SyncQueuePanel } from "@/components/mobile/sync-queue-panel";
 import { OfflineMapSection } from "@/components/mobile/offline-map-section";
 import { createBrowserSupabase } from "@/lib/supabase/client";
-import { DEVICE_PREF_COOKIE } from "@/lib/device.client";
 
 type MoreTab = "menu" | "queue" | "mypoints";
 type MyPointSummary = { today: number; total: number };
@@ -19,11 +18,6 @@ export function MorePanel({ projectId, projectName, myStats, center }: { project
     const sb = createBrowserSupabase();
     await sb.auth.signOut();
     router.push("/sign-in");
-  }
-
-  function switchToDesktop() {
-    document.cookie = `${DEVICE_PREF_COOKIE}=desktop; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
-    router.push(`/p/${projectId}/map`);
   }
 
   if (view === "queue") return (
@@ -54,7 +48,6 @@ export function MorePanel({ projectId, projectName, myStats, center }: { project
       <MenuRow Icon={CloudUpload} label="Sync queue" desc="Pending and failed offline points" onClick={() => setView("queue")} />
       <MenuRow Icon={MapPin}      label="My points" desc={`${myStats.today} today · ${myStats.total} total`} onClick={() => setView("mypoints")} />
       <OfflineMapSection center={center} />
-      <MenuRow Icon={Monitor}     label="Switch to desktop" desc="Open the full dashboard" onClick={switchToDesktop} />
       <MenuRow Icon={LogOut}      label="Sign out" desc="" onClick={signOut} tone="danger" />
     </div>
   );
@@ -69,7 +62,7 @@ function PanelHeader({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
-function MenuRow({ Icon, label, desc, onClick, tone }: { Icon: typeof Monitor; label: string; desc: string; onClick: () => void; tone?: "danger" }) {
+function MenuRow({ Icon, label, desc, onClick, tone }: { Icon: typeof LogOut; label: string; desc: string; onClick: () => void; tone?: "danger" }) {
   const labelCls = tone === "danger" ? "text-[oklch(68%_0.21_25)]" : "text-[var(--shell-text)]";
   return (
     <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl border border-[var(--shell-border)] bg-[var(--shell-1)] p-3 text-left active:bg-[var(--shell-2)]">
