@@ -40,21 +40,21 @@ export function ResponsesTable({ rows }: { rows: Row[] }) {
   }, [rows]);
 
   return (
-    <div className="mt-5 rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]">
-      <div className="flex items-center gap-3 border-b border-[oklch(28%_0.02_250/0.55)] p-3">
-        <div className="inline-flex rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-0.5">
+    <div className="mt-5 rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)]">
+      <div className="flex items-center gap-3 border-b border-[var(--shell-border)] p-3">
+        <div className="inline-flex rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-0.5">
           {(["all", "matched", "unmatched"] as const).map((k) => (
-            <button key={k} onClick={() => setMatch(k)} className={`rounded-md px-3 py-1.5 font-display text-[11px] font-bold transition ${match === k ? "bg-[oklch(22%_0.02_250)] text-[oklch(96%_0.008_250)]" : "text-[oklch(58%_0.014_250)] hover:text-[oklch(76%_0.012_250)]"}`}>
+            <button key={k} onClick={() => setMatch(k)} className={`rounded-md px-3 py-1.5 font-display text-[11px] font-bold transition ${match === k ? "bg-[var(--shell-elevated)] text-[var(--shell-text)]" : "text-[var(--shell-text-muted)] hover:text-[var(--shell-text-2)]"}`}>
               {k === "all" ? `All ${counts.total}` : k === "matched" ? `Matched ${counts.matched}` : `Unmatched ${counts.unmatched}`}
             </button>
           ))}
         </div>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search address or external_id…" className="flex-1 max-w-md rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 text-[12px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search address or external_id…" className="flex-1 max-w-md rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[12px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-[12px]">
-          <thead className="bg-[oklch(20%_0.016_250)] text-[oklch(58%_0.014_250)]">
+          <thead className="bg-[var(--shell-2)] text-[var(--shell-text-muted)]">
             <tr>
               <th className="px-3 py-2 text-left"><span className="inline-flex items-center gap-1"><ArrowUpDown className="h-3 w-3 opacity-50" strokeWidth={1.7} />Match</span></th>
               <th className="px-3 py-2 text-left">Address (geocoded)</th>
@@ -65,21 +65,21 @@ export function ResponsesTable({ rows }: { rows: Row[] }) {
           </thead>
           <tbody>
             {filtered.map((r) => (
-              <tr key={r.id} onClick={() => setSelected(r)} className="cursor-pointer border-t border-[oklch(28%_0.02_250/0.55)] hover:bg-[oklch(20%_0.016_250)]">
+              <tr key={r.id} onClick={() => setSelected(r)} className="cursor-pointer border-t border-[var(--shell-border)] hover:bg-[var(--shell-2)]">
                 <td className="px-3 py-2">
                   {r.point_id ? (
-                    <span className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ring-1 ring-white text-[oklch(96%_0.008_250)]">M1 · ±{r.match_distance_m?.toFixed(1) ?? "—"}m</span>
+                    <span className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ring-1 ring-white text-[var(--shell-text)]">M1 · ±{r.match_distance_m?.toFixed(1) ?? "—"}m</span>
                   ) : (
                     <span className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ring-2 ring-[#a855f7] text-[oklch(72%_0.18_305)]">R1</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-[oklch(96%_0.008_250)]">{r.address_used ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-[11px] text-[oklch(76%_0.012_250)]">{r.external_id ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-[11px] text-[oklch(58%_0.014_250)] tabular-nums">{new Date(r.imported_at).toLocaleString()}</td>
-                <td className="px-3 py-2 text-[oklch(76%_0.012_250)]">{r.source}</td>
+                <td className="px-3 py-2 text-[var(--shell-text)]">{r.address_used ?? "—"}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-[var(--shell-text-2)]">{r.external_id ?? "—"}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-[var(--shell-text-muted)] tabular-nums">{new Date(r.imported_at).toLocaleString()}</td>
+                <td className="px-3 py-2 text-[var(--shell-text-2)]">{r.source}</td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={5} className="px-3 py-12 text-center text-[oklch(58%_0.014_250)]">No responses {query ? "match" : "yet"}.</td></tr>}
+            {!filtered.length && <tr><td colSpan={5} className="px-3 py-12 text-center text-[var(--shell-text-muted)]">No responses {query ? "match" : "yet"}.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -87,23 +87,23 @@ export function ResponsesTable({ rows }: { rows: Row[] }) {
       {selected && (
         <div className="fixed inset-0 z-50 grid place-items-end" onClick={() => setSelected(null)}>
           <div className="absolute inset-0 bg-[oklch(0%_0_0/0.55)] backdrop-blur-sm" />
-          <div className="relative h-full w-full max-w-md overflow-hidden border-l border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] shadow-[0_30px_60px_-20px_oklch(0%_0_0/0.6)]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[oklch(28%_0.02_250/0.55)] px-4 py-3">
+          <div className="relative h-full w-full max-w-md overflow-hidden border-l border-[var(--shell-border)] bg-[var(--shell-1)] shadow-[0_30px_60px_-20px_oklch(0%_0_0/0.6)]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[var(--shell-border)] px-4 py-3">
               <div>
                 <h3 className="font-display text-[14px] font-extrabold">Response</h3>
-                <p className="font-mono text-[10.5px] text-[oklch(58%_0.014_250)]">{selected.external_id ?? selected.id}</p>
+                <p className="font-mono text-[10.5px] text-[var(--shell-text-muted)]">{selected.external_id ?? selected.id}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[oklch(76%_0.012_250)] hover:bg-[oklch(20%_0.016_250)]"><X className="h-4 w-4" strokeWidth={1.7} /></button>
+              <button onClick={() => setSelected(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--shell-text-2)] hover:bg-[var(--shell-2)]"><X className="h-4 w-4" strokeWidth={1.7} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-3 text-[12px]">
-                <div className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">Match</div>
+              <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-3 text-[12px]">
+                <div className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">Match</div>
                 <div className="mt-1 font-mono">{selected.point_id ? `M1 (point ${selected.point_id.slice(0, 8)}…)` : "R1 — no field point"}</div>
-                {selected.geocoded_lat != null && <div className="mt-1 font-mono text-[10.5px] text-[oklch(58%_0.014_250)]">Geocoded: {selected.geocoded_lat.toFixed(5)}, {selected.geocoded_lon?.toFixed(5)}</div>}
+                {selected.geocoded_lat != null && <div className="mt-1 font-mono text-[10.5px] text-[var(--shell-text-muted)]">Geocoded: {selected.geocoded_lat.toFixed(5)}, {selected.geocoded_lon?.toFixed(5)}</div>}
               </div>
               <div>
-                <div className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">Answers</div>
-                <pre className="overflow-x-auto rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(14%_0.012_250)] p-3 font-mono text-[11px] leading-relaxed text-[oklch(76%_0.012_250)]">{JSON.stringify(selected.raw_data, null, 2)}</pre>
+                <div className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">Answers</div>
+                <pre className="overflow-x-auto rounded-lg border border-[var(--shell-border)] bg-[var(--shell-base)] p-3 font-mono text-[11px] leading-relaxed text-[var(--shell-text-2)]">{JSON.stringify(selected.raw_data, null, 2)}</pre>
               </div>
             </div>
           </div>

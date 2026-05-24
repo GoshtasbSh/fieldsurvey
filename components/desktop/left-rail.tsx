@@ -55,20 +55,20 @@ export function DesktopLeftRail({
   onCollapse,
 }: Props) {
   return (
-    <aside className="flex h-full w-[280px] flex-col overflow-y-auto border-r border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]">
+    <aside className="flex h-full w-[280px] flex-col overflow-y-auto border-r border-[var(--shell-border)] bg-[var(--shell-1)]">
       {/* Project card */}
-      <div className="m-3.5 overflow-hidden rounded-xl border border-[oklch(78%_0.155_234/0.2)] bg-gradient-to-br from-[oklch(20%_0.04_234/0.7)] to-[oklch(18%_0.02_250)] p-3.5 relative">
+      <div className="m-3.5 overflow-hidden rounded-xl border border-[oklch(78%_0.155_234/0.2)] bg-gradient-to-br from-[oklch(78%_0.155_234/0.10)] to-[var(--shell-1)] p-3.5 relative">
         {/* Always-visible collapse button — top-right of project card */}
         <button
           onClick={onCollapse}
-          className="absolute right-2.5 top-2.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md text-[oklch(42%_0.014_250)] transition hover:bg-[oklch(24%_0.018_250/0.7)] hover:text-[oklch(78%_0.155_234)]"
+          className="absolute right-2.5 top-2.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--shell-text-muted)] transition hover:bg-[var(--shell-3)] hover:text-[oklch(78%_0.155_234)]"
           aria-label="Collapse panel"
           title="Collapse panel"
         >
           <PanelLeftClose className="h-3.5 w-3.5" strokeWidth={1.7} />
         </button>
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,oklch(78%_0.155_234/0.2),transparent_60%)] pointer-events-none" />
-        <div className="relative mb-2.5 h-16 overflow-hidden rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(16%_0.014_250)]">
+        <div className="relative mb-2.5 h-16 overflow-hidden rounded-lg border border-[var(--shell-border)] bg-[var(--shell-1)]">
           {/* tiny pin scatter */}
           <span className="absolute h-1 w-1 rounded-full bg-[oklch(76%_0.16_158)] shadow-[0_0_4px_oklch(76%_0.16_158)]" style={{ top: "30%", left: "25%" }} />
           <span className="absolute h-1 w-1 rounded-full bg-[oklch(76%_0.16_158)] shadow-[0_0_4px_oklch(76%_0.16_158)]" style={{ top: "42%", left: "32%" }} />
@@ -77,10 +77,10 @@ export function DesktopLeftRail({
           <span className="absolute h-1 w-1 rounded-full bg-[oklch(68%_0.21_25)] shadow-[0_0_4px_oklch(68%_0.21_25)]" style={{ top: "55%", left: "70%" }} />
         </div>
         <h3 className="mb-px font-display text-[13.5px] font-extrabold">{projectName}</h3>
-        <div className="font-mono text-[10.5px] text-[oklch(58%_0.014_250)]">
-          <b className="font-semibold text-[oklch(96%_0.008_250)]">{projectMeta.points}</b> field ·{" "}
-          <b className="font-semibold text-[oklch(96%_0.008_250)]">{projectMeta.responses}</b> resp ·{" "}
-          <b className="font-semibold text-[oklch(96%_0.008_250)]">{projectMeta.active}</b> active
+        <div className="font-mono text-[10.5px] text-[var(--shell-text-muted)]">
+          <b className="font-semibold text-[var(--shell-text)]">{projectMeta.points}</b> field ·{" "}
+          <b className="font-semibold text-[var(--shell-text)]">{projectMeta.responses}</b> resp ·{" "}
+          <b className="font-semibold text-[var(--shell-text)]">{projectMeta.active}</b> active
         </div>
       </div>
 
@@ -90,19 +90,19 @@ export function DesktopLeftRail({
       {/* Status (color) */}
       <div className="px-3.5 pt-3">
         <div className="mb-2 flex items-center justify-between">
-          <h4 className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-[oklch(58%_0.014_250)] before:h-[3px] before:w-[3px] before:rounded-full before:bg-[oklch(78%_0.155_234)] before:shadow-[0_0_5px_oklch(78%_0.155_234/0.35)]">
+          <h4 className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-[var(--shell-text-muted)] before:h-[3px] before:w-[3px] before:rounded-full before:bg-[oklch(78%_0.155_234)] before:shadow-[0_0_5px_oklch(78%_0.155_234/0.35)]">
             Status
           </h4>
           <div className="flex items-center gap-2">
             <button
-              className="cursor-pointer text-[10.5px] font-semibold text-[oklch(58%_0.014_250)] transition hover:text-[oklch(78%_0.155_234)]"
+              className="cursor-pointer text-[10.5px] font-semibold text-[var(--shell-text-muted)] transition hover:text-[oklch(78%_0.155_234)]"
               onClick={() => setActiveStatusIds(new Set())}
             >
               All
             </button>
             <Link
               href={`/p/${projectId}/settings`}
-              className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[oklch(42%_0.014_250)] transition hover:bg-[oklch(24%_0.018_250)] hover:text-[oklch(78%_0.155_234)]"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[var(--shell-text-muted)] transition hover:bg-[var(--shell-3)] hover:text-[oklch(78%_0.155_234)]"
               title="Manage statuses"
             >
               <Settings className="h-3 w-3" strokeWidth={1.7} />
@@ -117,7 +117,7 @@ export function DesktopLeftRail({
               key={s.id}
               className={`grid grid-cols-[12px_1fr_auto_22px] items-center gap-2 rounded-[7px] px-2 py-1.5 transition ${
                 isOn ? "" : "opacity-45"
-              } hover:bg-[oklch(20%_0.016_250)] cursor-pointer`}
+              } hover:bg-[var(--shell-2)] cursor-pointer`}
               onClick={() => {
                 const next = new Set(activeStatusIds);
                 if (next.has(s.id)) next.delete(s.id);
@@ -126,15 +126,15 @@ export function DesktopLeftRail({
               }}
             >
               <StatusSymbol color={s.color} icon={s.icon} size={10} />
-              <span className="text-[11.5px] font-semibold text-[oklch(96%_0.008_250)]">{s.label}</span>
+              <span className="text-[11.5px] font-semibold text-[var(--shell-text)]">{s.label}</span>
               <span className="row-span-1 col-start-3 flex flex-col items-end leading-tight">
                 <span className="font-mono text-[11.5px] font-semibold">{s.count}</span>
-                <span className="font-mono text-[9px] text-[oklch(58%_0.014_250)]">{Math.round(s.pct * 100)}%</span>
+                <span className="font-mono text-[9px] text-[var(--shell-text-muted)]">{Math.round(s.pct * 100)}%</span>
               </span>
               <button
                 className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition ${
-                  isVisible ? "text-[oklch(78%_0.155_234)]" : "text-[oklch(42%_0.014_250)]"
-                } hover:bg-[oklch(24%_0.018_250)] hover:text-[oklch(96%_0.008_250)]`}
+                  isVisible ? "text-[oklch(78%_0.155_234)]" : "text-[var(--shell-text-muted)]"
+                } hover:bg-[var(--shell-3)] hover:text-[var(--shell-text)]`}
                 onClick={(e) => {
                   e.stopPropagation();
                   const next = new Set(visibleStatusIds);
@@ -146,7 +146,7 @@ export function DesktopLeftRail({
               >
                 {isVisible ? <Eye className="h-3.5 w-3.5" strokeWidth={1.7} /> : <EyeOff className="h-3.5 w-3.5" strokeWidth={1.7} />}
               </button>
-              <div className="col-span-2 col-start-2 mt-1 h-[3px] overflow-hidden rounded-full bg-[oklch(24%_0.018_250)]">
+              <div className="col-span-2 col-start-2 mt-1 h-[3px] overflow-hidden rounded-full bg-[var(--shell-3)]">
                 <div className="h-full rounded-full" style={{ width: `${Math.round(s.pct * 100)}%`, background: s.color }} />
               </div>
             </div>
@@ -157,7 +157,7 @@ export function DesktopLeftRail({
       {/* Layers */}
       <div className="px-3.5 pt-3">
         <div className="mb-2 flex items-center">
-          <h4 className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-[oklch(58%_0.014_250)] before:h-[3px] before:w-[3px] before:rounded-full before:bg-[oklch(78%_0.155_234)] before:shadow-[0_0_5px_oklch(78%_0.155_234/0.35)]">
+          <h4 className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-[var(--shell-text-muted)] before:h-[3px] before:w-[3px] before:rounded-full before:bg-[oklch(78%_0.155_234)] before:shadow-[0_0_5px_oklch(78%_0.155_234/0.35)]">
             Layers
           </h4>
         </div>
@@ -174,28 +174,28 @@ export function DesktopLeftRail({
             <button
               key={key}
               onClick={() => setLayers({ ...layers, [key]: !isOn })}
-              className="flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1.5 transition hover:bg-[oklch(20%_0.016_250)]"
+              className="flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1.5 transition hover:bg-[var(--shell-2)]"
             >
               <span
                 className={`inline-flex h-[22px] w-[22px] items-center justify-center rounded-md border ${
                   isOn
                     ? "border-[oklch(78%_0.155_234/0.32)] bg-[oklch(78%_0.155_234/0.14)] text-[oklch(78%_0.155_234)]"
-                    : "border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] text-[oklch(76%_0.012_250)]"
+                    : "border-[var(--shell-border)] bg-[var(--shell-2)] text-[var(--shell-text-2)]"
                 }`}
               >
                 <Icon className="h-3 w-3" strokeWidth={1.7} />
               </span>
-              <span className={`flex-1 text-left text-[11.5px] ${isOn ? "font-semibold text-[oklch(96%_0.008_250)]" : "font-medium text-[oklch(76%_0.012_250)]"}`}>
+              <span className={`flex-1 text-left text-[11.5px] ${isOn ? "font-semibold text-[var(--shell-text)]" : "font-medium text-[var(--shell-text-2)]"}`}>
                 {label}
               </span>
               <span
                 className={`relative h-3.5 w-[26px] rounded-full border transition ${
-                  isOn ? "border-[oklch(78%_0.155_234/0.5)] bg-[oklch(78%_0.155_234/0.35)]" : "border-[oklch(28%_0.02_250/0.55)] bg-[oklch(24%_0.018_250)]"
+                  isOn ? "border-[oklch(78%_0.155_234/0.5)] bg-[oklch(78%_0.155_234/0.35)]" : "border-[var(--shell-border)] bg-[var(--shell-3)]"
                 }`}
               >
                 <span
                   className={`absolute top-px h-2.5 w-2.5 rounded-full transition ${
-                    isOn ? "left-[13px] bg-[oklch(78%_0.155_234)] shadow-[0_0_6px_oklch(78%_0.155_234/0.35)]" : "left-px bg-[oklch(58%_0.014_250)]"
+                    isOn ? "left-[13px] bg-[oklch(78%_0.155_234)] shadow-[0_0_6px_oklch(78%_0.155_234/0.35)]" : "left-px bg-[var(--shell-text-muted)]"
                   }`}
                 />
               </span>
@@ -207,7 +207,7 @@ export function DesktopLeftRail({
       {/* Date pills */}
       <div className="px-3.5 pt-3">
         <div className="mb-2 flex items-center">
-          <h4 className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-[oklch(58%_0.014_250)] before:h-[3px] before:w-[3px] before:rounded-full before:bg-[oklch(78%_0.155_234)] before:shadow-[0_0_5px_oklch(78%_0.155_234/0.35)]">
+          <h4 className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-[var(--shell-text-muted)] before:h-[3px] before:w-[3px] before:rounded-full before:bg-[oklch(78%_0.155_234)] before:shadow-[0_0_5px_oklch(78%_0.155_234/0.35)]">
             Date
           </h4>
         </div>
@@ -219,7 +219,7 @@ export function DesktopLeftRail({
               className={`flex-1 rounded-md border py-1.5 text-center font-display text-[10.5px] font-bold transition ${
                 dateRange === d
                   ? "border-[oklch(78%_0.155_234/0.32)] bg-[oklch(78%_0.155_234/0.16)] text-[oklch(78%_0.155_234)]"
-                  : "border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] text-[oklch(76%_0.012_250)] hover:border-[oklch(36%_0.025_250/0.7)] hover:text-[oklch(96%_0.008_250)]"
+                  : "border-[var(--shell-border)] bg-[var(--shell-2)] text-[var(--shell-text-2)] hover:border-[var(--shell-border-soft)] hover:text-[var(--shell-text)]"
               }`}
             >
               {d === "today" ? "Today" : d === "all" ? "All" : d}
@@ -229,19 +229,19 @@ export function DesktopLeftRail({
       </div>
 
       {/* Footer: saved view + collapse */}
-      <div className="mt-auto border-t border-[oklch(28%_0.02_250/0.55)] p-3.5 flex items-center gap-2">
-        <button className="flex flex-1 items-center gap-2.5 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-2.5 py-1.5 transition hover:bg-[oklch(24%_0.018_250)]">
+      <div className="mt-auto border-t border-[var(--shell-border)] p-3.5 flex items-center gap-2">
+        <button className="flex flex-1 items-center gap-2.5 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-2.5 py-1.5 transition hover:bg-[var(--shell-3)]">
           <Star className="h-3.5 w-3.5 text-[oklch(72%_0.18_305)]" strokeWidth={1.7} />
           <span className="flex-1 text-left">
-            <span className="block text-[11.5px] font-semibold text-[oklch(96%_0.008_250)]">Needs attention</span>
-            <span className="block text-[9.5px] text-[oklch(58%_0.014_250)]">
+            <span className="block text-[11.5px] font-semibold text-[var(--shell-text)]">Needs attention</span>
+            <span className="block text-[9.5px] text-[var(--shell-text-muted)]">
               F1 + R1 · {matchCounts.f1_count + matchCounts.r1_count} points
             </span>
           </span>
         </button>
         <button
           onClick={onCollapse}
-          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] text-[oklch(58%_0.014_250)] transition hover:bg-[oklch(24%_0.018_250)] hover:text-[oklch(96%_0.008_250)]"
+          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] text-[var(--shell-text-muted)] transition hover:bg-[var(--shell-3)] hover:text-[var(--shell-text)]"
           aria-label="Collapse panel"
         >
           <ChevronLeft className="h-4 w-4" strokeWidth={1.7} />

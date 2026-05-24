@@ -26,7 +26,7 @@ export default async function PublicProjectPage({ params }: { params: Promise<{ 
   ]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[oklch(14%_0.012_250)] text-[oklch(96%_0.008_250)]">
+    <div className="flex h-screen flex-col overflow-hidden bg-[var(--shell-base)] text-[var(--shell-text)]">
       <header className="flex h-12 items-center justify-between border-b border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-4">
         <div className="flex items-center gap-3">
           <div className="h-5 w-5 rounded-[5px] bg-[oklch(78%_0.155_234)] shadow-[0_0_12px_oklch(78%_0.155_234/0.35)]" />

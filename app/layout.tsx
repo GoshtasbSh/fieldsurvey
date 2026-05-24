@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, Inter, IBM_Plex_Mono } from "next/font/google";
 import { Toaster } from "sonner";
+import { ThemeProvider } from "@/components/theme-provider";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
@@ -36,11 +37,22 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${jakarta.variable} ${inter.variable} ${mono.variable}`}>
+    <html
+      lang="en"
+      className={`${jakarta.variable} ${inter.variable} ${mono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="font-sans antialiased">
-        {children}
-        <Toaster position="top-right" richColors />
-        <ServiceWorkerRegister />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem={false}
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster position="top-right" richColors />
+          <ServiceWorkerRegister />
+        </ThemeProvider>
       </body>
     </html>
   );

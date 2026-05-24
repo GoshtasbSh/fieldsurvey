@@ -40,9 +40,9 @@ export function DesktopRightRail({
   const [tab, setTab] = useState<RightRailTab>("pulse");
 
   return (
-    <aside className="flex h-full w-[360px] flex-col overflow-hidden border-l border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]">
+    <aside className="flex h-full w-[360px] flex-col overflow-hidden border-l border-[var(--shell-border)] bg-[var(--shell-1)]">
       {/* Tab bar */}
-      <nav className="flex items-center gap-1 border-b border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-2 py-2">
+      <nav className="flex items-center gap-1 border-b border-[var(--shell-border)] bg-[var(--shell-1)] px-2 py-2">
         <div className="grid flex-1 grid-cols-4 gap-1">
           {([
             { key: "pulse", label: "Pulse", Icon: Activity, badge: undefined as number | undefined },
@@ -56,13 +56,13 @@ export function DesktopRightRail({
                 key={key}
                 onClick={() => setTab(key)}
                 className={`relative flex flex-col items-center gap-1 rounded-[10px] px-0 py-2 transition ${
-                  on ? "bg-[oklch(78%_0.155_234/0.12)] text-[oklch(78%_0.155_234)]" : "text-[oklch(58%_0.014_250)] hover:bg-[oklch(20%_0.016_250)] hover:text-[oklch(76%_0.012_250)]"
+                  on ? "bg-[oklch(78%_0.155_234/0.12)] text-[oklch(78%_0.155_234)]" : "text-[var(--shell-text-muted)] hover:bg-[var(--shell-2)] hover:text-[var(--shell-text-2)]"
                 }`}
               >
                 <Icon className="h-[17px] w-[17px]" strokeWidth={1.7} />
                 <span className="font-display text-[10.5px] font-bold">{label}</span>
                 {typeof badge === "number" && badge > 0 && (
-                  <span className="absolute right-[18%] top-[5px] inline-flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-[oklch(17%_0.014_250)] bg-[oklch(68%_0.21_25)] px-1 font-mono text-[9.5px] font-bold text-white">{badge}</span>
+                  <span className="absolute right-[18%] top-[5px] inline-flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-[var(--shell-1)] bg-[oklch(68%_0.21_25)] px-1 font-mono text-[9.5px] font-bold text-white">{badge}</span>
                 )}
                 {on && <span className="absolute -bottom-2.5 left-[30%] right-[30%] h-0.5 rounded-t bg-[oklch(78%_0.155_234)] shadow-[0_0_8px_oklch(78%_0.155_234/0.35)]" />}
               </button>
@@ -72,7 +72,7 @@ export function DesktopRightRail({
         {/* Collapse button */}
         <button
           onClick={onCollapse}
-          className="ml-1 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[oklch(28%_0.02_250/0.55)] text-[oklch(58%_0.014_250)] transition hover:bg-[oklch(20%_0.016_250)] hover:text-[oklch(96%_0.008_250)]"
+          className="ml-1 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--shell-border)] text-[var(--shell-text-muted)] transition hover:bg-[var(--shell-2)] hover:text-[var(--shell-text)]"
           aria-label="Collapse panel"
         >
           <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
@@ -139,7 +139,7 @@ function PulseTab({
             </span>
             <span>
               <span className="block font-display text-[13px] font-extrabold">Needs attention</span>
-              <span className="block text-[10.5px] text-[oklch(58%_0.014_250)]">{attentionTotal} points have incomplete data</span>
+              <span className="block text-[10.5px] text-[var(--shell-text-muted)]">{attentionTotal} points have incomplete data</span>
             </span>
           </span>
         }>
@@ -169,7 +169,7 @@ function PulseTab({
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[oklch(78%_0.155_234)] to-transparent opacity-50" />
         <div className="grid grid-cols-[1fr_auto] items-end gap-3.5">
           <div>
-            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[oklch(58%_0.014_250)]">Points collected</div>
+            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--shell-text-muted)]">Points collected</div>
             <div className="font-display text-[40px] font-extrabold leading-none tracking-[-0.025em] tabular-nums">{pointsTotal}</div>
           </div>
           {todayDelta > 0 && (
@@ -204,14 +204,14 @@ function PulseTab({
             <div key={s.id} className="grid grid-cols-[8px_1fr_auto] items-center gap-2.5">
               <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
               <div>
-                <span className="text-[11.5px] font-semibold text-[oklch(76%_0.012_250)]">{s.label}</span>
-                <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-[oklch(24%_0.018_250)]">
+                <span className="text-[11.5px] font-semibold text-[var(--shell-text-2)]">{s.label}</span>
+                <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-[var(--shell-3)]">
                   <div className="h-full rounded-full" style={{ width: `${Math.round(s.pct * 100)}%`, background: s.color }} />
                 </div>
               </div>
               <div className="text-right">
-                <span className="font-mono text-[11.5px] font-semibold tabular-nums text-[oklch(96%_0.008_250)]">{s.count}</span>
-                <span className="block font-mono text-[9px] text-[oklch(58%_0.014_250)]">{Math.round(s.pct * 100)}%</span>
+                <span className="font-mono text-[11.5px] font-semibold tabular-nums text-[var(--shell-text)]">{s.count}</span>
+                <span className="block font-mono text-[9px] text-[var(--shell-text-muted)]">{Math.round(s.pct * 100)}%</span>
               </div>
             </div>
           ))}
@@ -269,7 +269,7 @@ function AnalyzeTab({
       {/* Surveyor productivity */}
       <Card title="Surveyor productivity">
         {surveyors.length === 0 ? (
-          <p className="text-[11px] text-[oklch(58%_0.014_250)]">No collectors yet.</p>
+          <p className="text-[11px] text-[var(--shell-text-muted)]">No collectors yet.</p>
         ) : (
           <div className="space-y-2">
             {surveyors.slice(0, 8).map((s, i) => {
@@ -277,10 +277,10 @@ function AnalyzeTab({
               const pct = Math.round((s.count / max) * 100);
               return (
                 <div key={s.collector_id ?? `u_${i}`} className="grid grid-cols-[20px_1fr_auto] items-center gap-2">
-                  <span className="font-mono text-[11px] font-bold text-[oklch(58%_0.014_250)] tabular-nums">{i + 1}</span>
+                  <span className="font-mono text-[11px] font-bold text-[var(--shell-text-muted)] tabular-nums">{i + 1}</span>
                   <div>
-                    <div className="text-[12px] font-semibold text-[oklch(96%_0.008_250)]">{s.name}</div>
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-[oklch(24%_0.018_250)]">
+                    <div className="text-[12px] font-semibold text-[var(--shell-text)]">{s.name}</div>
+                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-[var(--shell-3)]">
                       <div className="h-full rounded-full bg-[oklch(78%_0.155_234)]" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
@@ -301,10 +301,10 @@ function AnalyzeTab({
             <CovTile label="Photo coverage" value={`${coverage.photo_coverage_pct}%`} tone={coverage.photo_coverage_pct >= 70 ? "good" : "warn"} />
             <CovTile label="Density" value={coverage.density_per_km2 != null ? `${coverage.density_per_km2}/km²` : "—"} />
           </div>
-          <div className="mt-3 rounded-lg bg-[oklch(20%_0.016_250)] px-3 py-2">
-            <div className="mb-1.5 text-[9.5px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">Match rate progress</div>
+          <div className="mt-3 rounded-lg bg-[var(--shell-2)] px-3 py-2">
+            <div className="mb-1.5 text-[9.5px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">Match rate progress</div>
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-2 overflow-hidden rounded-full bg-[oklch(24%_0.018_250)]">
+              <div className="flex-1 h-2 overflow-hidden rounded-full bg-[var(--shell-3)]">
                 <div
                   className="h-full rounded-full transition-all"
                   style={{
@@ -337,11 +337,11 @@ function Scroll({ children }: { children: ReactNode }) {
 function Card({ title, children, framed, tone }: { title: ReactNode; children: ReactNode; framed?: boolean; tone?: "warn" }) {
   const cls = tone === "warn"
     ? "border-[oklch(86%_0.18_88/0.25)] bg-[linear-gradient(135deg,oklch(20%_0.06_88/0.4),oklch(18%_0.05_305/0.5))]"
-    : "border-[oklch(28%_0.02_250/0.55)] bg-[oklch(22%_0.02_250)]";
+    : "border-[var(--shell-border)] bg-[var(--shell-elevated)]";
   return (
     <div className={`rounded-xl p-4 border ${cls} ${framed ? "relative overflow-hidden" : ""}`}>
       {framed && <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[oklch(82%_0.17_86)] to-transparent" />}
-      <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">{title}</div>
+      <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">{title}</div>
       {children}
     </div>
   );
@@ -352,12 +352,12 @@ function AttentionTile({ pinClass, label, count, desc, cta, tone }: { pinClass: 
   const ctaCls = tone === "warn" ? "text-[oklch(82%_0.17_86)]" : "text-[oklch(72%_0.18_305)]";
   const borderCls = tone === "warn" ? "border-[oklch(86%_0.18_88/0.4)]" : "border-[oklch(72%_0.18_305/0.4)]";
   return (
-    <div className={`rounded-[10px] border ${borderCls} bg-[oklch(14%_0.012_250/0.5)] p-3`}>
-      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">
+    <div className={`rounded-[10px] border ${borderCls} bg-[var(--shell-base-alpha-65)] p-3`}>
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">
         <span className={`block h-3 w-3 ${pinClass}`} />{label}
       </div>
       <div className={`mt-1.5 font-display text-2xl font-extrabold leading-none tabular-nums ${numCls}`}>{count}</div>
-      <div className="mt-1 text-[10.5px] leading-snug text-[oklch(58%_0.014_250)]">{desc}</div>
+      <div className="mt-1 text-[10.5px] leading-snug text-[var(--shell-text-muted)]">{desc}</div>
       <button className={`mt-2 inline-flex items-center gap-1 text-[10.5px] font-bold ${ctaCls}`}>{cta}</button>
     </div>
   );
@@ -368,11 +368,11 @@ function KpiTile({ v, l, tone }: { v: string; l: string; tone?: "accent" | "viol
     ? "text-[oklch(78%_0.155_234)]"
     : tone === "violet"
     ? "text-[oklch(72%_0.18_305)]"
-    : "text-[oklch(96%_0.008_250)]";
+    : "text-[var(--shell-text)]";
   return (
     <div className="flex flex-col">
       <span className={`font-mono text-[14.5px] font-semibold tabular-nums ${cls}`}>{v}</span>
-      <span className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{l}</span>
+      <span className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">{l}</span>
     </div>
   );
 }
@@ -384,10 +384,10 @@ function CovTile({ label, value, tone }: { label: string; value: string; tone?: 
     ? "text-[oklch(82%_0.17_86)]"
     : tone === "bad"
     ? "text-[oklch(68%_0.21_25)]"
-    : "text-[oklch(96%_0.008_250)]";
+    : "text-[var(--shell-text)]";
   return (
-    <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5">
-      <div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{label}</div>
+    <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-2.5">
+      <div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">{label}</div>
       <div className={`mt-1 font-display text-[18px] font-extrabold tabular-nums ${valCls}`}>{value}</div>
     </div>
   );
@@ -398,15 +398,15 @@ function MatchLegendRow({ color, label, n, total }: { color: string; label: stri
   return (
     <div className="flex items-center gap-2">
       <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: color }} />
-      <span className="flex-1 text-[10.5px] text-[oklch(76%_0.012_250)]">{label}</span>
+      <span className="flex-1 text-[10.5px] text-[var(--shell-text-2)]">{label}</span>
       <span className="font-mono text-[10.5px] font-semibold tabular-nums">{n}</span>
-      <span className="w-7 text-right font-mono text-[9.5px] text-[oklch(58%_0.014_250)]">{pct}%</span>
+      <span className="w-7 text-right font-mono text-[9.5px] text-[var(--shell-text-muted)]">{pct}%</span>
     </div>
   );
 }
 
 function ActivitySparkline({ buckets, showToday }: { buckets: DailyBucket[]; showToday?: boolean }) {
-  if (!buckets.length) return <p className="text-[11px] text-[oklch(58%_0.014_250)]">No activity yet.</p>;
+  if (!buckets.length) return <p className="text-[11px] text-[var(--shell-text-muted)]">No activity yet.</p>;
   const max = Math.max(1, ...buckets.map((b) => b.total));
   const today = new Date().toISOString().slice(0, 10);
   return (
@@ -429,7 +429,7 @@ function ActivitySparkline({ buckets, showToday }: { buckets: DailyBucket[]; sho
           );
         })}
       </svg>
-      <div className="mt-1 flex justify-between font-mono text-[9px] text-[oklch(42%_0.014_250)]">
+      <div className="mt-1 flex justify-between font-mono text-[9px] text-[var(--shell-text-muted)]">
         <span>{buckets[0]?.day?.slice(5)}</span>
         <span className="text-[oklch(78%_0.155_234)]">today</span>
       </div>
@@ -485,19 +485,19 @@ function DowChart({ buckets }: { buckets: DowBucket[] }) {
           const isWeekend = d === 0 || d === 6;
           return (
             <div key={d} className="flex flex-col items-center gap-1">
-              <div className="relative flex h-12 w-full items-end overflow-hidden rounded bg-[oklch(20%_0.016_250)]">
+              <div className="relative flex h-12 w-full items-end overflow-hidden rounded bg-[var(--shell-2)]">
                 <div
                   className={`w-full rounded ${isWeekend ? "bg-[oklch(72%_0.18_305/0.55)]" : "bg-[oklch(78%_0.155_234/0.6)]"} transition-all`}
                   style={{ height: `${Math.max(pct, total > 0 ? 6 : 0)}%` }}
                 />
               </div>
-              <span className="text-[8.5px] font-semibold text-[oklch(42%_0.014_250)]">{label}</span>
-              <span className="font-mono text-[9px] text-[oklch(76%_0.012_250)]">{total}</span>
+              <span className="text-[8.5px] font-semibold text-[var(--shell-text-muted)]">{label}</span>
+              <span className="font-mono text-[9px] text-[var(--shell-text-2)]">{total}</span>
             </div>
           );
         })}
       </div>
-      <p className="text-[9.5px] text-[oklch(42%_0.014_250)]">Purple = weekends · Blue = weekdays</p>
+      <p className="text-[9.5px] text-[var(--shell-text-muted)]">Purple = weekends · Blue = weekdays</p>
     </div>
   );
 }
@@ -522,21 +522,21 @@ function HourChart({ buckets }: { buckets: HourBucket[] }) {
           );
         })}
       </div>
-      <div className="mt-1.5 flex justify-between font-mono text-[8.5px] text-[oklch(42%_0.014_250)]">
+      <div className="mt-1.5 flex justify-between font-mono text-[8.5px] text-[var(--shell-text-muted)]">
         <span>0h</span>
         <span>6h</span>
         <span>12h</span>
         <span>18h</span>
         <span>23h</span>
       </div>
-      <p className="mt-1 text-[9.5px] text-[oklch(42%_0.014_250)]">Purple = night (before 6am / after 8pm) · Blue = daytime</p>
+      <p className="mt-1 text-[9.5px] text-[var(--shell-text-muted)]">Purple = night (before 6am / after 8pm) · Blue = daytime</p>
     </div>
   );
 }
 
 function Placeholder({ label }: { label: string }) {
   return (
-    <div className="flex flex-1 items-center justify-center text-center text-[12px] text-[oklch(58%_0.014_250)]">
+    <div className="flex flex-1 items-center justify-center text-center text-[12px] text-[var(--shell-text-muted)]">
       <span>{label}</span>
     </div>
   );

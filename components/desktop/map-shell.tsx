@@ -7,12 +7,12 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { DesktopTopbar } from "@/components/desktop/topbar";
 import { DesktopLeftRail, useLeftRailState, type StatusRow } from "@/components/desktop/left-rail";
 import { DesktopRightRail, type DailyBucket, type SurveyorBrief, type CoverageMetrics, type ChatMember } from "@/components/desktop/right-rail";
-import { CommandCapsule, ActiveFiltersStrip, MapLegend, MapControls, AddFab, SyncPill } from "@/components/desktop/map-overlays";
+import { CommandCapsule, ActiveFiltersStrip, MapLegend, MapControls, AddFab, SyncPill, BasemapSwitcher, PlaceHintBanner } from "@/components/desktop/map-overlays";
 import { DesktopAddModal } from "@/components/desktop/add-modal";
 import { CapBanner } from "@/components/desktop/cap-banner";
 import { registerSyncTriggers } from "@/lib/offline/sync";
 import type { MatchStatusCounts, MatchStatusRow } from "@/lib/match/status";
-import type { StatusColorMap, MapHandle } from "@/components/map/maplibre-map";
+import type { StatusColorMap, MapHandle, BasemapKey } from "@/components/map/maplibre-map";
 import type { ChatMessage } from "@/lib/queries/chat";
 import type { CapStatus } from "@/lib/queries/caps";
 import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
@@ -26,6 +26,11 @@ type Props = {
   projectId: string;
   projectName: string;
   currentUserId: string | null;
+  currentUser?: {
+    email: string | null;
+    displayName: string | null;
+    role: string | null;
+  } | null;
   center: { lat: number; lon: number; zoom: number };
   statuses: StatusRow[];
   matchCounts: MatchStatusCounts;
@@ -47,6 +52,9 @@ export function MapShell(props: Props) {
   const left = useLeftRailState();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [placeCoords, setPlaceCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [placingMode, setPlacingMode] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapKey>("satellite");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
 
@@ -54,6 +62,29 @@ export function MapShell(props: Props) {
   const mapHandleRef = useRef<MapHandle | null>(null);
 
   useEffect(() => registerSyncTriggers(props.projectId), [props.projectId]);
+
+  // ESC cancels placing mode.
+  useEffect(() => {
+    if (!placingMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlacingMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [placingMode]);
+
+  function handleStartPlace() {
+    setPlacingMode(true);
+  }
+  function handleMapPlace(c: { lat: number; lon: number }) {
+    setPlacingMode(false);
+    setPlaceCoords(c);
+    setAddOpen(true);
+  }
+  function handleAddClose() {
+    setAddOpen(false);
+    setPlaceCoords(null);
+  }
 
   const statusColors: StatusColorMap = useMemo(
     () => Object.fromEntries(props.statuses.map((s) => [s.id, s.color])),
@@ -95,7 +126,13 @@ export function MapShell(props: Props) {
 
   return (
     <>
-      <DesktopTopbar projectName={props.projectName} scope="all" liveCount={props.surveyors?.length ?? 0} />
+      <DesktopTopbar
+        projectName={props.projectName}
+        projectId={props.projectId}
+        scope="all"
+        liveCount={props.surveyors?.length ?? 0}
+        user={props.currentUser ?? null}
+      />
       <CapBanner caps={props.caps ?? null} />
 
       <div
@@ -135,7 +172,7 @@ export function MapShell(props: Props) {
         </div>
 
         {/* ── Map center ── */}
-        <div className="relative overflow-hidden bg-[oklch(14%_0.012_250)]">
+        <div className="relative overflow-hidden bg-[var(--shell-base)]">
           <MaplibreMap
             ref={mapHandleRef}
             center={[props.center.lon, props.center.lat]}
@@ -145,12 +182,16 @@ export function MapShell(props: Props) {
             selectedId={selectedId}
             onSelect={setSelectedId}
             layers={left.layers}
+            basemap={basemap}
+            placingMode={placingMode}
+            onPlace={handleMapPlace}
           />
 
           <CommandCapsule
-            onAdd={() => setAddOpen(true)}
+            onAdd={handleStartPlace}
             onImport={() => router.push(`/p/${props.projectId}/import`)}
           />
+          <PlaceHintBanner visible={placingMode} onCancel={() => setPlacingMode(false)} />
           <ActiveFiltersStrip
             activeMatch={left.activeMatch}
             activeStatuses={activeStatusChips}
@@ -171,14 +212,18 @@ export function MapShell(props: Props) {
             onZoomOut={() => mapHandleRef.current?.zoomOut()}
             onLocate={() => mapHandleRef.current?.flyToCurrentLocation()}
           />
+          <BasemapSwitcher value={basemap} onChange={setBasemap} />
           <SyncPill lastSyncSeconds={4} refId={selectedId ?? undefined} />
-          <AddFab onClick={() => setAddOpen(true)} />
+          <AddFab
+            onClick={() => (placingMode ? setPlacingMode(false) : handleStartPlace())}
+            active={placingMode}
+          />
 
           {/* Left panel re-open button */}
           {!leftOpen && (
             <button
               onClick={() => setLeftOpen(true)}
-              className="absolute left-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(14%_0.012_250/0.85)] text-[oklch(76%_0.012_250)] shadow-lg backdrop-blur-[16px] transition hover:border-[oklch(78%_0.155_234/0.4)] hover:text-[oklch(78%_0.155_234)]"
+              className="absolute left-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--shell-border)] bg-[var(--shell-base-alpha-86)] text-[var(--shell-text-2)] shadow-lg backdrop-blur-[16px] transition hover:border-[oklch(78%_0.155_234/0.4)] hover:text-[oklch(78%_0.155_234)]"
               aria-label="Open left panel"
             >
               <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
@@ -189,7 +234,7 @@ export function MapShell(props: Props) {
           {!rightOpen && (
             <button
               onClick={() => setRightOpen(true)}
-              className="absolute right-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(14%_0.012_250/0.85)] text-[oklch(76%_0.012_250)] shadow-lg backdrop-blur-[16px] transition hover:border-[oklch(78%_0.155_234/0.4)] hover:text-[oklch(78%_0.155_234)]"
+              className="absolute right-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--shell-border)] bg-[var(--shell-base-alpha-86)] text-[var(--shell-text-2)] shadow-lg backdrop-blur-[16px] transition hover:border-[oklch(78%_0.155_234/0.4)] hover:text-[oklch(78%_0.155_234)]"
               aria-label="Open right panel"
             >
               <ChevronLeft className="h-4 w-4" strokeWidth={1.7} />
@@ -222,9 +267,9 @@ export function MapShell(props: Props) {
         open={addOpen}
         projectId={props.projectId}
         statuses={props.statuses}
-        initialCoords={{ lat: props.center.lat, lon: props.center.lon }}
-        onClose={() => setAddOpen(false)}
-        onSaved={() => { setAddOpen(false); router.refresh(); }}
+        initialCoords={placeCoords ?? undefined}
+        onClose={handleAddClose}
+        onSaved={() => { handleAddClose(); router.refresh(); }}
       />
     </>
   );

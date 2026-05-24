@@ -122,12 +122,12 @@ export function ChatPanel({ projectId, currentUserId, members, initial }: Props)
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* presence strip */}
-      <div className="flex items-center gap-2 border-b border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 text-[11px] text-[oklch(58%_0.014_250)]">
+      <div className="flex items-center gap-2 border-b border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[11px] text-[var(--shell-text-muted)]">
         <span className="relative h-2 w-2 rounded-full bg-[oklch(76%_0.16_158)]" />
         {presence.size} online ·
         <div className="flex -space-x-1.5">
           {members.filter((m) => presence.has(m.user_id)).slice(0, 5).map((m) => (
-            <div key={m.user_id} title={m.display_name} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[oklch(20%_0.016_250)] bg-gradient-to-br from-[oklch(72%_0.18_305)] to-[oklch(78%_0.155_234)] text-[8px] font-bold text-[oklch(14%_0.012_250)]">
+            <div key={m.user_id} title={m.display_name} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[var(--shell-2)] bg-gradient-to-br from-[oklch(72%_0.18_305)] to-[oklch(78%_0.155_234)] text-[8px] font-bold text-[var(--shell-base)]">
               {initials(m.display_name)}
             </div>
           ))}
@@ -136,19 +136,19 @@ export function ChatPanel({ projectId, currentUserId, members, initial }: Props)
 
       {/* messages */}
       <div ref={scrollerRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2.5">
-        {messages.length === 0 && <p className="text-center text-[11.5px] text-[oklch(58%_0.014_250)]">No messages yet. Say hi.</p>}
+        {messages.length === 0 && <p className="text-center text-[11.5px] text-[var(--shell-text-muted)]">No messages yet. Say hi.</p>}
         {messages.map((m) => {
           const mine = m.author_id === currentUserId;
           const name = m.author?.display_name || m.author?.email?.split("@")[0] || "Member";
           return (
             <div key={m.id} className={`flex gap-2 ${mine ? "flex-row-reverse" : "flex-row"}`}>
-              <div className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-[oklch(14%_0.012_250)] ${presence.has(m.author_id) ? "ring-2 ring-[oklch(76%_0.16_158)]" : ""}`} style={{ background: gradFromId(m.author_id) }}>
+              <div className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-[var(--shell-base)] ${presence.has(m.author_id) ? "ring-2 ring-[oklch(76%_0.16_158)]" : ""}`} style={{ background: gradFromId(m.author_id) }}>
                 {initials(name)}
               </div>
-              <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-[12.5px] leading-relaxed ${mine ? "bg-[oklch(78%_0.155_234/0.18)] text-[oklch(96%_0.008_250)]" : "bg-[oklch(20%_0.016_250)] text-[oklch(96%_0.008_250)]"}`}>
+              <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-[12.5px] leading-relaxed ${mine ? "bg-[oklch(78%_0.155_234/0.18)] text-[var(--shell-text)]" : "bg-[var(--shell-2)] text-[var(--shell-text)]"}`}>
                 <div className={`mb-0.5 flex items-baseline gap-2 ${mine ? "justify-end" : ""}`}>
-                  <span className="font-display text-[11px] font-bold text-[oklch(96%_0.008_250)]">{name}</span>
-                  <span className="font-mono text-[9.5px] text-[oklch(58%_0.014_250)]">{relTime(m.created_at)}</span>
+                  <span className="font-display text-[11px] font-bold text-[var(--shell-text)]">{name}</span>
+                  <span className="font-mono text-[9.5px] text-[var(--shell-text-muted)]">{relTime(m.created_at)}</span>
                 </div>
                 <div dangerouslySetInnerHTML={{ __html: highlightMentions(escapeHtml(m.body), members) }} />
               </div>
@@ -158,16 +158,16 @@ export function ChatPanel({ projectId, currentUserId, members, initial }: Props)
       </div>
 
       {/* composer */}
-      <div className="relative border-t border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-2">
+      <div className="relative border-t border-[var(--shell-border)] bg-[var(--shell-1)] p-2">
         {mentionSuggestions.length > 0 && (
-          <div className="absolute bottom-full left-2 right-2 mb-1 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] shadow-[0_8px_24px_-8px_oklch(0%_0_0/0.5)]">
+          <div className="absolute bottom-full left-2 right-2 mb-1 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-1)] shadow-[0_8px_24px_-8px_oklch(0%_0_0/0.5)]">
             {mentionSuggestions.map((m) => (
               <button
                 key={m.user_id}
                 onClick={() => applyMention(m)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[oklch(20%_0.016_250)]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[var(--shell-2)]"
               >
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-[oklch(14%_0.012_250)]" style={{ background: gradFromId(m.user_id) }}>{initials(m.display_name)}</span>
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-[var(--shell-base)]" style={{ background: gradFromId(m.user_id) }}>{initials(m.display_name)}</span>
                 <span>{m.display_name}</span>
               </button>
             ))}
@@ -180,12 +180,12 @@ export function ChatPanel({ projectId, currentUserId, members, initial }: Props)
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
             placeholder="Message your team…  use @ to mention"
             rows={1}
-            className="flex-1 max-h-32 resize-none rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 text-[13px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]"
+            className="flex-1 max-h-32 resize-none rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[13px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]"
           />
           <button
             onClick={send}
             disabled={sending || !body.trim()}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50 transition"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[oklch(78%_0.155_234)] text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50 transition"
             aria-label="Send"
           >
             <Send className="h-4 w-4" strokeWidth={2} />

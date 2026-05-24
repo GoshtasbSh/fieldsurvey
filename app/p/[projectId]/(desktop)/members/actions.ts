@@ -79,3 +79,44 @@ export async function removeMemberAction(projectId: string, userId: string) {
   revalidatePath(`/p/${projectId}/members`);
   return { ok: true };
 }
+
+const changeRole = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["admin", "surveyor", "viewer"]),
+});
+
+export async function changeMemberRoleAction(projectId: string, fd: FormData) {
+  const parsed = changeRole.safeParse({ userId: fd.get("userId"), role: fd.get("role") });
+  if (!parsed.success) return { error: "Invalid role." };
+
+  const sb = await createServerSupabase();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  // Guard: do not let an admin demote/modify the project owner row,
+  // and do not let a user modify themselves through this control.
+  if (parsed.data.userId === user.id) {
+    return { error: "You cannot change your own role." };
+  }
+  const { data: targetRaw } = await sb
+    .from("project_members")
+    .select("role")
+    .eq("project_id", projectId)
+    .eq("user_id", parsed.data.userId)
+    .maybeSingle();
+  const target = targetRaw as { role: string } | null;
+  if (target?.role === "owner") {
+    return { error: "Owner role cannot be changed." };
+  }
+
+  const { error } = await sb
+    .from("project_members")
+    .update({ role: parsed.data.role } as never)
+    .eq("project_id", projectId)
+    .eq("user_id", parsed.data.userId);
+  if (error) return { error: error.message };
+  revalidatePath(`/p/${projectId}/members`);
+  return { ok: true };
+}

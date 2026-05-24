@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
-import maplibregl, { type Map, type GeoJSONSource } from "maplibre-gl";
+import maplibregl, { type Map, type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MATCH_RING } from "@/lib/match/status";
 import type { MatchStatusRow } from "@/lib/match/status";
@@ -20,6 +20,14 @@ export type MapHandle = {
   flyToCurrentLocation: () => void;
 };
 
+export type BasemapKey = "satellite" | "streets" | "light";
+
+export const BASEMAPS: Record<BasemapKey, { label: string; subtitle: string }> = {
+  satellite: { label: "Satellite", subtitle: "Esri World Imagery" },
+  streets: { label: "Streets", subtitle: "OpenStreetMap" },
+  light: { label: "Light", subtitle: "CARTO Voyager" },
+};
+
 type Props = {
   center: [number, number];
   zoom: number;
@@ -29,24 +37,98 @@ type Props = {
   onSelect: (pointId: string) => void;
   /** If omitted, defaults to points-only — backwards-compatible with mobile shell. */
   layers?: LayerVisibility;
+  /** Active basemap key. Defaults to "satellite" (matches Keystone). */
+  basemap?: BasemapKey;
+  /** When true, cursor becomes crosshair and the next non-point map click fires onPlace. */
+  placingMode?: boolean;
+  /** Fired when the user clicks the map while placingMode is true (and not on an existing point). */
+  onPlace?: (lngLat: { lat: number; lon: number }) => void;
 };
-
-// OpenFreeMap "dark" style — free, no API key, CORS-open, vector quality.
-// CartoDB basemaps.cartocdn.com deprecated (returns 404 for all tiles as of 2026).
-const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
 
 const DEFAULT_LAYERS: LayerVisibility = { points: true, heatmap: false, clusters: false, boundary: false };
 
+const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
+  satellite: "bm-satellite",
+  streets: "bm-streets",
+  light: "bm-light",
+};
+
+// Custom style with three raster basemap sources, toggleable via visibility.
+// Mirrors Keystone's basemap stack: satellite default, streets fallback, light alt.
+function buildBaseStyle(active: BasemapKey): StyleSpecification {
+  return {
+    version: 8,
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    sources: {
+      "bm-satellite": {
+        type: "raster",
+        tiles: [
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+      },
+      "bm-streets": {
+        type: "raster",
+        tiles: [
+          "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+          "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+          "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '&copy; OpenStreetMap contributors',
+      },
+      "bm-light": {
+        type: "raster",
+        tiles: [
+          "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/">CARTO</a>',
+      },
+    },
+    layers: (Object.keys(BASEMAP_LAYER_IDS) as BasemapKey[]).map((k) => ({
+      id: BASEMAP_LAYER_IDS[k],
+      type: "raster" as const,
+      source: BASEMAP_LAYER_IDS[k],
+      layout: { visibility: k === active ? "visible" : "none" },
+    })),
+  };
+}
+
 export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
-  { center, zoom, features, statusColors, selectedId, onSelect, layers = DEFAULT_LAYERS },
+  {
+    center,
+    zoom,
+    features,
+    statusColors,
+    selectedId,
+    onSelect,
+    layers = DEFAULT_LAYERS,
+    basemap = "satellite",
+    placingMode = false,
+    onPlace,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
+  const placingRef = useRef(placingMode);
+  const onPlaceRef = useRef(onPlace);
+
+  // Keep refs in sync so the map-click handler reads the latest values without re-binding.
+  placingRef.current = placingMode;
+  onPlaceRef.current = onPlace;
 
   // Two GeoJSON FeatureCollections so heatmap/points can stay un-clustered
-  // while clusters use a separate clustered source (MapLibre limitation:
-  // a single source cluster flag toggles clustering for that source).
+  // while clusters use a separate clustered source.
   const fcRaw = useMemo(() => toGeoJSON(features, statusColors), [features, statusColors]);
 
   useImperativeHandle(ref, () => ({
@@ -72,7 +154,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: BASEMAP_STYLE,
+      style: buildBaseStyle(basemap),
       center,
       zoom,
       attributionControl: false,
@@ -136,7 +218,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
         layout: {
           visibility: "none",
           "text-field": "{point_count_abbreviated}",
-          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-font": ["Noto Sans Regular"],
           "text-size": ["step", ["get", "point_count"], 12, 25, 13, 100, 15],
         },
         paint: { "text-color": "#0d1117" },
@@ -207,8 +289,12 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
         const f = e.features?.[0];
         if (f?.properties?.id) onSelect(f.properties.id as string);
       });
-      map.on("mouseenter", "ms-points-bg", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "ms-points-bg", () => { map.getCanvas().style.cursor = ""; });
+      map.on("mouseenter", "ms-points-bg", () => {
+        if (!placingRef.current) map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "ms-points-bg", () => {
+        if (!placingRef.current) map.getCanvas().style.cursor = "";
+      });
 
       map.on("click", "ms-cluster-bubble", async (e) => {
         const f = e.features?.[0];
@@ -222,8 +308,22 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
           map.easeTo({ center: coords, zoom: z });
         } catch { /* ignore */ }
       });
-      map.on("mouseenter", "ms-cluster-bubble", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "ms-cluster-bubble", () => { map.getCanvas().style.cursor = ""; });
+      map.on("mouseenter", "ms-cluster-bubble", () => {
+        if (!placingRef.current) map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "ms-cluster-bubble", () => {
+        if (!placingRef.current) map.getCanvas().style.cursor = "";
+      });
+
+      // Generic map click — only fires when in placing mode AND not on an existing pin.
+      map.on("click", (e) => {
+        if (!placingRef.current) return;
+        const hits = map.queryRenderedFeatures(e.point, {
+          layers: ["ms-points-bg", "ms-cluster-bubble"].filter((id) => map.getLayer(id)),
+        });
+        if (hits.length > 0) return;
+        onPlaceRef.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+      });
 
       applyLayerVisibility(map, layers);
     });
@@ -246,6 +346,25 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Toggle basemap visibility without reloading the style — preserves zoom/center and overlay layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    (Object.keys(BASEMAP_LAYER_IDS) as BasemapKey[]).forEach((k) => {
+      const id = BASEMAP_LAYER_IDS[k];
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, "visibility", k === basemap ? "visible" : "none");
+      }
+    });
+  }, [basemap]);
+
+  // Crosshair cursor while in placing mode.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.getCanvas().style.cursor = placingMode ? "crosshair" : "";
+  }, [placingMode]);
 
   useEffect(() => {
     const map = mapRef.current;

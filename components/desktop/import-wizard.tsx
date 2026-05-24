@@ -71,7 +71,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="mt-8 rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-6">
+    <div className="mt-8 rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)] p-6">
       {step === "upload" && (
         <DropZone
           onFile={onFile}
@@ -82,34 +82,34 @@ export function ImportWizard({ projectId }: { projectId: string }) {
 
       {(step === "configure" || step === "preview") && (
         <div className="space-y-5">
-          <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-4">
-            <div className="font-mono text-[12px] text-[oklch(76%_0.012_250)]">{filename}</div>
-            <div className="font-mono text-[11px] text-[oklch(58%_0.014_250)]">{rows.length} rows · {headers.length} columns</div>
+          <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-4">
+            <div className="font-mono text-[12px] text-[var(--shell-text-2)]">{filename}</div>
+            <div className="font-mono text-[11px] text-[var(--shell-text-muted)]">{rows.length} rows · {headers.length} columns</div>
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">
+            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">
               Which column is the respondent&apos;s home address? <span className="text-[oklch(68%_0.21_25)]">required</span>
             </label>
             <select
               value={addressColumn}
               onChange={(e) => setAddressColumn(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 text-[13px]"
+              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[13px]"
             >
               <option value="">— choose —</option>
               {headers.map((h) => (<option key={h} value={h}>{h}</option>))}
             </select>
-            <p className="mt-2 text-[11px] leading-relaxed text-[oklch(58%_0.014_250)]">
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
               We re-geocode this column via the U.S. Census geocoder. The response&apos;s own latitude/longitude (e.g. <span className="font-mono">LocationLatitude</span>) is <b>discarded</b> — it&apos;s where the survey was filled, not where the house is.
             </p>
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[oklch(58%_0.014_250)]">External ID column (optional, for de-duplication)</label>
+            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">External ID column (optional, for de-duplication)</label>
             <select
               value={externalIdColumn}
               onChange={(e) => setExternalIdColumn(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 text-[13px]"
+              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[13px]"
             >
               <option value="">— none —</option>
               {headers.map((h) => (<option key={h} value={h}>{h}</option>))}
@@ -123,14 +123,14 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           <div className="flex gap-2">
             <button
               onClick={() => { setStep("upload"); setRows([]); setHeaders([]); }}
-              className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-4 py-2 font-display text-[12px] font-bold text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] transition"
+              className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-text-2)] hover:bg-[var(--shell-3)] transition"
             >
               Re-upload
             </button>
             <button
               onClick={onCommit}
               disabled={busy || !addressColumn}
-              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[oklch(14%_0.012_250)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50 transition"
+              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50 transition"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               Commit {rows.length} rows → run matching
@@ -143,7 +143,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <Loader2 className="h-8 w-8 animate-spin text-[oklch(78%_0.155_234)]" />
           <div className="font-display text-[14px] font-bold">Importing and matching…</div>
-          <div className="text-[11px] text-[oklch(58%_0.014_250)]">Geocoding each address via the U.S. Census, then snapping responses to field points within 30 meters.</div>
+          <div className="text-[11px] text-[var(--shell-text-muted)]">Geocoding each address via the U.S. Census, then snapping responses to field points within 30 meters.</div>
         </div>
       )}
 
@@ -151,10 +151,10 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle2 className="h-10 w-10 text-[oklch(76%_0.16_158)]" />
           <div className="font-display text-[16px] font-extrabold">Import complete</div>
-          <div className="text-[12px] text-[oklch(76%_0.012_250)]">{result.inserted} responses imported. Matching is running server-side; counts will update shortly.</div>
+          <div className="text-[12px] text-[var(--shell-text-2)]">{result.inserted} responses imported. Matching is running server-side; counts will update shortly.</div>
           <div className="mt-3 flex gap-2">
-            <button onClick={() => router.push(`/p/${projectId}/map`)} className="rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[oklch(14%_0.012_250)]">View map</button>
-            <button onClick={() => { setStep("upload"); setRows([]); setResult(null); }} className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] px-4 py-2 font-display text-[12px] font-bold text-[oklch(76%_0.012_250)]">Import more</button>
+            <button onClick={() => router.push(`/p/${projectId}/map`)} className="rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)]">View map</button>
+            <button onClick={() => { setStep("upload"); setRows([]); setResult(null); }} className="rounded-lg border border-[var(--shell-border)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-text-2)]">Import more</button>
           </div>
         </div>
       )}
@@ -164,9 +164,9 @@ export function ImportWizard({ projectId }: { projectId: string }) {
 
 function DropZone({ onFile, accept, label }: { onFile: (f: File) => void; accept: string; label: string }) {
   return (
-    <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] py-16 text-center transition hover:border-[oklch(78%_0.155_234/0.5)]">
+    <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[var(--shell-border)] bg-[var(--shell-2)] py-16 text-center transition hover:border-[oklch(78%_0.155_234/0.5)]">
       <Upload className="h-8 w-8 text-[oklch(78%_0.155_234)]" strokeWidth={1.7} />
-      <span className="text-[13px] text-[oklch(76%_0.012_250)]">{label}</span>
+      <span className="text-[13px] text-[var(--shell-text-2)]">{label}</span>
       <input type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
     </label>
   );
@@ -176,12 +176,12 @@ function PreviewTable({ rows, addressColumn }: { rows: Row[]; addressColumn: str
   if (!rows.length) return null;
   const headers = Object.keys(rows[0]);
   return (
-    <div className="overflow-x-auto rounded-lg border border-[oklch(28%_0.02_250/0.55)]">
+    <div className="overflow-x-auto rounded-lg border border-[var(--shell-border)]">
       <table className="w-full text-[11px]">
-        <thead className="bg-[oklch(20%_0.016_250)]">
+        <thead className="bg-[var(--shell-2)]">
           <tr>
             {headers.map((h) => (
-              <th key={h} className={`whitespace-nowrap px-2 py-1.5 text-left font-bold ${h === addressColumn ? "text-[oklch(78%_0.155_234)]" : "text-[oklch(58%_0.014_250)]"}`}>
+              <th key={h} className={`whitespace-nowrap px-2 py-1.5 text-left font-bold ${h === addressColumn ? "text-[oklch(78%_0.155_234)]" : "text-[var(--shell-text-muted)]"}`}>
                 {h}
               </th>
             ))}
@@ -189,9 +189,9 @@ function PreviewTable({ rows, addressColumn }: { rows: Row[]; addressColumn: str
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="border-t border-[oklch(28%_0.02_250/0.55)]">
+            <tr key={i} className="border-t border-[var(--shell-border)]">
               {headers.map((h) => (
-                <td key={h} className={`whitespace-nowrap px-2 py-1.5 ${h === addressColumn ? "text-[oklch(96%_0.008_250)]" : "text-[oklch(76%_0.012_250)]"}`}>
+                <td key={h} className={`whitespace-nowrap px-2 py-1.5 ${h === addressColumn ? "text-[var(--shell-text)]" : "text-[var(--shell-text-2)]"}`}>
                   {String(r[h] ?? "")}
                 </td>
               ))}

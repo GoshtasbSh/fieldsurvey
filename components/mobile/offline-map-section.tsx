@@ -31,28 +31,28 @@ export function OfflineMapSection({ center }: { center: { lat: number; lon: numb
   const estMB = (tiles.length * 0.025).toFixed(1); // ~25 KB / tile average
 
   return (
-    <div className="rounded-xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-3.5">
+    <div className="rounded-xl border border-[var(--shell-border)] bg-[var(--shell-1)] p-3.5">
       <div className="flex items-center gap-2">
         <Download className="h-4 w-4 text-[oklch(78%_0.155_234)]" strokeWidth={1.7} />
         <h3 className="font-display text-[13px] font-extrabold">Download offline map</h3>
       </div>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-[oklch(76%_0.012_250)]">
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--shell-text-2)]">
         Pre-cache the ~10 km square around your project so the map renders without a network. Approx <b>{estMB} MB</b> ({tiles.length.toLocaleString()} tiles · zooms {Z_MIN}–{Z_MAX}).
       </p>
 
       {state === "idle" && (
-        <button onClick={download} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[oklch(78%_0.155_234)] px-3 py-2 font-display text-[12px] font-bold text-[oklch(14%_0.012_250)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] active:scale-95">
+        <button onClick={download} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[oklch(78%_0.155_234)] px-3 py-2 font-display text-[12px] font-bold text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] active:scale-95">
           <Download className="h-3.5 w-3.5" strokeWidth={2} /> Download tiles
         </button>
       )}
 
       {state === "downloading" && (
         <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between font-mono text-[10.5px] text-[oklch(76%_0.012_250)] tabular-nums">
+          <div className="mb-1.5 flex items-center justify-between font-mono text-[10.5px] text-[var(--shell-text-2)] tabular-nums">
             <span>{progress.done} / {progress.total} tiles</span>
             <span>{pct}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-[oklch(24%_0.018_250)]">
+          <div className="h-2 overflow-hidden rounded-full bg-[var(--shell-3)]">
             <div className="h-full bg-[oklch(78%_0.155_234)] transition-[width] duration-150" style={{ width: `${pct}%` }} />
           </div>
         </div>

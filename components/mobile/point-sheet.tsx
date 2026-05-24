@@ -76,23 +76,23 @@ export function MobilePointSheet({ pointId, open, onClose, onDeleted }: { pointI
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-[oklch(0%_0_0/0.6)] backdrop-blur-sm" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 max-h-[80dvh] overflow-hidden rounded-t-2xl border-t border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] shadow-[0_-12px_40px_-8px_oklch(0%_0_0/0.6)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-        <div className="flex justify-center py-2"><span className="h-1 w-10 rounded-full bg-[oklch(36%_0.025_250/0.7)]" /></div>
+      <div className="absolute inset-x-0 bottom-0 max-h-[80dvh] overflow-hidden rounded-t-2xl border-t border-[var(--shell-border)] bg-[var(--shell-1)] shadow-[0_-12px_40px_-8px_oklch(0%_0_0/0.6)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        <div className="flex justify-center py-2"><span className="h-1 w-10 rounded-full bg-[var(--shell-border-soft)]" /></div>
         <div className="flex items-center justify-between px-4 pb-2">
           <h2 className="font-display text-[15px] font-extrabold">Point</h2>
-          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[oklch(76%_0.012_250)] hover:bg-[oklch(20%_0.016_250)]"><X className="h-4 w-4" strokeWidth={1.7} /></button>
+          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--shell-text-2)] hover:bg-[var(--shell-2)]"><X className="h-4 w-4" strokeWidth={1.7} /></button>
         </div>
 
         {!data ? (
-          <div className="p-4 text-center text-[12px] text-[oklch(58%_0.014_250)]">Loading…</div>
+          <div className="p-4 text-center text-[12px] text-[var(--shell-text-muted)]">Loading…</div>
         ) : (
           <div className="space-y-3 px-4 pb-4">
             <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full ring-2 ring-[oklch(14%_0.012_250)]" style={{ background: data.status_color }} />
+              <span className="h-3 w-3 rounded-full ring-2 ring-[var(--shell-base)]" style={{ background: data.status_color }} />
               <span className="font-display text-[14px] font-bold">{data.status_label}</span>
             </div>
             {data.address && (
-              <div className="flex items-start gap-2 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-3">
+              <div className="flex items-start gap-2 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-3">
                 <MapPinIcon className="h-4 w-4 mt-0.5 text-[oklch(78%_0.155_234)]" strokeWidth={1.7} />
                 <span className="text-[13px]">{data.address}</span>
               </div>
@@ -104,13 +104,13 @@ export function MobilePointSheet({ pointId, open, onClose, onDeleted }: { pointI
               <Field label="When" value={new Date(data.collected_at).toLocaleString()} mono />
             </div>
             {data.notes && (
-              <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-3">
-                <div className="text-[10.5px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">Notes</div>
+              <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-3">
+                <div className="text-[10.5px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">Notes</div>
                 <p className="mt-1 text-[12.5px]">{data.notes}</p>
               </div>
             )}
             <div className="flex gap-2 pt-2">
-              <button disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] py-2.5 font-display text-[12px] font-bold text-[oklch(76%_0.012_250)] disabled:opacity-50"><Edit2 className="h-3.5 w-3.5" strokeWidth={1.7} /> Edit</button>
+              <button disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] py-2.5 font-display text-[12px] font-bold text-[var(--shell-text-2)] disabled:opacity-50"><Edit2 className="h-3.5 w-3.5" strokeWidth={1.7} /> Edit</button>
               <button onClick={onDelete} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-[oklch(68%_0.21_25/0.3)] bg-[oklch(68%_0.21_25/0.1)] py-2.5 font-display text-[12px] font-bold text-[oklch(68%_0.21_25)] disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} /> Delete</button>
             </div>
           </div>
@@ -122,8 +122,8 @@ export function MobilePointSheet({ pointId, open, onClose, onDeleted }: { pointI
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5">
-      <div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[oklch(58%_0.014_250)]">{label}</div>
+    <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-2.5">
+      <div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">{label}</div>
       <div className={`mt-0.5 text-[12px] ${mono ? "font-mono tabular-nums" : ""}`}>{value}</div>
     </div>
   );

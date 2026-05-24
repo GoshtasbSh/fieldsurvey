@@ -109,22 +109,22 @@ export function StatusesEditor({ projectId, initial }: { projectId: string; init
             onDragLeave={() => onDragLeave(s.id)}
             onDrop={(e) => onDrop(e, s.id)}
             onDragEnd={() => { setDragId(null); setOverId(null); }}
-            className={`grid grid-cols-[20px_28px_1fr_110px_auto_28px_28px_28px] items-center gap-2 rounded-lg border bg-[oklch(20%_0.016_250)] p-2 transition ${
+            className={`grid grid-cols-[20px_28px_1fr_110px_auto_28px_28px_28px] items-center gap-2 rounded-lg border bg-[var(--shell-2)] p-2 transition ${
               isDragging
                 ? "opacity-50 border-[oklch(78%_0.155_234/0.5)] shadow-[0_12px_24px_-8px_oklch(0%_0_0/0.5)]"
                 : isOver
                   ? "border-dashed border-[oklch(78%_0.155_234/0.5)] bg-[oklch(78%_0.155_234/0.08)]"
-                  : "border-[oklch(28%_0.02_250/0.55)]"
+                  : "border-[var(--shell-border)]"
             }`}
           >
-            <span className="cursor-grab text-[oklch(42%_0.014_250)] hover:text-[oklch(78%_0.155_234)] active:cursor-grabbing" aria-label="Drag to reorder">
+            <span className="cursor-grab text-[var(--shell-text-muted)] hover:text-[oklch(78%_0.155_234)] active:cursor-grabbing" aria-label="Drag to reorder">
               <GripVertical className="h-4 w-4" strokeWidth={1.7} />
             </span>
-            <span className="font-mono text-[11px] text-[oklch(58%_0.014_250)] text-center tabular-nums">{i + 1}</span>
-            <input value={s.label} onChange={(e) => update(s.id, { label: e.target.value })} className="rounded border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-2 py-1 text-[13px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
+            <span className="font-mono text-[11px] text-[var(--shell-text-muted)] text-center tabular-nums">{i + 1}</span>
+            <input value={s.label} onChange={(e) => update(s.id, { label: e.target.value })} className="rounded border border-[var(--shell-border)] bg-[var(--shell-1)] px-2 py-1 text-[13px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
             <div className="flex items-center gap-2">
-              <input type="color" value={s.color} onChange={(e) => update(s.id, { color: e.target.value })} className="h-6 w-10 cursor-pointer rounded border border-[oklch(28%_0.02_250/0.55)] bg-transparent" />
-              <input value={s.color} onChange={(e) => update(s.id, { color: e.target.value })} className="w-16 rounded border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] px-1.5 py-0.5 font-mono text-[10px]" />
+              <input type="color" value={s.color} onChange={(e) => update(s.id, { color: e.target.value })} className="h-6 w-10 cursor-pointer rounded border border-[var(--shell-border)] bg-transparent" />
+              <input value={s.color} onChange={(e) => update(s.id, { color: e.target.value })} className="w-16 rounded border border-[var(--shell-border)] bg-[var(--shell-1)] px-1.5 py-0.5 font-mono text-[10px]" />
             </div>
             {/* Symbol picker */}
             <div className="flex items-center gap-0.5">
@@ -138,7 +138,7 @@ export function StatusesEditor({ projectId, initial }: { projectId: string; init
                     className={`inline-flex h-6 w-6 items-center justify-center rounded text-[13px] transition ${
                       active
                         ? "bg-[oklch(78%_0.155_234/0.2)] ring-1 ring-[oklch(78%_0.155_234/0.5)]"
-                        : "text-[oklch(58%_0.014_250)] hover:bg-[oklch(28%_0.02_250/0.5)]"
+                        : "text-[var(--shell-text-muted)] hover:bg-[oklch(28%_0.02_250/0.5)]"
                     }`}
                   >
                     <SymbolPreview icon={sym.id} color={active ? s.color : "oklch(58% 0.014 250)"} size={12} />
@@ -146,22 +146,22 @@ export function StatusesEditor({ projectId, initial }: { projectId: string; init
                 );
               })}
             </div>
-            <button onClick={() => move(s.id, -1)} disabled={i === 0} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] disabled:opacity-30" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
-            <button onClick={() => move(s.id, 1)} disabled={i === rows.length - 1} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)] disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
+            <button onClick={() => move(s.id, -1)} disabled={i === 0} className="h-7 w-7 inline-flex items-center justify-center rounded text-[var(--shell-text-2)] hover:bg-[var(--shell-3)] disabled:opacity-30" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
+            <button onClick={() => move(s.id, 1)} disabled={i === rows.length - 1} className="h-7 w-7 inline-flex items-center justify-center rounded text-[var(--shell-text-2)] hover:bg-[var(--shell-3)] disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
             <button onClick={() => remove(s.id)} className="h-7 w-7 inline-flex items-center justify-center rounded text-[oklch(68%_0.21_25)] hover:bg-[oklch(68%_0.21_25/0.15)]" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
           </div>
         );
       })}
       <div className="flex gap-2 pt-2">
-        <button onClick={add} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[oklch(28%_0.02_250/0.55)] px-3 py-2 font-display text-[11px] font-bold text-[oklch(76%_0.012_250)] hover:border-[oklch(78%_0.155_234/0.5)] hover:text-[oklch(78%_0.155_234)]">
+        <button onClick={add} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[var(--shell-border)] px-3 py-2 font-display text-[11px] font-bold text-[var(--shell-text-2)] hover:border-[oklch(78%_0.155_234/0.5)] hover:text-[oklch(78%_0.155_234)]">
           <Plus className="h-3.5 w-3.5" strokeWidth={1.7} /> Add status
         </button>
-        <button onClick={save} disabled={busy} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[oklch(14%_0.012_250)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50">
+        <button onClick={save} disabled={busy} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50">
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           Save
         </button>
       </div>
-      <p className="text-[10.5px] text-[oklch(58%_0.014_250)] mt-1">Drag the handle to reorder, or use the arrow buttons for keyboard access.</p>
+      <p className="text-[10.5px] text-[var(--shell-text-muted)] mt-1">Drag the handle to reorder, or use the arrow buttons for keyboard access.</p>
     </div>
   );
 }

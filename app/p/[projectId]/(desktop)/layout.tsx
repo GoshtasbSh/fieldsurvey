@@ -19,5 +19,5 @@ export default async function DesktopLayout({
   const { projectId } = await params;
   // Touch the project to ensure access (auth gate is in parent layout)
   await getProjectForUser(projectId);
-  return <div className="flex h-screen flex-col overflow-hidden bg-[oklch(14%_0.012_250)] text-[oklch(96%_0.008_250)]">{children}</div>;
+  return <div className="flex h-screen flex-col overflow-hidden bg-[var(--shell-base)] text-[var(--shell-text)]">{children}</div>;
 }

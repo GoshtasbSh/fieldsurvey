@@ -4,7 +4,12 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { inviteMemberAction, revokeInviteAction } from "./actions";
+import {
+  inviteMemberAction,
+  revokeInviteAction,
+  removeMemberAction,
+  changeMemberRoleAction,
+} from "./actions";
 
 type MemberRow = {
   user_id: string;
@@ -22,6 +27,13 @@ type InviteRow = {
 };
 
 type MeRow = { role: string } | null;
+
+const ROLE_BADGE: Record<string, string> = {
+  owner: "bg-[oklch(78%_0.155_234/0.16)] text-[oklch(78%_0.155_234)] border-[oklch(78%_0.155_234/0.4)]",
+  admin: "bg-[oklch(72%_0.18_305/0.16)] text-[oklch(72%_0.18_305)] border-[oklch(72%_0.18_305/0.4)]",
+  surveyor: "bg-[oklch(76%_0.16_158/0.16)] text-[oklch(76%_0.16_158)] border-[oklch(76%_0.16_158/0.4)]",
+  viewer: "bg-secondary text-secondary-foreground border-border",
+};
 
 export default async function MembersPage({
   params,
@@ -61,11 +73,20 @@ export default async function MembersPage({
 
   return (
     <main className="mx-auto max-w-3xl p-6">
-      <h1 className="font-display text-2xl font-bold">Members</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="font-display text-2xl font-bold">Members</h1>
+        <span className="rounded-full border border-border bg-secondary px-3 py-1 text-xs font-semibold text-muted-foreground">
+          {mems.length} member{mems.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
       {canManage && (
         <Card className="mt-6">
           <CardHeader>
             <h2 className="font-display text-lg font-bold">Invite member</h2>
+            <p className="text-sm text-muted-foreground">
+              They&apos;ll get an email with a one-time link to join this project.
+            </p>
           </CardHeader>
           <form
             action={async (fd) => {
@@ -101,19 +122,73 @@ export default async function MembersPage({
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Members
         </h2>
-        {mems.map((m) => (
-          <Card key={m.user_id}>
-            <CardContent className="flex items-center justify-between py-3">
-              <div>
-                <div className="font-medium">
-                  {m.profiles?.display_name || m.profiles?.email}
+        {mems.map((m) => {
+          const isMe = m.user_id === user.id;
+          const isOwner = m.role === "owner";
+          const canEditThis = canManage && !isMe && !isOwner;
+          return (
+            <Card key={m.user_id}>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">
+                    {m.profiles?.display_name || m.profiles?.email}
+                    {isMe && (
+                      <span className="ml-2 rounded-full bg-secondary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        you
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">{m.profiles?.email}</div>
                 </div>
-                <div className="text-xs text-muted-foreground">{m.profiles?.email}</div>
-              </div>
-              <span className="rounded-full bg-secondary px-2 py-0.5 text-xs">{m.role}</span>
-            </CardContent>
-          </Card>
-        ))}
+                <div className="flex items-center gap-2">
+                  {canEditThis ? (
+                    <form
+                      action={async (fd) => {
+                        "use server";
+                        await changeMemberRoleAction(projectId, fd);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <input type="hidden" name="userId" value={m.user_id} />
+                      <select
+                        name="role"
+                        defaultValue={m.role}
+                        className="h-8 rounded-md border bg-background px-2 text-xs"
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="surveyor">Surveyor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                      <Button type="submit" size="sm" variant="outline">
+                        Save
+                      </Button>
+                    </form>
+                  ) : (
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                        ROLE_BADGE[m.role] ?? "bg-secondary text-secondary-foreground border-border"
+                      }`}
+                    >
+                      {m.role}
+                    </span>
+                  )}
+                  {canEditThis && (
+                    <form
+                      action={async () => {
+                        "use server";
+                        await removeMemberAction(projectId, m.user_id);
+                      }}
+                    >
+                      <Button type="submit" size="sm" variant="outline" className="text-destructive hover:bg-destructive/10">
+                        Remove
+                      </Button>
+                    </form>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </section>
 
       {canManage && invites.length > 0 && (

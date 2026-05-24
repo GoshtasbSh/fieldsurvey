@@ -26,10 +26,10 @@ export function DesktopAddModal({ open, projectId, statuses, initialCoords, onCl
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-6">
       <div className="absolute inset-0 bg-[oklch(0%_0_0/0.55)] backdrop-blur-sm" onClick={onClose} />
-      <div className="relative flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] shadow-[0_30px_60px_-20px_oklch(0%_0_0/0.6)]">
-        <div className="flex items-center justify-between border-b border-[oklch(28%_0.02_250/0.55)] px-5 py-3.5">
+      <div className="relative flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)] shadow-[0_30px_60px_-20px_oklch(0%_0_0/0.6)]">
+        <div className="flex items-center justify-between border-b border-[var(--shell-border)] px-5 py-3.5">
           <h2 className="font-display text-[15px] font-extrabold">Add point</h2>
-          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[oklch(76%_0.012_250)] hover:bg-[oklch(20%_0.016_250)]">
+          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--shell-text-2)] hover:bg-[var(--shell-2)]">
             <X className="h-4 w-4" strokeWidth={1.7} />
           </button>
         </div>

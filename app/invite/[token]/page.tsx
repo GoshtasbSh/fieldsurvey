@@ -56,9 +56,31 @@ export default async function InvitePage({
           <CardTitle className="font-display text-2xl">Project invite</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          {!invite && (
-            <p className="text-destructive">
-              This invite is invalid or no longer exists.
+          {/* The invitee themselves can't read their own row under the current
+              admin-only SELECT policy, so `invite` is null even for a real
+              pending invite. Fall back to a generic "ready to accept" message
+              when the user is signed in — the accept_invite RPC server-side
+              validates the token, accepted_at, expiry, and email match. */}
+          {!invite && !user && (
+            <>
+              <p className="text-amber-400">
+                You need to be signed in to accept this invite.
+              </p>
+              <p className="text-muted-foreground">
+                <Link href={`/sign-up?next=/invite/${token}`} className="underline">
+                  Create an account
+                </Link>{" "}
+                or{" "}
+                <Link href={`/sign-in?next=/invite/${token}`} className="underline">
+                  sign in
+                </Link>
+                . Use the email this invite was sent to.
+              </p>
+            </>
+          )}
+          {!invite && user && (
+            <p className="text-muted-foreground">
+              Accept this invite to join the project. We&apos;ll verify it on the server.
             </p>
           )}
           {invite?.accepted_at && (
@@ -99,7 +121,7 @@ export default async function InvitePage({
             </>
           )}
         </CardContent>
-        {isValid && user && (
+        {((isValid && user) || (!invite && user)) && (
           <CardFooter>
             <form
               action={async () => {

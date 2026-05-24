@@ -23,7 +23,7 @@ export function CapBanner({ caps }: { caps: CapStatus | null }) {
       <span className="flex-1">
         <b>Approaching project cap:</b> {triggers.join(" · ")}
       </span>
-      <button onClick={() => setDismissed(true)} className="inline-flex h-6 w-6 items-center justify-center rounded text-[oklch(58%_0.014_250)] hover:bg-[oklch(86%_0.18_88/0.15)]" aria-label="Dismiss"><X className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
+      <button onClick={() => setDismissed(true)} className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--shell-text-muted)] hover:bg-[oklch(86%_0.18_88/0.15)]" aria-label="Dismiss"><X className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
     </div>
   );
 }

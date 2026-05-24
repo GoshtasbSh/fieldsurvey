@@ -99,13 +99,13 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
   }
 
   return (
-    <div className="mt-5 rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)]">
-      <div className="flex items-center gap-3 border-b border-[oklch(28%_0.02_250/0.55)] p-3">
-        <input placeholder="Search address or notes…" value={query} onChange={(e) => setQuery(e.target.value)} className="flex-1 max-w-md rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 text-[12px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
-        <button onClick={exportCsv} className="inline-flex items-center gap-1.5 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 font-display text-[11px] font-bold text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)]">
+    <div className="mt-5 rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)]">
+      <div className="flex items-center gap-3 border-b border-[var(--shell-border)] p-3">
+        <input placeholder="Search address or notes…" value={query} onChange={(e) => setQuery(e.target.value)} className="flex-1 max-w-md rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[12px] outline-none focus:border-[oklch(78%_0.155_234/0.5)]" />
+        <button onClick={exportCsv} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-display text-[11px] font-bold text-[var(--shell-text-2)] hover:bg-[var(--shell-3)]">
           <Download className="h-3.5 w-3.5" strokeWidth={1.7} /> CSV
         </button>
-        <button onClick={exportGeoJSON} className="inline-flex items-center gap-1.5 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 font-display text-[11px] font-bold text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)]">
+        <button onClick={exportGeoJSON} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-display text-[11px] font-bold text-[var(--shell-text-2)] hover:bg-[var(--shell-3)]">
           <MapIcon className="h-3.5 w-3.5" strokeWidth={1.7} /> GeoJSON
         </button>
       </div>
@@ -114,24 +114,24 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
         <div className="m-3 flex items-center gap-3 rounded-xl border border-[oklch(78%_0.155_234/0.4)] bg-[linear-gradient(135deg,oklch(20%_0.06_234/0.4),oklch(17%_0.018_250))] p-2.5 shadow-[0_8px_24px_-10px_oklch(78%_0.155_234/0.3)]">
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[oklch(78%_0.155_234/0.18)] text-[oklch(78%_0.155_234)]"><Check className="h-4 w-4" strokeWidth={2} /></span>
           <span className="font-display text-[12px] font-extrabold"><b className="text-[oklch(78%_0.155_234)]">{selected.size}</b> selected</span>
-          <span className="text-[oklch(58%_0.014_250)]">·</span>
-          <span className="text-[11px] text-[oklch(58%_0.014_250)]">across all visible rows</span>
+          <span className="text-[var(--shell-text-muted)]">·</span>
+          <span className="text-[11px] text-[var(--shell-text-muted)]">across all visible rows</span>
           <div className="ml-auto flex gap-1.5">
-            <button onClick={() => setBulkOp("change_status")} className="inline-flex items-center gap-1.5 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-1.5 font-display text-[11px] font-bold text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)]"><Tag className="h-3 w-3" strokeWidth={1.7} /> Change status</button>
-            <button onClick={() => setBulkOp("reassign")} className="inline-flex items-center gap-1.5 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-1.5 font-display text-[11px] font-bold text-[oklch(76%_0.012_250)] hover:bg-[oklch(24%_0.018_250)]"><Users className="h-3 w-3" strokeWidth={1.7} /> Reassign</button>
-            <button onClick={() => setBulkOp("delete")} className="inline-flex items-center gap-1.5 rounded-lg border border-[oklch(68%_0.21_25/0.4)] bg-[oklch(20%_0.016_250)] px-3 py-1.5 font-display text-[11px] font-bold text-[oklch(68%_0.21_25)] hover:bg-[oklch(68%_0.21_25/0.1)]"><Trash2 className="h-3 w-3" strokeWidth={1.7} /> Delete</button>
-            <button onClick={() => setSelected(new Set())} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-[oklch(58%_0.014_250)] hover:bg-[oklch(20%_0.016_250)]"><X className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
+            <button onClick={() => setBulkOp("change_status")} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-1.5 font-display text-[11px] font-bold text-[var(--shell-text-2)] hover:bg-[var(--shell-3)]"><Tag className="h-3 w-3" strokeWidth={1.7} /> Change status</button>
+            <button onClick={() => setBulkOp("reassign")} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-1.5 font-display text-[11px] font-bold text-[var(--shell-text-2)] hover:bg-[var(--shell-3)]"><Users className="h-3 w-3" strokeWidth={1.7} /> Reassign</button>
+            <button onClick={() => setBulkOp("delete")} className="inline-flex items-center gap-1.5 rounded-lg border border-[oklch(68%_0.21_25/0.4)] bg-[var(--shell-2)] px-3 py-1.5 font-display text-[11px] font-bold text-[oklch(68%_0.21_25)] hover:bg-[oklch(68%_0.21_25/0.1)]"><Trash2 className="h-3 w-3" strokeWidth={1.7} /> Delete</button>
+            <button onClick={() => setSelected(new Set())} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-[var(--shell-text-muted)] hover:bg-[var(--shell-2)]"><X className="h-3.5 w-3.5" strokeWidth={1.7} /></button>
           </div>
         </div>
       )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-[12px]">
-          <thead className="bg-[oklch(20%_0.016_250)] text-[oklch(58%_0.014_250)]">
+          <thead className="bg-[var(--shell-2)] text-[var(--shell-text-muted)]">
             <tr>
               {canBulkEdit && (
                 <th className="px-3 py-2 text-left" style={{ width: 32 }}>
-                  <button onClick={toggleAllVisible} className={`inline-flex h-4 w-4 items-center justify-center rounded border-[1.5px] ${sorted.length > 0 && sorted.every((r) => selected.has(r.id)) ? "border-[oklch(78%_0.155_234)] bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)]" : "border-[oklch(42%_0.014_250)]"}`} aria-label="Select all">
+                  <button onClick={toggleAllVisible} className={`inline-flex h-4 w-4 items-center justify-center rounded border-[1.5px] ${sorted.length > 0 && sorted.every((r) => selected.has(r.id)) ? "border-[oklch(78%_0.155_234)] bg-[oklch(78%_0.155_234)] text-[var(--shell-base)]" : "border-[var(--shell-text-muted)]"}`} aria-label="Select all">
                     {sorted.length > 0 && sorted.every((r) => selected.has(r.id)) && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
                   </button>
                 </th>
@@ -148,10 +148,10 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
             {sorted.map((r) => {
               const on = selected.has(r.id);
               return (
-                <tr key={r.id} className={`border-t border-[oklch(28%_0.02_250/0.55)] ${on ? "bg-[oklch(78%_0.155_234/0.06)]" : "hover:bg-[oklch(20%_0.016_250)]"}`}>
+                <tr key={r.id} className={`border-t border-[var(--shell-border)] ${on ? "bg-[oklch(78%_0.155_234/0.06)]" : "hover:bg-[var(--shell-2)]"}`}>
                   {canBulkEdit && (
                     <td className="px-3 py-2">
-                      <button onClick={() => toggleOne(r.id)} className={`inline-flex h-4 w-4 items-center justify-center rounded border-[1.5px] ${on ? "border-[oklch(78%_0.155_234)] bg-[oklch(78%_0.155_234)] text-[oklch(14%_0.012_250)]" : "border-[oklch(42%_0.014_250)] hover:border-[oklch(78%_0.155_234)]"}`} aria-label={on ? "Deselect" : "Select"}>
+                      <button onClick={() => toggleOne(r.id)} className={`inline-flex h-4 w-4 items-center justify-center rounded border-[1.5px] ${on ? "border-[oklch(78%_0.155_234)] bg-[oklch(78%_0.155_234)] text-[var(--shell-base)]" : "border-[var(--shell-text-muted)] hover:border-[oklch(78%_0.155_234)]"}`} aria-label={on ? "Deselect" : "Select"}>
                         {on && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
                       </button>
                     </td>
@@ -161,15 +161,15 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
                   <td className="px-3 py-2 font-mono text-[11px] tabular-nums">{r.lat.toFixed(5)}, {r.lon.toFixed(5)}</td>
                   <td className="px-3 py-2">
                     {r.matched_response_id
-                      ? <span className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ring-1 ring-white text-[oklch(96%_0.008_250)]">M1</span>
+                      ? <span className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ring-1 ring-white text-[var(--shell-text)]">M1</span>
                       : <span className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ring-2 ring-[#fde047] text-[oklch(82%_0.17_86)]">F1</span>}
                   </td>
-                  <td className="px-3 py-2 font-mono text-[11px] tabular-nums text-[oklch(58%_0.014_250)]">{new Date(r.collected_at).toLocaleString()}</td>
-                  <td className="px-3 py-2 max-w-[300px] truncate text-[oklch(76%_0.012_250)]">{r.notes ?? ""}</td>
+                  <td className="px-3 py-2 font-mono text-[11px] tabular-nums text-[var(--shell-text-muted)]">{new Date(r.collected_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 max-w-[300px] truncate text-[var(--shell-text-2)]">{r.notes ?? ""}</td>
                 </tr>
               );
             })}
-            {!sorted.length && <tr><td colSpan={canBulkEdit ? 7 : 6} className="px-3 py-12 text-center text-[oklch(58%_0.014_250)]">No points {query ? "match your search" : "yet"}.</td></tr>}
+            {!sorted.length && <tr><td colSpan={canBulkEdit ? 7 : 6} className="px-3 py-12 text-center text-[var(--shell-text-muted)]">No points {query ? "match your search" : "yet"}.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -177,7 +177,7 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
       {bulkOp && (
         <div className="fixed inset-0 z-50 grid place-items-center p-6" onClick={() => !busy && setBulkOp(null)}>
           <div className="absolute inset-0 bg-[oklch(0%_0_0/0.55)] backdrop-blur-sm" />
-          <div className="relative w-full max-w-md rounded-2xl border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(17%_0.014_250)] p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-full max-w-md rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)] p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-display text-[15px] font-extrabold">
               {bulkOp === "change_status" && `Change status of ${selected.size} point${selected.size === 1 ? "" : "s"}`}
               {bulkOp === "reassign" && `Reassign ${selected.size} point${selected.size === 1 ? "" : "s"}`}
@@ -187,7 +187,7 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
             {bulkOp === "change_status" && (
               <div className="mt-4 grid grid-cols-2 gap-2">
                 {statuses.map((s) => (
-                  <button key={s.id} disabled={busy} onClick={() => runBulk({ action: "change_status", status_id: s.id })} className="flex items-center gap-2 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5 text-left text-[12px] font-semibold hover:border-[oklch(78%_0.155_234/0.5)]">
+                  <button key={s.id} disabled={busy} onClick={() => runBulk({ action: "change_status", status_id: s.id })} className="flex items-center gap-2 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-2.5 text-left text-[12px] font-semibold hover:border-[oklch(78%_0.155_234/0.5)]">
                     <span className="h-3 w-3 rounded-full" style={{ background: s.color }} />
                     {s.label}
                   </button>
@@ -197,22 +197,22 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
 
             {bulkOp === "reassign" && (
               <div className="mt-4 space-y-2">
-                <button disabled={busy} onClick={() => runBulk({ action: "reassign", collector_id: null })} className="flex w-full items-center gap-2 rounded-lg border border-dashed border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5 text-left text-[12px] font-semibold text-[oklch(58%_0.014_250)]">— Unassigned —</button>
+                <button disabled={busy} onClick={() => runBulk({ action: "reassign", collector_id: null })} className="flex w-full items-center gap-2 rounded-lg border border-dashed border-[var(--shell-border)] bg-[var(--shell-2)] p-2.5 text-left text-[12px] font-semibold text-[var(--shell-text-muted)]">— Unassigned —</button>
                 {members.map((m) => (
-                  <button key={m.user_id} disabled={busy} onClick={() => runBulk({ action: "reassign", collector_id: m.user_id })} className="flex w-full items-center gap-2 rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] p-2.5 text-left text-[12px] font-semibold hover:border-[oklch(78%_0.155_234/0.5)]">
+                  <button key={m.user_id} disabled={busy} onClick={() => runBulk({ action: "reassign", collector_id: m.user_id })} className="flex w-full items-center gap-2 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-2.5 text-left text-[12px] font-semibold hover:border-[oklch(78%_0.155_234/0.5)]">
                     {m.display_name}
                   </button>
                 ))}
-                {members.length === 0 && <p className="text-[11px] text-[oklch(58%_0.014_250)]">No members yet — invite teammates from the Members page first.</p>}
+                {members.length === 0 && <p className="text-[11px] text-[var(--shell-text-muted)]">No members yet — invite teammates from the Members page first.</p>}
               </div>
             )}
 
             {bulkOp === "delete" && (
               <div className="mt-3">
-                <p className="text-[12px] text-[oklch(76%_0.012_250)]">This permanently deletes the selected points and their photos. Type <b className="font-mono">DELETE</b> to confirm.</p>
-                <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="DELETE" className="mt-3 w-full rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 font-mono text-[13px] outline-none focus:border-[oklch(68%_0.21_25/0.5)]" />
+                <p className="text-[12px] text-[var(--shell-text-2)]">This permanently deletes the selected points and their photos. Type <b className="font-mono">DELETE</b> to confirm.</p>
+                <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="DELETE" className="mt-3 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-mono text-[13px] outline-none focus:border-[oklch(68%_0.21_25/0.5)]" />
                 <div className="mt-4 flex justify-end gap-2">
-                  <button disabled={busy} onClick={() => { setBulkOp(null); setConfirmText(""); }} className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 font-display text-[12px] font-bold text-[oklch(76%_0.012_250)]">Cancel</button>
+                  <button disabled={busy} onClick={() => { setBulkOp(null); setConfirmText(""); }} className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-display text-[12px] font-bold text-[var(--shell-text-2)]">Cancel</button>
                   <button disabled={busy || confirmText !== "DELETE"} onClick={() => runBulk({ action: "delete" })} className="inline-flex items-center gap-2 rounded-lg bg-[oklch(68%_0.21_25)] px-3 py-2 font-display text-[12px] font-bold text-white disabled:opacity-50">
                     {busy && <Loader2 className="h-4 w-4 animate-spin" />}
                     Delete {selected.size}
@@ -223,7 +223,7 @@ export function PointsTable({ projectId, rows, canBulkEdit = false, statuses = [
 
             {bulkOp !== "delete" && (
               <div className="mt-4 flex justify-end">
-                <button onClick={() => setBulkOp(null)} className="rounded-lg border border-[oklch(28%_0.02_250/0.55)] bg-[oklch(20%_0.016_250)] px-3 py-2 font-display text-[12px] font-bold text-[oklch(76%_0.012_250)]">Cancel</button>
+                <button onClick={() => setBulkOp(null)} className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-display text-[12px] font-bold text-[var(--shell-text-2)]">Cancel</button>
               </div>
             )}
           </div>
