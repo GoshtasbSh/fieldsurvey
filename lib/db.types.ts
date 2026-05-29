@@ -375,6 +375,95 @@ export type Database = {
           },
         ]
       }
+      parcels: {
+        Row: {
+          address: string | null
+          centroid: unknown
+          county: string | null
+          created_at: string
+          external_id: string | null
+          geometry: unknown
+          id: string
+          parcel_apn: string | null
+          project_id: string
+          source: string
+        }
+        Insert: {
+          address?: string | null
+          centroid: unknown
+          county?: string | null
+          created_at?: string
+          external_id?: string | null
+          geometry: unknown
+          id?: string
+          parcel_apn?: string | null
+          project_id: string
+          source?: string
+        }
+        Update: {
+          address?: string | null
+          centroid?: unknown
+          county?: string | null
+          created_at?: string
+          external_id?: string | null
+          geometry?: unknown
+          id?: string
+          parcel_apn?: string | null
+          project_id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "parcels_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_boundaries: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          geometry: unknown
+          id: string
+          name: string | null
+          project_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          geometry: unknown
+          id?: string
+          name?: string | null
+          project_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          geometry?: unknown
+          id?: string
+          name?: string | null
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_boundaries_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_boundaries_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       points: {
         Row: {
           accuracy_m: number | null
@@ -1054,6 +1143,23 @@ export type Database = {
     }
     Functions: {
       accept_invite: { Args: { p_token: string }; Returns: string }
+      boundaries_geojson: {
+        Args: { p_project: string }
+        Returns: Array<{
+          id: string
+          name: string | null
+          geojson: Json
+          created_at: string
+        }>
+      }
+      find_parcel_for_address: {
+        Args: { p_project: string; p_address: string }
+        Returns: Array<{
+          parcel_id: string
+          centroid_lat: number
+          centroid_lon: number
+        }>
+      }
       is_project_member: { Args: { p_project: string }; Returns: boolean }
       is_public_project: { Args: { p_project: string }; Returns: boolean }
       project_role: { Args: { p_project: string }; Returns: string }
