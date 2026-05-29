@@ -66,33 +66,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     );
   }
 
-  // Insert via a Postgres expression — `ST_Multi(ST_GeomFromGeoJSON(...))`
-  // converts the JSON to PostGIS geometry. We use a single-row RPC-style
-  // INSERT and rely on RLS for the admin gate.
-  const insertSql = `
-    insert into public.project_boundaries (project_id, name, geometry, created_by)
-    select $1::uuid, $2::text, extensions.ST_Multi(extensions.ST_GeomFromGeoJSON($3))::extensions.geometry(MultiPolygon, 4326), $4::uuid
-    returning id, name, created_at
-  `;
-  void insertSql;
-  // Supabase JS doesn't expose raw SQL; instead we send the geometry as a
-  // GeoJSON string via the Postgrest insert and let our SQL helper coerce it.
-  // We accomplish that by writing through a tiny RPC `insert_project_boundary`
-  // — but since the user said "minimum scope", we instead use the supabase
-  // JS client's insert with the GeoJSON-as-text trick: PostGIS accepts a
-  // GeoJSON string into a geometry column via implicit cast on insert IF
-  // the GeoJSON has a `crs` field. To keep this simple and robust, we use
-  // a one-shot helper RPC declared inline below.
-
-  // Instead of inline raw SQL, use a helper RPC that we add via this route's
-  // companion SQL — but we already shipped migration 012 without it. Fall
-  // back to the documented pattern: insert geometry as a GeoJSON string +
-  // explicit cast via PostgREST's `set` API. PostgREST supports geometry
-  // inserts when the column accepts EWKB/EWKT; PostGIS auto-parses a
-  // GeoJSON text via input function when the column type is `geometry`.
-  //
-  // The cleanest reliable approach here is a dedicated RPC. Add it now.
-
+  // Insert via the `insert_project_boundary` helper RPC — it casts the
+  // GeoJSON string to PostGIS geometry server-side. RLS still enforces the
+  // admin gate (SECURITY INVOKER).
   const { data, error } = await sbAny.rpc("insert_project_boundary", {
     p_project: projectId,
     p_name: parsed.data.name ?? null,
@@ -106,26 +82,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
 // ── GeoJSON normalization ──────────────────────────────────────────────────
 
-type AnyGeoJSON = GeoJSON.Polygon | GeoJSON.MultiPolygon | GeoJSON.Feature | GeoJSON.FeatureCollection;
-
 function normalizeToMultiPolygon(input: unknown): GeoJSON.MultiPolygon | null {
   if (!input || typeof input !== "object") return null;
   const obj = input as { type?: string } & Record<string, unknown>;
 
   if (obj.type === "Polygon") {
-    return { type: "MultiPolygon", coordinates: [(obj as GeoJSON.Polygon).coordinates] };
+    const p = obj as unknown as GeoJSON.Polygon;
+    return { type: "MultiPolygon", coordinates: [p.coordinates] };
   }
   if (obj.type === "MultiPolygon") {
-    return { type: "MultiPolygon", coordinates: (obj as GeoJSON.MultiPolygon).coordinates };
+    const mp = obj as unknown as GeoJSON.MultiPolygon;
+    return { type: "MultiPolygon", coordinates: mp.coordinates };
   }
   if (obj.type === "Feature") {
-    return normalizeToMultiPolygon((obj as GeoJSON.Feature).geometry);
+    const f = obj as unknown as GeoJSON.Feature;
+    return normalizeToMultiPolygon(f.geometry);
   }
   if (obj.type === "FeatureCollection") {
-    const fc = obj as GeoJSON.FeatureCollection;
+    const fc = obj as unknown as GeoJSON.FeatureCollection;
     const merged: number[][][][] = [];
     for (const f of fc.features) {
-      const m = normalizeToMultiPolygon(f.geometry as AnyGeoJSON);
+      const m = normalizeToMultiPolygon(f.geometry);
       if (m) merged.push(...m.coordinates);
     }
     return merged.length > 0 ? { type: "MultiPolygon", coordinates: merged } : null;
