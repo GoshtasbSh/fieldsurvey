@@ -400,5 +400,52 @@ export async function refreshProjectCache(
   // Prune old snapshots (keep 50 most recent + daily rollups).
   await sbAny.rpc("prune_analysis_versions", { p_project_id: projectId });
 
+  // M8 — best-effort thumb refresh. Skip when the project already has a
+  // recent (≤7 day) thumb. Failures are swallowed because they shouldn't
+  // block the cache write.
+  try {
+    const { data: proj } = await sbAny
+      .from("projects")
+      .select("center_lat, center_lon, default_zoom, thumb_updated_at")
+      .eq("id", projectId)
+      .maybeSingle() as {
+        data: {
+          center_lat: number;
+          center_lon: number;
+          default_zoom: number | null;
+          thumb_updated_at: string | null;
+        } | null;
+      };
+    if (proj) {
+      const stale =
+        !proj.thumb_updated_at ||
+        Date.now() - new Date(proj.thumb_updated_at).getTime() > 7 * 24 * 3600 * 1000;
+      if (stale) {
+        const { generateProjectThumb } = await import("@/lib/thumb/generate");
+        const thumb = await generateProjectThumb({
+          centerLat: proj.center_lat,
+          centerLon: proj.center_lon,
+          zoom: Math.min(13, Math.max(10, proj.default_zoom ?? 11)),
+        });
+        const path = `${projectId}.png`;
+        const { error: upErr } = await sbAny.storage
+          .from("project-thumbs")
+          .upload(path, thumb.png, {
+            contentType: "image/png",
+            cacheControl: "public, max-age=3600",
+            upsert: true,
+          });
+        if (!upErr) {
+          await sbAny
+            .from("projects")
+            .update({ thumb_path: path, thumb_updated_at: new Date().toISOString() })
+            .eq("id", projectId);
+        }
+      }
+    }
+  } catch {
+    /* thumb refresh is best-effort */
+  }
+
   return { ok: true, projectId, trigger, blobs: sizes, delta };
 }

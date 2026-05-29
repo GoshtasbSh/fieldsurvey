@@ -59,6 +59,7 @@ export function ProjectCard({ card }: { card: HomeCard }) {
             lat={card.center_lat}
             lon={card.center_lon}
             zoom={card.default_zoom ?? 13}
+            thumbUrl={thumbPublicUrl(card.thumb_path)}
           />
         </div>
       </div>
@@ -98,4 +99,17 @@ function Stat({ n, l }: { n: number | string; l: string }) {
       <span className="bento-label">{l}</span>
     </div>
   );
+}
+
+/**
+ * Compose the public Supabase Storage URL for a thumbnail path. The
+ * `project-thumbs` bucket is public-read so no signed URL is needed.
+ * Returns null when no thumb has been generated yet (HomeThumb falls back
+ * to live Leaflet in that case).
+ */
+function thumbPublicUrl(path: string | null): string | null {
+  if (!path) return null;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) return null;
+  return `${base.replace(/\/$/, "")}/storage/v1/object/public/project-thumbs/${path}`;
 }

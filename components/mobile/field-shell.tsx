@@ -52,6 +52,8 @@ type Props = {
   myStats: { today: number; total: number };
   /** True when the project has opted into universe-driven canvassing. */
   canvassMode?: boolean;
+  /** Project boundary polygons (M6). Read-only on mobile. */
+  boundaries?: GeoJSON.FeatureCollection | null;
 };
 
 export function MobileFieldShell({
@@ -66,6 +68,7 @@ export function MobileFieldShell({
   features,
   myStats,
   canvassMode = false,
+  boundaries = null,
 }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<"map" | "team" | "more" | "universe">("map");
@@ -162,6 +165,7 @@ export function MobileFieldShell({
               onSelect={setSelectedPointId}
               basemap={basemap}
               placingMode={placingMode}
+              boundaries={boundaries}
               onPlace={(c) => {
                 setPlacingMode(false);
                 setPlaceCoords(c);

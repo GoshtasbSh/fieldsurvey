@@ -807,6 +807,8 @@ export type Database = {
           id: string
           name: string
           owner_id: string
+          thumb_path: string | null
+          thumb_updated_at: string | null
           updated_at: string
           visibility: string
         }
@@ -820,6 +822,8 @@ export type Database = {
           id?: string
           name: string
           owner_id: string
+          thumb_path?: string | null
+          thumb_updated_at?: string | null
           updated_at?: string
           visibility?: string
         }
@@ -833,6 +837,8 @@ export type Database = {
           id?: string
           name?: string
           owner_id?: string
+          thumb_path?: string | null
+          thumb_updated_at?: string | null
           updated_at?: string
           visibility?: string
         }
@@ -1159,6 +1165,18 @@ export type Database = {
           centroid_lat: number
           centroid_lon: number
         }>
+      }
+      insert_project_boundary: {
+        Args: { p_project: string; p_name: string | null; p_geojson: string }
+        Returns: Array<{
+          id: string
+          name: string | null
+          created_at: string
+        }>
+      }
+      insert_parcels_batch: {
+        Args: { p_project: string; p_rows: Json }
+        Returns: number
       }
       is_project_member: { Args: { p_project: string }; Returns: boolean }
       is_public_project: { Args: { p_project: string }; Returns: boolean }

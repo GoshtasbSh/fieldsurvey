@@ -5,11 +5,54 @@ import { listChatMessages, listProjectMembers } from "@/lib/queries/chat";
 import { getProjectCaps } from "@/lib/queries/caps";
 import { readCachedBlobs } from "@/lib/cache/read";
 import { getCanvassCompletion } from "@/lib/queries/universe";
+import { listProjectBoundaries, boundariesAsFeatureCollection } from "@/lib/queries/parcels";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { MapShell } from "@/components/desktop/map-shell";
 import { RealtimeWatcher } from "@/components/realtime-watcher";
-import type { CanvassBlob } from "@/components/desktop/right-rail";
+import type {
+  CanvassBlob,
+  DailyBucket,
+  CoverageMetrics,
+} from "@/components/desktop/right-rail";
+import type { MatchStatusCounts } from "@/lib/match/status";
+import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
 import { notFound } from "next/navigation";
+
+/**
+ * Cache content-swap (M4 deferred → shipped in M6+).
+ *
+ * `pulse_blob` and `analyze_blob` are written by the refresh worker every
+ * time the cache rolls forward. When the cached payload is fresh enough
+ * we use it directly instead of running the raw queries; when stale (or
+ * absent) we fall back to the raw values that already came back from the
+ * parallel fetches above.
+ *
+ * 15 minutes is generous — the typical refresh cadence is a few minutes
+ * and the badge in the topbar shows the actual age so the operator can
+ * see when they're reading from the cache.
+ */
+const CACHE_FRESH_S = 15 * 60;
+
+type PulseBlobPayload = {
+  pointsTotal: number;
+  todayDelta: number;
+  matchCounts: MatchStatusCounts;
+  daily: DailyBucket[];
+};
+
+type AnalyzeBlobPayload = {
+  matchCounts: MatchStatusCounts;
+  hourly: HourBucket[];
+  dow: DowBucket[];
+  coverage: CoverageMetrics;
+};
+
+function preferFresh<T>(
+  blob: { payload: unknown; age_seconds: number } | undefined,
+): T | null {
+  if (!blob || blob.age_seconds >= CACHE_FRESH_S) return null;
+  return blob.payload as T;
+}
 
 export default async function DesktopMapPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
@@ -54,6 +97,12 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
     readCachedBlobs(projectId, ["pulse_blob", "analyze_blob", "match_status_blob", "canvass_blob"]),
   ]);
 
+  // M6 — boundary overlay. Empty FeatureCollection when project has none.
+  const boundaryRows = await listProjectBoundaries(projectId);
+  const boundaries = boundaryRows.length > 0
+    ? boundariesAsFeatureCollection(boundaryRows)
+    : null;
+
   // canvass_blob → prefer cached payload when fresh, else compute from
   // survey_universe directly. Disabled rows render no UI (right-rail checks
   // `enabled`), so we only invoke the raw query when canvass_mode is on.
@@ -91,9 +140,22 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
     ? cacheStamps.sort().reverse()[0]
     : null;
 
-  const pointsTotal = (matchCounts.total_with_status ?? 0) + (matchCounts.r1_count ?? 0);
+  // Cache content-swap. Pull fresh cached payloads; fall back to raw.
+  // surveyors stays raw because the analyze_blob version lacks display names.
+  const pulse = preferFresh<PulseBlobPayload>(cacheBlobs.pulse_blob);
+  const analyze = preferFresh<AnalyzeBlobPayload>(cacheBlobs.analyze_blob);
+
+  const rawPointsTotal = (matchCounts.total_with_status ?? 0) + (matchCounts.r1_count ?? 0);
   const today = new Date().toISOString().slice(0, 10);
-  const todayDelta = daily.find((d) => d.day === today)?.total ?? 0;
+  const rawTodayDelta = daily.find((d) => d.day === today)?.total ?? 0;
+
+  const usedPointsTotal = pulse?.pointsTotal ?? rawPointsTotal;
+  const usedTodayDelta = pulse?.todayDelta ?? rawTodayDelta;
+  const usedMatchCounts = pulse?.matchCounts ?? analyze?.matchCounts ?? matchCounts;
+  const usedDaily = pulse?.daily ?? daily;
+  const usedHourly = analyze?.hourly ?? hourly;
+  const usedDow = analyze?.dow ?? dow;
+  const usedCoverage = analyze?.coverage ?? coverage;
 
   return (
     <>
@@ -104,20 +166,26 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
         currentUser={currentUser}
         center={{ lat: res.project.center_lat, lon: res.project.center_lon, zoom: res.project.default_zoom ?? 14 }}
         statuses={statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, icon: s.icon ?? null, count: s.count, pct: s.pct }))}
-        matchCounts={{ m1_count: matchCounts.m1_count ?? 0, f1_count: matchCounts.f1_count ?? 0, r1_count: matchCounts.r1_count ?? 0, total_with_status: matchCounts.total_with_status ?? 0 }}
+        matchCounts={{
+          m1_count: usedMatchCounts.m1_count ?? 0,
+          f1_count: usedMatchCounts.f1_count ?? 0,
+          r1_count: usedMatchCounts.r1_count ?? 0,
+          total_with_status: usedMatchCounts.total_with_status ?? 0,
+        }}
         features={features}
-        pointsTotal={pointsTotal}
-        todayDelta={todayDelta}
-        daily={daily}
-        hourly={hourly}
-        dow={dow}
+        pointsTotal={usedPointsTotal}
+        todayDelta={usedTodayDelta}
+        daily={usedDaily}
+        hourly={usedHourly}
+        dow={usedDow}
         surveyors={surveyors}
-        coverage={coverage}
+        coverage={usedCoverage}
         chatMembers={chatMembers}
         initialChat={initialChat}
         caps={caps}
         cachedAt={cachedAt}
         canvass={canvass}
+        boundaries={boundaries}
       />
       <RealtimeWatcher projectId={projectId} />
     </>

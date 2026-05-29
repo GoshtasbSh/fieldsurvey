@@ -5,6 +5,8 @@ import { VisibilityToggle } from "@/components/desktop/visibility-toggle";
 import { RecipientsAdmin } from "@/components/desktop/recipients-admin";
 import { GuestCodesAdmin } from "@/components/desktop/guest-codes-admin";
 import { UniverseUploader } from "@/components/desktop/universe-uploader";
+import { BoundaryAdmin } from "@/components/desktop/boundary-admin";
+import { ParcelAdmin } from "@/components/desktop/parcel-admin";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
@@ -78,6 +80,14 @@ export default async function SettingsPage({
 
       <section className="bento-panel p-5">
         <UniverseUploader projectId={projectId} initialCanvassMode={canvassMode} />
+      </section>
+
+      <section className="bento-panel p-5">
+        <BoundaryAdmin projectId={projectId} />
+      </section>
+
+      <section className="bento-panel p-5">
+        <ParcelAdmin projectId={projectId} />
       </section>
     </main>
   );

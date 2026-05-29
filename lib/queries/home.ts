@@ -25,6 +25,8 @@ export type HomeCard = {
   last_activity_at: string | null;
   last_actor_name: string | null;
   status: "active" | "setup_incomplete" | "archived";
+  /** Server-rendered static thumb (M8). When null, /home falls back to live Leaflet. */
+  thumb_path: string | null;
 };
 
 type ProjectRow = {
@@ -38,6 +40,7 @@ type ProjectRow = {
   visibility: string;
   archived: boolean;
   created_at: string;
+  thumb_path: string | null;
   project_members: Array<{ role: string }>;
 };
 
@@ -76,7 +79,7 @@ export async function listHomeCards(): Promise<{
   const { data: projRaw } = await sbAny
     .from("projects")
     .select(
-      "id, name, description, owner_id, center_lat, center_lon, default_zoom, visibility, archived, created_at, project_members!inner(role)",
+      "id, name, description, owner_id, center_lat, center_lon, default_zoom, visibility, archived, created_at, thumb_path, project_members!inner(role)",
     )
     .eq("archived", false)
     .order("updated_at", { ascending: false });
@@ -146,6 +149,7 @@ export async function listHomeCards(): Promise<{
       last_activity_at: latestPoint?.updated_at ?? null,
       last_actor_name: lastActorName,
       status,
+      thumb_path: r.thumb_path,
     };
   });
 

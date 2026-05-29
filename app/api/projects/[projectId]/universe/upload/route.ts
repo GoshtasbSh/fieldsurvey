@@ -15,6 +15,7 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { snapAddressToParcel } from "@/lib/queries/parcels";
 
 const BATCH = 200;
 const MAX_ROWS = 50_000;
@@ -62,19 +63,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
   const inserts: UniverseInsert[] = [];
   let skipped = 0;
+  let snapped = 0;
   for (const r of parsed.rows) {
     const address = (r.address ?? "").trim();
     if (!address) {
       skipped++;
       continue;
     }
-    const lat = numOrNull(r.lat);
-    const lon = numOrNull(r.lon);
+    const rawLat = numOrNull(r.lat);
+    const rawLon = numOrNull(r.lon);
+    let lat = rawLat !== null && rawLat >= -90 && rawLat <= 90 ? rawLat : null;
+    let lon = rawLon !== null && rawLon >= -180 && rawLon <= 180 ? rawLon : null;
+
+    // M6 — snap to parcel centroid when row has no coords. Sequential rather
+    // than parallel because most universes are < 5k rows and we'd rather
+    // keep Postgres happy than save a few seconds.
+    if (lat === null || lon === null) {
+      const hit = await snapAddressToParcel({ projectId, address, client: "user" });
+      if (hit) {
+        lat = hit.lat;
+        lon = hit.lon;
+        snapped++;
+      }
+    }
+
     inserts.push({
       project_id: projectId,
       address,
-      lat: lat !== null && lat >= -90 && lat <= 90 ? lat : null,
-      lon: lon !== null && lon >= -180 && lon <= 180 ? lon : null,
+      lat,
+      lon,
       external_id: (r.external_id ?? "").trim() || null,
     });
   }
@@ -93,7 +110,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     }
   }
 
-  return NextResponse.json({ inserted, skipped, errors });
+  return NextResponse.json({ inserted, skipped, snapped, errors });
 }
 
 // ── CSV parser (RFC 4180-ish, header-row required) ─────────────────────────

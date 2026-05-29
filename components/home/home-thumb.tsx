@@ -1,8 +1,14 @@
 "use client";
 
 /**
- * Lazy-initialised Leaflet thumbnail for a single project card on /home.
- * Uses IntersectionObserver so off-screen cards do not boot a map.
+ * Project card thumbnail for /home.
+ *
+ * When the server has pre-rendered a static PNG (`thumb_path` set), render
+ * an <img> straight from the public `project-thumbs` bucket — no Leaflet,
+ * no IntersectionObserver, no client-side tile fetching.
+ *
+ * When no static thumb exists yet, fall back to the existing lazy-Leaflet
+ * path so /home stays usable while the thumb-refresh pipeline catches up.
  * Tile source = Carto Dark Matter (OSM-derived; no API key).
  */
 
@@ -14,9 +20,41 @@ type Props = {
   lon: number;
   zoom?: number;
   basemap?: "dark" | "satellite";
+  /** Static thumb URL (publicly readable Storage object). When present, used directly. */
+  thumbUrl?: string | null;
 };
 
-export function HomeThumb({ lat, lon, zoom = 13, basemap = "dark" }: Props) {
+export function HomeThumb({ lat, lon, zoom = 13, basemap = "dark", thumbUrl }: Props) {
+  const [staticErrored, setStaticErrored] = useState(false);
+
+  // Static path: render `<img>` straight from the public bucket.
+  if (thumbUrl && !staticErrored) {
+    return (
+      <img
+        src={thumbUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-full w-full object-cover"
+        onError={() => setStaticErrored(true)}
+      />
+    );
+  }
+
+  return <LeafletThumb lat={lat} lon={lon} zoom={zoom} basemap={basemap} />;
+}
+
+function LeafletThumb({
+  lat,
+  lon,
+  zoom,
+  basemap,
+}: {
+  lat: number;
+  lon: number;
+  zoom: number;
+  basemap: "dark" | "satellite";
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const [visible, setVisible] = useState(false);

@@ -1,6 +1,7 @@
 import { getProjectForUser } from "@/lib/queries/project";
 import { getStatusBreakdown, getMatchStatusFeatures } from "@/lib/queries/points";
 import { listChatMessages, listProjectMembers } from "@/lib/queries/chat";
+import { listProjectBoundaries, boundariesAsFeatureCollection } from "@/lib/queries/parcels";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { MobileFieldShell } from "@/components/mobile/field-shell";
 import { notFound } from "next/navigation";
@@ -33,7 +34,7 @@ export default async function MobileFieldPage({ params }: { params: Promise<{ pr
     };
   }
 
-  const [statuses, allFeatures, chatMembers, initialChat, settingsRow] = await Promise.all([
+  const [statuses, allFeatures, chatMembers, initialChat, settingsRow, boundaryRows] = await Promise.all([
     getStatusBreakdown(projectId),
     getMatchStatusFeatures(projectId),
     listProjectMembers(projectId),
@@ -43,8 +44,10 @@ export default async function MobileFieldPage({ params }: { params: Promise<{ pr
       .select("canvass_mode")
       .eq("project_id", projectId)
       .maybeSingle() as Promise<{ data: { canvass_mode: boolean } | null }>,
+    listProjectBoundaries(projectId),
   ]);
   const canvassMode = Boolean(settingsRow.data?.canvass_mode);
+  const boundaries = boundaryRows.length > 0 ? boundariesAsFeatureCollection(boundaryRows) : null;
 
   // Mobile scope: field points only (point_id is set on field rows; null on R1),
   // and strip match_status so the M1/F1 ring symbology doesn't render.
@@ -78,6 +81,7 @@ export default async function MobileFieldPage({ params }: { params: Promise<{ pr
       features={safeFeatures}
       myStats={{ today: myToday, total: myTotal }}
       canvassMode={canvassMode}
+      boundaries={boundaries}
     />
   );
 }

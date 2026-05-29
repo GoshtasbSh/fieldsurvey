@@ -48,11 +48,13 @@ type Props = {
   onPlace?: (lngLat: { lat: number; lon: number }) => void;
   /** Per-status paint overrides (Q4 locked). */
   symbology?: SymbologyMap;
+  /** Optional project-boundary polygons (M6). Rendered under the points. */
+  boundaries?: GeoJSON.FeatureCollection | null;
 };
 
 const SYMB_DEFAULTS = { size: 8, fill_opacity: 0.85, outline_px: 1.5 };
 
-const DEFAULT_LAYERS: LayerVisibility = { points: true, heatmap: false, clusters: false, boundary: false };
+const DEFAULT_LAYERS: LayerVisibility = { points: true, heatmap: false, clusters: false, boundary: true };
 
 const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
   satellite: "bm-satellite",
@@ -123,6 +125,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     placingMode = false,
     onPlace,
     symbology,
+    boundaries,
   },
   ref,
 ) {
@@ -170,6 +173,35 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
     map.on("load", () => {
+      // ── Project-boundary source + layers (M6). Rendered first so points
+      // and clusters sit on top. Empty FeatureCollection when none exist.
+      map.addSource("ms-boundaries", {
+        type: "geojson",
+        data: boundaries ?? { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "ms-boundary-fill",
+        type: "fill",
+        source: "ms-boundaries",
+        layout: { visibility: layers.boundary === false ? "none" : "visible" },
+        paint: {
+          "fill-color": "oklch(78% 0.155 234)",
+          "fill-opacity": 0.06,
+        },
+      });
+      map.addLayer({
+        id: "ms-boundary-line",
+        type: "line",
+        source: "ms-boundaries",
+        layout: { visibility: layers.boundary === false ? "none" : "visible" },
+        paint: {
+          "line-color": "oklch(78% 0.155 234)",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 14, 2.2, 18, 3],
+          "line-opacity": 0.9,
+          "line-dasharray": [3, 2],
+        },
+      });
+
       // Un-clustered source — feeds the heatmap and the per-point circles
       map.addSource("ms-points", { type: "geojson", data: fcRaw });
       // Clustered source — same data, different config
@@ -412,6 +444,14 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     (map.getSource("ms-points-clustered") as GeoJSONSource | undefined)?.setData(fcRaw);
   }, [fcRaw]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    (map.getSource("ms-boundaries") as GeoJSONSource | undefined)?.setData(
+      boundaries ?? { type: "FeatureCollection", features: [] },
+    );
+  }, [boundaries]);
+
   // ── Symbology overrides → dynamic paint (Q4 locked). ─────────────────────
   // Each per-status override yields a `match` expression on `status_id`,
   // falling through to the existing default paint for un-overridden statuses.
@@ -547,6 +587,8 @@ function applyLayerVisibility(map: Map, layers: LayerVisibility) {
   setVis("ms-cluster-bubble", layers.clusters);
   setVis("ms-cluster-count", layers.clusters);
   setVis("ms-cluster-singleton", layers.clusters);
+  setVis("ms-boundary-fill", layers.boundary !== false);
+  setVis("ms-boundary-line", layers.boundary !== false);
 }
 
 function toGeoJSON(features: MatchStatusRow[], statusColors: StatusColorMap): GeoJSON.FeatureCollection {

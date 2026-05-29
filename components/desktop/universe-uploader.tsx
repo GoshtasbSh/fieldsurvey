@@ -91,6 +91,7 @@ export function UniverseUploader({
       } else {
         const parts: string[] = [];
         if (body.inserted) parts.push(`${body.inserted} addresses imported`);
+        if (body.snapped) parts.push(`${body.snapped} snapped to parcels`);
         if (body.skipped) parts.push(`${body.skipped} skipped (blank address)`);
         if (Array.isArray(body.errors) && body.errors.length) {
           parts.push(`${body.errors.length} batches errored`);

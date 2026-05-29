@@ -54,6 +54,8 @@ type Props = {
   cachedAt?: string | null;
   /** Cached canvass blob; passed through to Pulse tab when enabled. */
   canvass?: CanvassBlob | null;
+  /** Project boundaries as a single FeatureCollection (M6). */
+  boundaries?: GeoJSON.FeatureCollection | null;
 };
 
 export function MapShell(props: Props) {
@@ -227,6 +229,7 @@ export function MapShell(props: Props) {
             placingMode={placingMode}
             onPlace={handleMapPlace}
             symbology={symbology}
+            boundaries={props.boundaries ?? null}
           />
 
           <CommandCapsule
