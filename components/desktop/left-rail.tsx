@@ -20,7 +20,6 @@ import type { MatchStatusCounts, MatchStatus } from "@/lib/match/status";
 import {
   SymbologyEditor,
   type SymbologyMap,
-  type SymbologyOverride,
 } from "@/components/desktop/symbology-editor";
 
 export type StatusRow = {

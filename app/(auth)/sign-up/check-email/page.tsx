@@ -20,7 +20,7 @@ export default function CheckEmailPage() {
             <Mail size={26} />
           </div>
           <p className="text-[14px] leading-relaxed text-[var(--bento-ink-2)]">
-            We sent a confirmation link to your inbox. Click it to finish signing up and we'll
+            We sent a confirmation link to your inbox. Click it to finish signing up and we&apos;ll
             drop you straight into your project list.
           </p>
         </div>

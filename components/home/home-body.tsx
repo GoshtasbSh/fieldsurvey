@@ -32,7 +32,7 @@ export function HomeBody({ owned, shared, drafts }: Props) {
           </div>
           {owned.length === 0 ? (
             <p className="mb-10 text-[13px] text-[var(--bento-ink-3)]">
-              You don't own any projects yet.
+              You don&apos;t own any projects yet.
             </p>
           ) : view === "grid" ? (
             <div className="mb-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

@@ -30,7 +30,6 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { sendEmail } from "@/lib/email";
 import { signForWeeklyExport } from "@/lib/storage/signed-urls";
 
 // DB-side throttle. profiles.last_export_at is persistent so concurrent
