@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { DesktopTopbar } from "@/components/desktop/topbar";
 import { DesktopLeftRail, useLeftRailState, type StatusRow } from "@/components/desktop/left-rail";
-import { DesktopRightRail, type DailyBucket, type SurveyorBrief, type CoverageMetrics, type ChatMember } from "@/components/desktop/right-rail";
+import type { SymbologyMap } from "@/components/desktop/symbology-editor";
+import {
+  RestoredViewProvider,
+  RestoredViewBanner,
+} from "@/components/desktop/history-dropdown";
+import { DesktopRightRail, type DailyBucket, type SurveyorBrief, type CoverageMetrics, type ChatMember, type CanvassBlob } from "@/components/desktop/right-rail";
 import { CommandCapsule, ActiveFiltersStrip, MapLegend, MapControls, AddFab, SyncPill, BasemapSwitcher, PlaceHintBanner } from "@/components/desktop/map-overlays";
 import { DesktopAddModal } from "@/components/desktop/add-modal";
 import { CapBanner } from "@/components/desktop/cap-banner";
@@ -45,6 +50,10 @@ type Props = {
   chatMembers?: ChatMember[];
   initialChat?: ChatMessage[];
   caps?: CapStatus | null;
+  /** ISO timestamp of the freshest dashboard_cache row; null when no cache exists. */
+  cachedAt?: string | null;
+  /** Cached canvass blob; passed through to Pulse tab when enabled. */
+  canvass?: CanvassBlob | null;
 };
 
 export function MapShell(props: Props) {
@@ -57,6 +66,33 @@ export function MapShell(props: Props) {
   const [basemap, setBasemap] = useState<BasemapKey>("satellite");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [symbology, setSymbology] = useState<SymbologyMap>({});
+
+  // Load saved symbology once on mount; sliders patch via their own endpoint.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${props.projectId}/symbology`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.overrides) return;
+        setSymbology(j.overrides as SymbologyMap);
+      })
+      .catch(() => { /* leave defaults */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.projectId]);
+
+  // Role-derived capability flags. See lib/auth/role.ts for full matrix.
+  const role = (props.currentUser?.role ?? null) as
+    | "owner"
+    | "admin"
+    | "surveyor"
+    | "viewer"
+    | null;
+  const canEditSymbology = role === "owner" || role === "admin" || role === "surveyor";
+  const canEditPoints = role === "owner" || role === "admin" || role === "surveyor";
+  const canImport = role === "owner" || role === "admin";
 
   // Ref forwarded into MaplibreMap so MapControls can call zoom/locate
   const mapHandleRef = useRef<MapHandle | null>(null);
@@ -125,14 +161,16 @@ export function MapShell(props: Props) {
   );
 
   return (
-    <>
+    <RestoredViewProvider>
       <DesktopTopbar
         projectName={props.projectName}
         projectId={props.projectId}
         scope="all"
         liveCount={props.surveyors?.length ?? 0}
         user={props.currentUser ?? null}
+        cachedAt={props.cachedAt ?? null}
       />
+      <RestoredViewBanner />
       <CapBanner caps={props.caps ?? null} />
 
       <div
@@ -167,6 +205,9 @@ export function MapShell(props: Props) {
             setLayers={left.setLayers}
             dateRange={left.dateRange}
             setDateRange={left.setDateRange}
+            symbology={symbology}
+            setSymbology={setSymbology}
+            canEditSymbology={canEditSymbology}
             onCollapse={() => setLeftOpen(false)}
           />
         </div>
@@ -185,11 +226,14 @@ export function MapShell(props: Props) {
             basemap={basemap}
             placingMode={placingMode}
             onPlace={handleMapPlace}
+            symbology={symbology}
           />
 
           <CommandCapsule
             onAdd={handleStartPlace}
             onImport={() => router.push(`/p/${props.projectId}/import`)}
+            canEdit={canEditPoints}
+            canImport={canImport}
           />
           <PlaceHintBanner visible={placingMode} onCancel={() => setPlacingMode(false)} />
           <ActiveFiltersStrip
@@ -214,19 +258,22 @@ export function MapShell(props: Props) {
           />
           <BasemapSwitcher value={basemap} onChange={setBasemap} />
           <SyncPill lastSyncSeconds={4} refId={selectedId ?? undefined} />
-          <AddFab
-            onClick={() => (placingMode ? setPlacingMode(false) : handleStartPlace())}
-            active={placingMode}
-          />
+          {canEditPoints && (
+            <AddFab
+              onClick={() => (placingMode ? setPlacingMode(false) : handleStartPlace())}
+              active={placingMode}
+            />
+          )}
 
           {/* Left panel re-open button */}
           {!leftOpen && (
             <button
               onClick={() => setLeftOpen(true)}
-              className="absolute left-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--shell-border)] bg-[var(--shell-base-alpha-86)] text-[var(--shell-text-2)] shadow-lg backdrop-blur-[16px] transition hover:border-[oklch(78%_0.155_234/0.4)] hover:text-[oklch(78%_0.155_234)]"
+              className="bento-focus absolute left-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-[var(--bento-rule)] bg-[var(--shell-base-alpha-86)] text-[var(--bento-ink-2)] backdrop-blur-[16px] transition hover:text-[var(--bento-accent)]"
+              style={{ boxShadow: "var(--bento-shadow-md)" }}
               aria-label="Open left panel"
             >
-              <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
+              <ChevronRight className="h-4 w-4" strokeWidth={1.8} />
             </button>
           )}
 
@@ -234,10 +281,11 @@ export function MapShell(props: Props) {
           {!rightOpen && (
             <button
               onClick={() => setRightOpen(true)}
-              className="absolute right-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--shell-border)] bg-[var(--shell-base-alpha-86)] text-[var(--shell-text-2)] shadow-lg backdrop-blur-[16px] transition hover:border-[oklch(78%_0.155_234/0.4)] hover:text-[oklch(78%_0.155_234)]"
+              className="bento-focus absolute right-3 top-1/2 z-30 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-[var(--bento-rule)] bg-[var(--shell-base-alpha-86)] text-[var(--bento-ink-2)] backdrop-blur-[16px] transition hover:text-[var(--bento-accent)]"
+              style={{ boxShadow: "var(--bento-shadow-md)" }}
               aria-label="Open right panel"
             >
-              <ChevronLeft className="h-4 w-4" strokeWidth={1.7} />
+              <ChevronLeft className="h-4 w-4" strokeWidth={1.8} />
             </button>
           )}
         </div>
@@ -258,6 +306,8 @@ export function MapShell(props: Props) {
             coverage={props.coverage}
             chatMembers={props.chatMembers}
             initialChat={props.initialChat}
+            canWriteChat={canEditPoints}
+            canvass={props.canvass ?? null}
             onCollapse={() => setRightOpen(false)}
           />
         </div>
@@ -271,6 +321,6 @@ export function MapShell(props: Props) {
         onClose={handleAddClose}
         onSaved={() => { handleAddClose(); router.refresh(); }}
       />
-    </>
+    </RestoredViewProvider>
   );
 }

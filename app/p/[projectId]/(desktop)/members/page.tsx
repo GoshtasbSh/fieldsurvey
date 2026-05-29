@@ -1,22 +1,15 @@
 import { notFound } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MembersList, type MemberRow } from "@/components/members/members-list";
 import {
   inviteMemberAction,
   revokeInviteAction,
   removeMemberAction,
   changeMemberRoleAction,
 } from "./actions";
-
-type MemberRow = {
-  user_id: string;
-  role: string;
-  joined_at: string;
-  profiles: { email: string | null; display_name: string | null; avatar_url: string | null } | null;
-};
 
 type InviteRow = {
   id: string;
@@ -28,11 +21,11 @@ type InviteRow = {
 
 type MeRow = { role: string } | null;
 
-const ROLE_BADGE: Record<string, string> = {
-  owner: "bg-[oklch(78%_0.155_234/0.16)] text-[oklch(78%_0.155_234)] border-[oklch(78%_0.155_234/0.4)]",
-  admin: "bg-[oklch(72%_0.18_305/0.16)] text-[oklch(72%_0.18_305)] border-[oklch(72%_0.18_305/0.4)]",
-  surveyor: "bg-[oklch(76%_0.16_158/0.16)] text-[oklch(76%_0.16_158)] border-[oklch(76%_0.16_158/0.4)]",
-  viewer: "bg-secondary text-secondary-foreground border-border",
+const ROLE_BADGE: Record<string, { bg: string; color: string }> = {
+  owner: { bg: "var(--bento-accent-soft)", color: "var(--bento-accent)" },
+  admin: { bg: "var(--bento-magenta-soft)", color: "var(--bento-magenta)" },
+  surveyor: { bg: "var(--bento-success-soft)", color: "var(--bento-success)" },
+  viewer: { bg: "var(--bento-surface-2)", color: "var(--bento-ink-2)" },
 };
 
 export default async function MembersPage({
@@ -71,152 +64,153 @@ export default async function MembersPage({
   const me = meRaw as MeRow;
   const canManage = me?.role === "owner" || me?.role === "admin";
 
+  // Pre-render per-row server-action forms; the client component embeds them.
+  const rowActions: Record<string, React.ReactNode> = {};
+  for (const m of mems) {
+    const isMe = m.user_id === user.id;
+    const isOwner = m.role === "owner";
+    const canEditThis = canManage && !isMe && !isOwner;
+    const badge = ROLE_BADGE[m.role] ?? ROLE_BADGE.viewer;
+    rowActions[m.user_id] = (
+      <>
+        {canEditThis ? (
+          <form
+            action={async (fd) => {
+              "use server";
+              await changeMemberRoleAction(projectId, fd);
+            }}
+            className="flex items-center gap-2"
+          >
+            <input type="hidden" name="userId" value={m.user_id} />
+            <select
+              name="role"
+              defaultValue={m.role}
+              className="h-8 rounded-[10px] border border-[var(--bento-rule)] bg-[var(--bento-surface)] px-2 text-xs text-[var(--bento-ink-1)]"
+            >
+              <option value="admin">Admin</option>
+              <option value="surveyor">Surveyor</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            <Button type="submit" size="sm" variant="outline">
+              Save
+            </Button>
+          </form>
+        ) : (
+          <span
+            className="rounded-full border border-transparent px-2.5 py-0.5 text-[11px] font-semibold"
+            style={{ background: badge.bg, color: badge.color }}
+          >
+            {m.role}
+          </span>
+        )}
+        {canEditThis && (
+          <form
+            action={async () => {
+              "use server";
+              await removeMemberAction(projectId, m.user_id);
+            }}
+          >
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              className="text-[var(--bento-danger)] hover:bg-[var(--bento-danger-soft)]"
+            >
+              Remove
+            </Button>
+          </form>
+        )}
+      </>
+    );
+  }
+
   return (
-    <main className="mx-auto max-w-3xl p-6">
+    <main className="mx-auto max-w-3xl space-y-6 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold">Members</h1>
-        <span className="rounded-full border border-border bg-secondary px-3 py-1 text-xs font-semibold text-muted-foreground">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-[var(--bento-ink-1)]">
+            Members
+          </h1>
+          <p className="mt-1 text-[12px] text-[var(--bento-ink-3)]">
+            Online indicator is live from the project presence channel.
+          </p>
+        </div>
+        <span className="bento-chip">
           {mems.length} member{mems.length === 1 ? "" : "s"}
         </span>
       </div>
 
       {canManage && (
-        <Card className="mt-6">
-          <CardHeader>
-            <h2 className="font-display text-lg font-bold">Invite member</h2>
-            <p className="text-sm text-muted-foreground">
-              They&apos;ll get an email with a one-time link to join this project.
-            </p>
-          </CardHeader>
+        <div className="bento-panel p-5">
+          <h2 className="font-display text-lg font-bold text-[var(--bento-ink-1)]">
+            Invite member
+          </h2>
+          <p className="mt-1 text-sm text-[var(--bento-ink-3)]">
+            They&apos;ll get an email with a one-time link to join this project.
+          </p>
           <form
             action={async (fd) => {
               "use server";
               await inviteMemberAction(projectId, fd);
             }}
+            className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
           >
-            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1 space-y-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="role">Role</Label>
-                <select
-                  id="role"
-                  name="role"
-                  defaultValue="surveyor"
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
-                >
-                  <option value="admin">Admin</option>
-                  <option value="surveyor">Surveyor</option>
-                  <option value="viewer">Viewer</option>
-                </select>
-              </div>
-              <Button type="submit">Send invite</Button>
-            </CardContent>
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" name="email" type="email" required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="role">Role</Label>
+              <select
+                id="role"
+                name="role"
+                defaultValue="surveyor"
+                className="h-9 rounded-[10px] border border-[var(--bento-rule)] bg-[var(--bento-surface)] px-3 text-sm text-[var(--bento-ink-1)]"
+              >
+                <option value="admin">Admin</option>
+                <option value="surveyor">Surveyor</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            </div>
+            <Button type="submit">Send invite</Button>
           </form>
-        </Card>
+        </div>
       )}
 
-      <section className="mt-8 space-y-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Members
-        </h2>
-        {mems.map((m) => {
-          const isMe = m.user_id === user.id;
-          const isOwner = m.role === "owner";
-          const canEditThis = canManage && !isMe && !isOwner;
-          return (
-            <Card key={m.user_id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <div className="truncate font-medium">
-                    {m.profiles?.display_name || m.profiles?.email}
-                    {isMe && (
-                      <span className="ml-2 rounded-full bg-secondary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        you
-                      </span>
-                    )}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">{m.profiles?.email}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {canEditThis ? (
-                    <form
-                      action={async (fd) => {
-                        "use server";
-                        await changeMemberRoleAction(projectId, fd);
-                      }}
-                      className="flex items-center gap-2"
-                    >
-                      <input type="hidden" name="userId" value={m.user_id} />
-                      <select
-                        name="role"
-                        defaultValue={m.role}
-                        className="h-8 rounded-md border bg-background px-2 text-xs"
-                      >
-                        <option value="admin">Admin</option>
-                        <option value="surveyor">Surveyor</option>
-                        <option value="viewer">Viewer</option>
-                      </select>
-                      <Button type="submit" size="sm" variant="outline">
-                        Save
-                      </Button>
-                    </form>
-                  ) : (
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                        ROLE_BADGE[m.role] ?? "bg-secondary text-secondary-foreground border-border"
-                      }`}
-                    >
-                      {m.role}
-                    </span>
-                  )}
-                  {canEditThis && (
-                    <form
-                      action={async () => {
-                        "use server";
-                        await removeMemberAction(projectId, m.user_id);
-                      }}
-                    >
-                      <Button type="submit" size="sm" variant="outline" className="text-destructive hover:bg-destructive/10">
-                        Remove
-                      </Button>
-                    </form>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+      <section className="space-y-2">
+        <h2 className="bento-label">Members</h2>
+        <MembersList
+          projectId={projectId}
+          currentUserId={user.id}
+          members={mems}
+          rowActions={rowActions}
+        />
       </section>
 
       {canManage && invites.length > 0 && (
-        <section className="mt-8 space-y-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Pending invites
-          </h2>
+        <section className="space-y-2">
+          <h2 className="bento-label">Pending invites</h2>
           {invites.map((inv) => (
-            <Card key={inv.id}>
-              <CardContent className="flex items-center justify-between py-3">
-                <div>
-                  <div className="font-medium">{inv.email}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {inv.role} · expires {new Date(inv.expires_at).toLocaleDateString()}
-                  </div>
+            <div key={inv.id} className="bento-panel flex items-center justify-between p-3.5">
+              <div>
+                <div className="text-[13px] font-semibold text-[var(--bento-ink-1)]">
+                  {inv.email}
                 </div>
-                <form
-                  action={async () => {
-                    "use server";
-                    await revokeInviteAction(projectId, inv.id);
-                  }}
-                >
-                  <Button variant="outline" size="sm">
-                    Revoke
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
+                <div className="text-[11px] text-[var(--bento-ink-3)]">
+                  {inv.role} · expires {new Date(inv.expires_at).toLocaleDateString()}
+                </div>
+              </div>
+              <form
+                action={async () => {
+                  "use server";
+                  await revokeInviteAction(projectId, inv.id);
+                }}
+              >
+                <Button variant="outline" size="sm">
+                  Revoke
+                </Button>
+              </form>
+            </div>
           ))}
         </section>
       )}

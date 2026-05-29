@@ -1,9 +1,5 @@
-import { createServerSupabase } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+import "leaflet/dist/leaflet.css";
 
-export default async function HomeLayout({ children }: { children: React.ReactNode }) {
-  const sb = await createServerSupabase();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) redirect("/sign-in");
-  return <div className="min-h-screen bg-background">{children}</div>;
+export default function HomeLayout({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }

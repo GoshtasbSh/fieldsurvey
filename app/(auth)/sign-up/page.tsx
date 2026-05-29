@@ -1,52 +1,92 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
-import { signUpAction } from "./actions";
 import Link from "next/link";
+import { UserPlus } from "lucide-react";
+import { AuthWordmark } from "@/components/auth/auth-wordmark";
+import { AuthGlassCard, AuthCardFooter } from "@/components/auth/auth-glass-card";
+import { signUpAction } from "./actions";
 
 export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="font-display text-2xl">Create your account</CardTitle>
-      </CardHeader>
-      <form
-        action={(fd) => startTransition(async () => {
-          const res = await signUpAction(fd);
-          if (res?.error) setError(res.error);
-        })}
-      >
-        <CardContent className="space-y-4">
+    <>
+      <AuthWordmark tagline="Create your FieldSurvey account in under a minute." />
+
+      <AuthGlassCard title="Create your account" ribbon="New here">
+        <form
+          action={(fd) =>
+            startTransition(async () => {
+              const res = await signUpAction(fd);
+              if (res?.error) setError(res.error);
+            })
+          }
+          className="space-y-4"
+        >
           <div className="space-y-1.5">
-            <Label htmlFor="displayName">Name</Label>
-            <Input id="displayName" name="displayName" placeholder="Ada Lovelace" />
+            <label htmlFor="displayName" className="block text-[12px] font-medium text-[var(--bento-ink-2)]">
+              Name
+            </label>
+            <input
+              id="displayName"
+              name="displayName"
+              placeholder="Ada Lovelace"
+              className="fos-input"
+            />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" required autoComplete="email" />
+            <label htmlFor="email" className="block text-[12px] font-medium text-[var(--bento-ink-2)]">
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="you@university.edu"
+              className="fos-input font-mono"
+            />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="password">Password</Label>
-            <Input id="password" name="password" type="password" required minLength={8} autoComplete="new-password" />
+            <label htmlFor="password" className="block text-[12px] font-medium text-[var(--bento-ink-2)]">
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              className="fos-input"
+            />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </CardContent>
-        <CardFooter className="flex flex-col gap-2">
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? "Creating..." : "Create account"}
-          </Button>
-          <p className="text-sm text-muted-foreground">
-            Already have one? <Link href="/sign-in" className="underline">Sign in</Link>
-          </p>
-        </CardFooter>
-      </form>
-    </Card>
+
+          {error && (
+            <p className="text-[13px] text-[var(--bento-danger)]" role="alert">
+              {error}
+            </p>
+          )}
+
+          <button type="submit" className="fos-btn-primary" disabled={pending}>
+            <UserPlus size={14} /> {pending ? "Creating…" : "Create account"}
+          </button>
+        </form>
+      </AuthGlassCard>
+
+      <AuthCardFooter>
+        Already have one?{" "}
+        <Link
+          href="/sign-in"
+          className="font-semibold text-[var(--bento-ink-1)] underline decoration-[var(--bento-rule)] underline-offset-4 hover:text-[var(--bento-accent)] hover:decoration-[var(--bento-accent)]"
+        >
+          Sign in
+        </Link>
+      </AuthCardFooter>
+    </>
   );
 }

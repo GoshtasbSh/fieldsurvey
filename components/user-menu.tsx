@@ -90,12 +90,14 @@ export function UserMenu({ projectId, user, compact = false }: Props) {
             <span>Notifications</span>
           </DropdownMenuItem>
         </Link>
-        <Link href={`/p/${projectId}/settings`}>
-          <DropdownMenuItem className="cursor-pointer focus:bg-[var(--shell-2)]">
-            <Settings className="h-4 w-4" strokeWidth={1.7} />
-            <span>Project settings</span>
-          </DropdownMenuItem>
-        </Link>
+        {canManage && (
+          <Link href={`/p/${projectId}/settings`}>
+            <DropdownMenuItem className="cursor-pointer focus:bg-[var(--shell-2)]">
+              <Settings className="h-4 w-4" strokeWidth={1.7} />
+              <span>Project settings</span>
+            </DropdownMenuItem>
+          </Link>
+        )}
         <DropdownMenuItem
           className="cursor-pointer focus:bg-[var(--shell-2)]"
           onSelect={(e) => {

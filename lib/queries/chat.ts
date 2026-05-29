@@ -1,5 +1,15 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 
+export type ChatAttachment = {
+  id: string;
+  path: string;
+  mime: string;
+  size: number;
+  name: string;
+  width_px: number | null;
+  height_px: number | null;
+};
+
 export type ChatMessage = {
   id: string;
   project_id: string;
@@ -9,6 +19,7 @@ export type ChatMessage = {
   edited_at: string | null;
   created_at: string;
   author?: { display_name: string | null; email: string; avatar_url: string | null };
+  attachments?: ChatAttachment[];
 };
 
 /** Most-recent N chat messages for a project, oldest-first. */
@@ -16,11 +27,28 @@ export async function listChatMessages(projectId: string, limit = 200): Promise<
   const sb = await createServerSupabase();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (sb.from("chat_messages") as any)
-    .select("id, project_id, author_id, body, mentions, edited_at, created_at, profiles!chat_messages_author_id_fkey(display_name, email, avatar_url)")
+    .select(
+      "id, project_id, author_id, body, mentions, edited_at, created_at, " +
+        "profiles!chat_messages_author_id_fkey(display_name, email, avatar_url), " +
+        "attachments:chat_message_attachments(id, path, mime, size, name, width_px, height_px)",
+    )
     .eq("project_id", projectId)
     .order("created_at", { ascending: false })
-    .limit(limit) as { data: Array<ChatMessage & { profiles: ChatMessage["author"] }> | null };
-  const rows = (data ?? []).map((r) => ({ ...r, author: r.profiles })).reverse();
+    .limit(limit) as {
+      data: Array<
+        ChatMessage & {
+          profiles: ChatMessage["author"];
+          attachments: ChatAttachment[] | null;
+        }
+      > | null;
+    };
+  const rows = (data ?? [])
+    .map((r) => ({
+      ...r,
+      author: r.profiles,
+      attachments: r.attachments ?? [],
+    }))
+    .reverse();
   return rows;
 }
 

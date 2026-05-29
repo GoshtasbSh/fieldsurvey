@@ -28,6 +28,9 @@ export const BASEMAPS: Record<BasemapKey, { label: string; subtitle: string }> =
   light: { label: "Light", subtitle: "CARTO Voyager" },
 };
 
+export type SymbologyOverride = { size?: number; fill_opacity?: number; outline_px?: number };
+export type SymbologyMap = Record<string, SymbologyOverride>;
+
 type Props = {
   center: [number, number];
   zoom: number;
@@ -43,7 +46,11 @@ type Props = {
   placingMode?: boolean;
   /** Fired when the user clicks the map while placingMode is true (and not on an existing point). */
   onPlace?: (lngLat: { lat: number; lon: number }) => void;
+  /** Per-status paint overrides (Q4 locked). */
+  symbology?: SymbologyMap;
 };
+
+const SYMB_DEFAULTS = { size: 8, fill_opacity: 0.85, outline_px: 1.5 };
 
 const DEFAULT_LAYERS: LayerVisibility = { points: true, heatmap: false, clusters: false, boundary: false };
 
@@ -115,6 +122,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     basemap = "satellite",
     placingMode = false,
     onPlace,
+    symbology,
   },
   ref,
 ) {
@@ -326,6 +334,37 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
       });
 
       applyLayerVisibility(map, layers);
+
+      // ── Fit-to-data on first load ──────────────────────────────────
+      // KeyStone §6 lesson: never trust the project's hard-coded center —
+      // derive viewport from the actual feature bbox so the map opens on
+      // the data, not on an empty ocean. Falls back to the initial
+      // (center, zoom) only when the project has 0 or 1 features.
+      const initialFc = fcRaw;
+      const initialFeats = initialFc.features ?? [];
+      if (initialFeats.length >= 2) {
+        let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+        for (const f of initialFeats) {
+          const c = (f.geometry as { coordinates?: [number, number] })?.coordinates;
+          if (!c || c.length < 2) continue;
+          const [lon, lat] = c;
+          if (typeof lon !== "number" || typeof lat !== "number") continue;
+          if (lon < minLon) minLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lon > maxLon) maxLon = lon;
+          if (lat > maxLat) maxLat = lat;
+        }
+        const span = Math.max(maxLon - minLon, maxLat - minLat);
+        // Only fit when the bbox is non-degenerate (>~50 m at the equator).
+        if (Number.isFinite(minLon) && span > 0.0005) {
+          try {
+            map.fitBounds(
+              [[minLon, minLat], [maxLon, maxLat]],
+              { padding: 60, animate: false, maxZoom: 17 },
+            );
+          } catch { /* ignore — preserves the initial center/zoom */ }
+        }
+      }
     });
 
     // Resize map whenever the outer wrapper changes dimensions (panel collapse/expand)
@@ -372,6 +411,106 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     (map.getSource("ms-points") as GeoJSONSource | undefined)?.setData(fcRaw);
     (map.getSource("ms-points-clustered") as GeoJSONSource | undefined)?.setData(fcRaw);
   }, [fcRaw]);
+
+  // ── Symbology overrides → dynamic paint (Q4 locked). ─────────────────────
+  // Each per-status override yields a `match` expression on `status_id`,
+  // falling through to the existing default paint for un-overridden statuses.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    if (!map.getLayer("ms-points")) return;
+
+    const overrides = symbology ?? {};
+    const entries = Object.entries(overrides);
+
+    // ── circle-radius ─────────────────────────────────────────────
+    // Default is zoom-interpolated 6→9→13 (defaults are tuned to ~size 8
+    // at zoom 16). For each overridden status we generate a per-zoom
+    // interpolate keyed to the user's chosen size at the mid zoom.
+    const defaultRadius: maplibregl.ExpressionSpecification = [
+      "interpolate", ["linear"], ["zoom"],
+      12, 6,
+      16, 9,
+      19, 13,
+    ];
+    if (entries.length === 0) {
+      map.setPaintProperty("ms-points", "circle-radius", defaultRadius);
+      map.setPaintProperty("ms-points", "circle-opacity", 0.95);
+    } else {
+      const sizeMatch: unknown[] = ["match", ["coalesce", ["get", "status_id"], ""]];
+      for (const [sid, ov] of entries) {
+        if (ov?.size === undefined) continue;
+        const s = ov.size;
+        sizeMatch.push(sid, [
+          "interpolate", ["linear"], ["zoom"],
+          12, Math.max(2, s * 0.65),
+          16, s,
+          19, s * 1.55,
+        ]);
+      }
+      // If at least one status has a size override, we need the rest to fall
+      // back to defaults.
+      sizeMatch.push(defaultRadius);
+      const anySizeOverride = entries.some(([, o]) => o?.size !== undefined);
+      map.setPaintProperty(
+        "ms-points",
+        "circle-radius",
+        anySizeOverride
+          ? (sizeMatch as unknown as maplibregl.ExpressionSpecification)
+          : defaultRadius,
+      );
+
+      // ── circle-opacity ────────────────────────────────────────────
+      const anyOpacityOverride = entries.some(
+        ([, o]) => o?.fill_opacity !== undefined,
+      );
+      if (anyOpacityOverride) {
+        const opacityMatch: unknown[] = ["match", ["coalesce", ["get", "status_id"], ""]];
+        for (const [sid, ov] of entries) {
+          if (ov?.fill_opacity === undefined) continue;
+          opacityMatch.push(sid, ov.fill_opacity);
+        }
+        opacityMatch.push(SYMB_DEFAULTS.fill_opacity);
+        map.setPaintProperty(
+          "ms-points",
+          "circle-opacity",
+          opacityMatch as unknown as maplibregl.ExpressionSpecification,
+        );
+      } else {
+        map.setPaintProperty("ms-points", "circle-opacity", 0.95);
+      }
+    }
+
+    // ── circle-stroke-width — preserve M1/F1/R1 ring case, additionally
+    //    apply the user override when set. Per-status override takes priority.
+    const matchRingCase: unknown[] = [
+      "case",
+      ["==", ["get", "match_status"], "F1"], MATCH_RING.F1.width,
+      ["==", ["get", "match_status"], "M1"], MATCH_RING.M1.width,
+      ["==", ["get", "match_status"], "R1"], MATCH_RING.R1.width,
+      2,
+    ];
+    const anyOutlineOverride = entries.some(([, o]) => o?.outline_px !== undefined);
+    if (!anyOutlineOverride) {
+      map.setPaintProperty(
+        "ms-points",
+        "circle-stroke-width",
+        matchRingCase as unknown as maplibregl.ExpressionSpecification,
+      );
+    } else {
+      const strokeMatch: unknown[] = ["match", ["coalesce", ["get", "status_id"], ""]];
+      for (const [sid, ov] of entries) {
+        if (ov?.outline_px === undefined) continue;
+        strokeMatch.push(sid, ov.outline_px);
+      }
+      strokeMatch.push(matchRingCase);
+      map.setPaintProperty(
+        "ms-points",
+        "circle-stroke-width",
+        strokeMatch as unknown as maplibregl.ExpressionSpecification,
+      );
+    }
+  }, [symbology]);
 
   useEffect(() => {
     const map = mapRef.current;

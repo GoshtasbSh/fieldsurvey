@@ -26,6 +26,39 @@ export function metersBoundingBox(centerLat: number, centerLon: number, radiusMe
   return { north: centerLat + dLat, south: centerLat - dLat, east: centerLon + dLon, west: centerLon - dLon };
 }
 
+/**
+ * Compute the tile pre-cache bbox from the project's ACTUAL data extent
+ * (KeyStone §10 lesson — never guess a radius around `project.center` since
+ * the centre can be wildly off from where the field team is working).
+ *
+ * Pads the raw point bbox by `paddingMeters` (default 1.5 km) so the
+ * surveyor has tiles around the edge of their work area, not just under
+ * their existing pins. Returns `null` when there are <2 points — caller
+ * should fall back to a radius around the project centre in that case.
+ */
+export function bboxFromPoints(
+  points: Array<{ lat: number; lon: number } | null | undefined>,
+  paddingMeters = 1500,
+): { north: number; south: number; east: number; west: number } | null {
+  let n = -Infinity, s = Infinity, e = -Infinity, w = Infinity;
+  let count = 0;
+  for (const p of points) {
+    if (!p) continue;
+    if (typeof p.lat !== "number" || typeof p.lon !== "number") continue;
+    if (p.lat < s) s = p.lat;
+    if (p.lat > n) n = p.lat;
+    if (p.lon < w) w = p.lon;
+    if (p.lon > e) e = p.lon;
+    count += 1;
+  }
+  if (count < 2 || !Number.isFinite(n) || !Number.isFinite(s)) return null;
+  // Pad the bbox so the surveyor has tiles outside the edge points too.
+  const midLat = (n + s) / 2;
+  const dLat = paddingMeters / 111_320;
+  const dLon = paddingMeters / (111_320 * Math.cos((midLat * Math.PI) / 180));
+  return { north: n + dLat, south: s - dLat, east: e + dLon, west: w - dLon };
+}
+
 /** Returns the URLs we'd need to fetch to cover the box at the given zoom range. */
 export function tilesForBox(box: { north: number; south: number; east: number; west: number }, zMin: number, zMax: number): string[] {
   const out: string[] = [];

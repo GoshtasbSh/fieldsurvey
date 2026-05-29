@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { z } from "zod";
+import { findNearestNotVisited, markUniverseVisited } from "@/lib/queries/universe";
 
 const PointInsert = z.object({
   project_id: z.string().uuid(),
@@ -81,6 +82,34 @@ export async function POST(req: NextRequest) {
       uploaded_by: user.id,
     }));
     await sbAny.from("point_photos").insert(rows);
+  }
+
+  // Canvass marker: if the project is in canvass_mode, snap the new point
+  // to the nearest unvisited universe row within match_radius_m and mark
+  // it visited. Best-effort — failures do not block the point insert.
+  try {
+    const { data: settings } = await sbAny
+      .from("project_settings")
+      .select("canvass_mode, match_radius_m")
+      .eq("project_id", body.project_id)
+      .maybeSingle() as { data: { canvass_mode: boolean; match_radius_m: number } | null };
+    if (settings?.canvass_mode) {
+      const nearest = await findNearestNotVisited({
+        projectId: body.project_id,
+        lat: body.lat,
+        lon: body.lon,
+        radiusM: settings.match_radius_m ?? 30,
+      });
+      if (nearest) {
+        await markUniverseVisited({
+          rowId: nearest.id,
+          pointId: point.id,
+          visitedBy: user.id,
+        });
+      }
+    }
+  } catch {
+    /* non-fatal */
   }
 
   return NextResponse.json({ id: point.id, deduped: false });

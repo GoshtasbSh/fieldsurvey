@@ -8,7 +8,7 @@ const PostBody = z.object({
   mentions: z.array(z.string().uuid()).max(20).optional(),
 });
 
-/** Send a chat message to a project. Author defaults to auth.uid() via RLS. */
+/** Send a chat message to a project. Viewers are blocked. */
 export async function POST(req: NextRequest) {
   const sb = await createServerSupabase();
   const { data: { user } } = await sb.auth.getUser();
@@ -16,6 +16,16 @@ export async function POST(req: NextRequest) {
 
   const parsed = PostBody.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+
+  // Role gate — viewers can read but not write.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: roleRaw } = await (sb as any).rpc("project_role", {
+    p_project: parsed.data.project_id,
+  });
+  const role = (roleRaw as string | null) ?? null;
+  if (!(role === "owner" || role === "admin" || role === "surveyor")) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (sb.from("chat_messages") as any)

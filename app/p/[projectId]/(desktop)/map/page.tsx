@@ -3,9 +3,12 @@ import { getStatusBreakdown, getMatchStatusCounts, getMatchStatusFeatures } from
 import { getDailyActivity, getSurveyorLeaderboard, getCoverageMetrics, getHourlyDistribution, getDayOfWeekDistribution } from "@/lib/queries/analytics";
 import { listChatMessages, listProjectMembers } from "@/lib/queries/chat";
 import { getProjectCaps } from "@/lib/queries/caps";
+import { readCachedBlobs } from "@/lib/cache/read";
+import { getCanvassCompletion } from "@/lib/queries/universe";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { MapShell } from "@/components/desktop/map-shell";
 import { RealtimeWatcher } from "@/components/realtime-watcher";
+import type { CanvassBlob } from "@/components/desktop/right-rail";
 import { notFound } from "next/navigation";
 
 export default async function DesktopMapPage({ params }: { params: Promise<{ projectId: string }> }) {
@@ -35,6 +38,7 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
     daily, hourly, dow,
     surveyors, coverage,
     chatMembers, initialChat, caps,
+    cacheBlobs,
   ] = await Promise.all([
     getStatusBreakdown(projectId),
     getMatchStatusCounts(projectId),
@@ -47,7 +51,45 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
     listProjectMembers(projectId),
     listChatMessages(projectId, 200),
     getProjectCaps(projectId),
+    readCachedBlobs(projectId, ["pulse_blob", "analyze_blob", "match_status_blob", "canvass_blob"]),
   ]);
+
+  // canvass_blob → prefer cached payload when fresh, else compute from
+  // survey_universe directly. Disabled rows render no UI (right-rail checks
+  // `enabled`), so we only invoke the raw query when canvass_mode is on.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: settingsRow } = await (sb.from("project_settings") as any)
+    .select("canvass_mode")
+    .eq("project_id", projectId)
+    .maybeSingle() as { data: { canvass_mode: boolean } | null };
+  const canvassMode = Boolean(settingsRow?.canvass_mode);
+
+  let canvass: CanvassBlob | null = null;
+  if (canvassMode) {
+    const cached = cacheBlobs.canvass_blob?.payload as CanvassBlob | undefined;
+    if (cached && cached.enabled) {
+      canvass = cached;
+    } else {
+      const summary = await getCanvassCompletion(projectId);
+      canvass = {
+        enabled: true,
+        total: summary.total,
+        visited: summary.visited,
+        skipped: summary.skipped,
+        pct: summary.pct,
+        by_surveyor: [],
+      };
+    }
+  }
+
+  // Freshest cache timestamp across all blobs we read — used for the
+  // "as of N minutes ago" badge in the topbar. null when no cache row exists.
+  const cacheStamps = Object.values(cacheBlobs)
+    .map((b) => b?.computed_at)
+    .filter((s): s is string => typeof s === "string");
+  const cachedAt = cacheStamps.length > 0
+    ? cacheStamps.sort().reverse()[0]
+    : null;
 
   const pointsTotal = (matchCounts.total_with_status ?? 0) + (matchCounts.r1_count ?? 0);
   const today = new Date().toISOString().slice(0, 10);
@@ -74,6 +116,8 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
         chatMembers={chatMembers}
         initialChat={initialChat}
         caps={caps}
+        cachedAt={cachedAt}
+        canvass={canvass}
       />
       <RealtimeWatcher projectId={projectId} />
     </>

@@ -33,12 +33,18 @@ export default async function MobileFieldPage({ params }: { params: Promise<{ pr
     };
   }
 
-  const [statuses, allFeatures, chatMembers, initialChat] = await Promise.all([
+  const [statuses, allFeatures, chatMembers, initialChat, settingsRow] = await Promise.all([
     getStatusBreakdown(projectId),
     getMatchStatusFeatures(projectId),
     listProjectMembers(projectId),
     listChatMessages(projectId, 200),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sb.from("project_settings") as any)
+      .select("canvass_mode")
+      .eq("project_id", projectId)
+      .maybeSingle() as Promise<{ data: { canvass_mode: boolean } | null }>,
   ]);
+  const canvassMode = Boolean(settingsRow.data?.canvass_mode);
 
   // Mobile scope: field points only (point_id is set on field rows; null on R1),
   // and strip match_status so the M1/F1 ring symbology doesn't render.
@@ -71,6 +77,7 @@ export default async function MobileFieldPage({ params }: { params: Promise<{ pr
       initialChat={initialChat}
       features={safeFeatures}
       myStats={{ today: myToday, total: myTotal }}
+      canvassMode={canvassMode}
     />
   );
 }

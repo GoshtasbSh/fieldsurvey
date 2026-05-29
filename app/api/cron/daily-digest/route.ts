@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { sendDailyDigestEmail, sendCapWarningEmail, type DigestProjectSummary } from "@/lib/email";
+import { refreshProjectCache } from "@/lib/cache/refresh";
 
 /**
  * Cron endpoint. Schedule with Vercel Cron (or any external cron) and
@@ -97,5 +98,100 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, digests_sent: digestsSent, cap_warnings_sent: warningsSent });
+  // ── Change-report recipients (Q2 locked) ──────────────────────────────
+  // Per-project arbitrary-email list. Skip recipients whose project has
+  // had zero new points/responses since `last_sent_at`.
+  let externalSent = 0, externalSkipped = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: recipients } = await (sb.from("change_report_recipients") as any)
+    .select("id, project_id, name, email, last_sent_at, projects(name)")
+    .eq("paused", false) as {
+      data: Array<{
+        id: string;
+        project_id: string;
+        name: string | null;
+        email: string;
+        last_sent_at: string | null;
+        projects: { name: string } | null;
+      }> | null;
+    };
+
+  for (const r of recipients ?? []) {
+    const recipientSince =
+      r.last_sent_at ?? new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const [ptsRes, respRes, countsRes] = await Promise.all([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sb.from("points") as any)
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", r.project_id)
+        .gte("created_at", recipientSince),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sb.from("survey_responses") as any)
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", r.project_id)
+        .gte("imported_at", recipientSince),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sb.from("v_match_status_counts") as any)
+        .select("m1_count, f1_count, r1_count")
+        .eq("project_id", r.project_id)
+        .maybeSingle(),
+    ]);
+    const newPoints = (ptsRes as { count: number | null }).count ?? 0;
+    const newResponses = (respRes as { count: number | null }).count ?? 0;
+    if (newPoints === 0 && newResponses === 0) {
+      externalSkipped += 1;
+      continue;
+    }
+    const c = (
+      countsRes as {
+        data: { m1_count: number; f1_count: number; r1_count: number } | null;
+      }
+    ).data;
+    const projects: DigestProjectSummary[] = [
+      {
+        projectName: r.projects?.name ?? "Project",
+        url: `${appUrl}/p/${r.project_id}`,
+        newPoints,
+        newResponses,
+        m1: c?.m1_count ?? 0,
+        f1: c?.f1_count ?? 0,
+        r1: c?.r1_count ?? 0,
+      },
+    ];
+    const period = new Date().toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    });
+    const out = await sendDailyDigestEmail({ to: r.email, period, projects });
+    if (out.ok) {
+      externalSent += 1;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (sb.from("change_report_recipients") as any)
+        .update({ last_sent_at: new Date().toISOString() })
+        .eq("id", r.id);
+    }
+  }
+
+  // ── Cache refresh — refresh dashboard_cache for every project so the
+  //    Pulse / Analyze / History blobs are at most ~24h stale (locked Q1).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: allProjects } = await (sb.from("projects") as any)
+    .select("id") as { data: Array<{ id: string }> | null };
+  let cacheRefreshed = 0, cacheFailed = 0;
+  for (const p of allProjects ?? []) {
+    const res = await refreshProjectCache(p.id, { trigger: "cron" });
+    if (res.ok) cacheRefreshed += 1;
+    else cacheFailed += 1;
+  }
+
+  return NextResponse.json({
+    ok: true,
+    digests_sent: digestsSent,
+    cap_warnings_sent: warningsSent,
+    external_sent: externalSent,
+    external_skipped_empty: externalSkipped,
+    cache_refreshed: cacheRefreshed,
+    cache_failed: cacheFailed,
+  });
 }

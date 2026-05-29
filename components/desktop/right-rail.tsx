@@ -1,7 +1,17 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Activity, BarChart3, Users, MousePointer2, ChevronRight, TrendingUp, Clock } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  Users,
+  MousePointer2,
+  ChevronRight,
+  TrendingUp,
+  Clock,
+  Sparkles,
+  ListChecks,
+} from "lucide-react";
 import type { MatchStatusCounts } from "@/lib/match/status";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import type { ChatMessage } from "@/lib/queries/chat";
@@ -13,6 +23,14 @@ export type SurveyorBrief = { collector_id: string | null; name: string; count: 
 export type DailyBucket = { day: string; total: number };
 export type CoverageMetrics = { match_rate_pct: number; median_accuracy_m: number | null; photo_coverage_pct: number; density_per_km2: number | null };
 export type ChatMember = { user_id: string; display_name: string; email: string; avatar_url: string | null };
+export type CanvassBlob = {
+  enabled: boolean;
+  total: number;
+  visited: number;
+  skipped: number;
+  pct: number;
+  by_surveyor: Array<{ visited_by: string | null; count: number }>;
+};
 
 type Props = {
   projectId: string;
@@ -29,21 +47,25 @@ type Props = {
   coverage?: CoverageMetrics;
   chatMembers?: ChatMember[];
   initialChat?: ChatMessage[];
+  /** False for viewer role — chat composer is hidden, only read is allowed. */
+  canWriteChat?: boolean;
+  /** When non-null, Pulse swaps its KPI bento for a canvass-completion block. */
+  canvass?: CanvassBlob | null;
   onCollapse: () => void;
 };
 
 export function DesktopRightRail({
   projectId, currentUserId, matchCounts, statuses, pointsTotal, todayDelta,
   unreadChats, daily = [], hourly = [], dow = [], surveyors = [], coverage,
-  chatMembers = [], initialChat = [], onCollapse,
+  chatMembers = [], initialChat = [], canWriteChat = true, canvass = null, onCollapse,
 }: Props) {
   const [tab, setTab] = useState<RightRailTab>("pulse");
 
   return (
-    <aside className="flex h-full w-[360px] flex-col overflow-hidden border-l border-[var(--shell-border)] bg-[var(--shell-1)]">
-      {/* Tab bar */}
-      <nav className="flex items-center gap-1 border-b border-[var(--shell-border)] bg-[var(--shell-1)] px-2 py-2">
-        <div className="grid flex-1 grid-cols-4 gap-1">
+    <aside className="flex h-full w-[360px] flex-col overflow-hidden border-l border-[var(--bento-rule)] bg-[var(--bento-bg)]">
+      {/* Tab bar — Bento segmented (full pills at top, no bottom indicator) */}
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+        <div className="bento-panel flex flex-1 gap-1 p-1">
           {([
             { key: "pulse", label: "Pulse", Icon: Activity, badge: undefined as number | undefined },
             { key: "analyze", label: "Analyze", Icon: BarChart3, badge: undefined as number | undefined },
@@ -55,29 +77,34 @@ export function DesktopRightRail({
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                className={`relative flex flex-col items-center gap-1 rounded-[10px] px-0 py-2 transition ${
-                  on ? "bg-[oklch(78%_0.155_234/0.12)] text-[oklch(78%_0.155_234)]" : "text-[var(--shell-text-muted)] hover:bg-[var(--shell-2)] hover:text-[var(--shell-text-2)]"
+                className={`bento-focus relative flex flex-1 items-center justify-center gap-1.5 rounded-[10px] py-2 text-[11.5px] font-semibold transition ${
+                  on
+                    ? "bg-[var(--bento-ink-1)] text-[var(--bento-bg)] shadow-[var(--bento-shadow-xs)]"
+                    : "text-[var(--bento-ink-2)] hover:bg-[var(--bento-surface-2)] hover:text-[var(--bento-ink-1)]"
                 }`}
               >
-                <Icon className="h-[17px] w-[17px]" strokeWidth={1.7} />
-                <span className="font-display text-[10.5px] font-bold">{label}</span>
+                <Icon className="h-[14px] w-[14px]" strokeWidth={1.8} />
+                <span>{label}</span>
                 {typeof badge === "number" && badge > 0 && (
-                  <span className="absolute right-[18%] top-[5px] inline-flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-[var(--shell-1)] bg-[oklch(68%_0.21_25)] px-1 font-mono text-[9.5px] font-bold text-white">{badge}</span>
+                  <span
+                    className="absolute -top-1 right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-mono text-[9.5px] font-bold text-white"
+                    style={{ background: "var(--bento-danger)" }}
+                  >
+                    {badge}
+                  </span>
                 )}
-                {on && <span className="absolute -bottom-2.5 left-[30%] right-[30%] h-0.5 rounded-t bg-[oklch(78%_0.155_234)] shadow-[0_0_8px_oklch(78%_0.155_234/0.35)]" />}
               </button>
             );
           })}
         </div>
-        {/* Collapse button */}
         <button
           onClick={onCollapse}
-          className="ml-1 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--shell-border)] text-[var(--shell-text-muted)] transition hover:bg-[var(--shell-2)] hover:text-[var(--shell-text)]"
+          className="bento-focus inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border border-[var(--bento-rule)] bg-[var(--bento-surface)] text-[var(--bento-ink-3)] transition hover:bg-[var(--bento-surface-3)] hover:text-[var(--bento-ink-1)]"
           aria-label="Collapse panel"
         >
-          <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
+          <ChevronRight className="h-4 w-4" strokeWidth={1.8} />
         </button>
-      </nav>
+      </div>
 
       {/* Tab content */}
       <div className="flex min-h-0 flex-1 flex-col">
@@ -89,6 +116,7 @@ export function DesktopRightRail({
               pointsTotal={pointsTotal}
               todayDelta={todayDelta}
               daily={daily}
+              canvass={canvass}
             />
           </Scroll>
         )}
@@ -105,12 +133,60 @@ export function DesktopRightRail({
         )}
         {tab === "team" && (
           currentUserId
-            ? <ChatPanel projectId={projectId} currentUserId={currentUserId} members={chatMembers} initial={initialChat} />
+            ? <ChatPanel projectId={projectId} currentUserId={currentUserId} members={chatMembers} initial={initialChat} canWrite={canWriteChat} />
             : <Placeholder label="Sign in to chat" />
         )}
         {tab === "inspect" && <Placeholder label="Click a pin on the map to inspect it" />}
       </div>
+
+      {/* GeoChatBot placeholder slot — bottom-right (locked decision Q8). */}
+      {/* No LLM dependency in M4; future plug-in replaces the body without touching the mount. */}
+      <GeoChatBotSlot />
     </aside>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GeoChatBot placeholder — KeyStone parity, bottom-right of dashboard
+// ──────────────────────────────────────────────────────────────────────────────
+
+function GeoChatBotSlot() {
+  return (
+    <div className="border-t border-[var(--bento-rule)] bg-[var(--bento-bg)] p-3">
+      <div
+        className="bento-panel relative overflow-hidden p-3.5"
+        style={{
+          background:
+            "linear-gradient(135deg, var(--bento-accent-soft), var(--bento-surface))",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <span
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px]"
+            style={{
+              background: "var(--bento-accent)",
+              color: "var(--bento-on-accent)",
+            }}
+          >
+            <Sparkles className="h-4 w-4" strokeWidth={2} />
+          </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="text-[12.5px] font-semibold text-[var(--bento-ink-1)]">
+              Ask GeoChatBot
+            </div>
+            <div className="text-[10.5px] text-[var(--bento-ink-3)]">
+              Natural-language analyst · coming soon
+            </div>
+          </div>
+          <span
+            className="bento-chip font-mono text-[10px]"
+            style={{ color: "var(--bento-ink-3)" }}
+          >
+            Soon
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -119,17 +195,21 @@ export function DesktopRightRail({
 // ──────────────────────────────────────────────────────────────────────────────
 
 function PulseTab({
-  matchCounts, statuses, pointsTotal, todayDelta, daily,
+  matchCounts, statuses, pointsTotal, todayDelta, daily, canvass,
 }: {
   matchCounts: MatchStatusCounts;
   statuses: StatusRow[];
   pointsTotal: number;
   todayDelta: number;
   daily: DailyBucket[];
+  canvass: CanvassBlob | null;
 }) {
   const attentionTotal = matchCounts.f1_count + matchCounts.r1_count;
   return (
     <>
+      {canvass?.enabled && (
+        <CanvassCompletion blob={canvass} />
+      )}
       {/* Needs attention */}
       {attentionTotal > 0 && (
         <Card framed tone="warn" title={
@@ -165,20 +245,34 @@ function PulseTab({
       )}
 
       {/* Points counter + today delta */}
-      <div className="rounded-[14px] border border-[oklch(78%_0.155_234/0.18)] bg-[radial-gradient(circle_at_top_right,oklch(20%_0.06_234/0.6),transparent_65%),linear-gradient(180deg,oklch(20%_0.025_250)_0%,oklch(17%_0.018_250)_100%)] p-4 relative overflow-hidden">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[oklch(78%_0.155_234)] to-transparent opacity-50" />
-        <div className="grid grid-cols-[1fr_auto] items-end gap-3.5">
+      <div className="bento-panel relative overflow-hidden p-4">
+        <div
+          className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full"
+          style={{ background: "var(--bento-accent-soft)" }}
+        />
+        <div className="relative grid grid-cols-[1fr_auto] items-end gap-3.5">
           <div>
-            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--shell-text-muted)]">Points collected</div>
-            <div className="font-display text-[40px] font-extrabold leading-none tracking-[-0.025em] tabular-nums">{pointsTotal}</div>
+            <div className="bento-label mb-1.5">Points collected</div>
+            <div className="bento-num font-display text-[40px] font-extrabold leading-none tracking-[-0.025em] text-[var(--bento-ink-1)]">
+              {pointsTotal}
+            </div>
           </div>
           {todayDelta > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[oklch(76%_0.16_158/0.3)] bg-[oklch(76%_0.16_158/0.14)] px-2.5 py-1 font-mono text-[11px] font-bold text-[oklch(76%_0.16_158)]">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] font-bold"
+              style={{
+                background: "var(--bento-success-soft)",
+                color: "var(--bento-success)",
+              }}
+            >
               ▲ +{todayDelta} today
             </span>
           )}
         </div>
-        <div className="mt-3 grid grid-cols-3 gap-1.5 border-t border-[oklch(50%_0.025_250/0.18)] pt-3">
+        <div
+          className="relative mt-3 grid grid-cols-3 gap-1.5 border-t pt-3"
+          style={{ borderColor: "var(--bento-rule)" }}
+        >
           <KpiTile v={`${Math.round((matchCounts.m1_count / Math.max(pointsTotal, 1)) * 100)}%`} l="Match rate" />
           <KpiTile v={String(matchCounts.m1_count)} l="M1 matched" tone="accent" />
           <KpiTile v={String(matchCounts.r1_count)} l="R1 awaiting" tone="violet" />
@@ -334,14 +428,17 @@ function Scroll({ children }: { children: ReactNode }) {
   return <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto p-4">{children}</div>;
 }
 
-function Card({ title, children, framed, tone }: { title: ReactNode; children: ReactNode; framed?: boolean; tone?: "warn" }) {
-  const cls = tone === "warn"
-    ? "border-[oklch(86%_0.18_88/0.25)] bg-[linear-gradient(135deg,oklch(20%_0.06_88/0.4),oklch(18%_0.05_305/0.5))]"
-    : "border-[var(--shell-border)] bg-[var(--shell-elevated)]";
+function Card({ title, children, tone }: { title: ReactNode; children: ReactNode; framed?: boolean; tone?: "warn" }) {
+  const toneStyle =
+    tone === "warn"
+      ? { background: "var(--bento-warning-soft)", borderColor: "transparent" }
+      : undefined;
   return (
-    <div className={`rounded-xl p-4 border ${cls} ${framed ? "relative overflow-hidden" : ""}`}>
-      {framed && <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[oklch(82%_0.17_86)] to-transparent" />}
-      <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">{title}</div>
+    <div
+      className="bento-panel p-4"
+      style={toneStyle}
+    >
+      <div className="bento-label mb-3">{title}</div>
       {children}
     </div>
   );
@@ -364,31 +461,44 @@ function AttentionTile({ pinClass, label, count, desc, cta, tone }: { pinClass: 
 }
 
 function KpiTile({ v, l, tone }: { v: string; l: string; tone?: "accent" | "violet" }) {
-  const cls = tone === "accent"
-    ? "text-[oklch(78%_0.155_234)]"
-    : tone === "violet"
-    ? "text-[oklch(72%_0.18_305)]"
-    : "text-[var(--shell-text)]";
+  const color =
+    tone === "accent"
+      ? "var(--bento-accent)"
+      : tone === "violet"
+        ? "var(--bento-magenta)"
+        : "var(--bento-ink-1)";
   return (
     <div className="flex flex-col">
-      <span className={`font-mono text-[14.5px] font-semibold tabular-nums ${cls}`}>{v}</span>
-      <span className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">{l}</span>
+      <span className="bento-num font-mono text-[14.5px] font-semibold" style={{ color }}>
+        {v}
+      </span>
+      <span className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-[0.07em] text-[var(--bento-ink-3)]">
+        {l}
+      </span>
     </div>
   );
 }
 
 function CovTile({ label, value, tone }: { label: string; value: string; tone?: "good" | "warn" | "bad" }) {
-  const valCls = tone === "good"
-    ? "text-[oklch(76%_0.16_158)]"
-    : tone === "warn"
-    ? "text-[oklch(82%_0.17_86)]"
-    : tone === "bad"
-    ? "text-[oklch(68%_0.21_25)]"
-    : "text-[var(--shell-text)]";
+  const valColor =
+    tone === "good"
+      ? "var(--bento-success)"
+      : tone === "warn"
+        ? "var(--bento-warning)"
+        : tone === "bad"
+          ? "var(--bento-danger)"
+          : "var(--bento-ink-1)";
   return (
-    <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-2.5">
-      <div className="text-[10px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-muted)]">{label}</div>
-      <div className={`mt-1 font-display text-[18px] font-extrabold tabular-nums ${valCls}`}>{value}</div>
+    <div className="bento-panel-inset p-2.5">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-[var(--bento-ink-3)]">
+        {label}
+      </div>
+      <div
+        className="bento-num mt-1 font-display text-[18px] font-extrabold"
+        style={{ color: valColor }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -530,6 +640,59 @@ function HourChart({ buckets }: { buckets: HourBucket[] }) {
         <span>23h</span>
       </div>
       <p className="mt-1 text-[9.5px] text-[var(--shell-text-muted)]">Purple = night (before 6am / after 8pm) · Blue = daytime</p>
+    </div>
+  );
+}
+
+function CanvassCompletion({ blob }: { blob: CanvassBlob }) {
+  const pct = Math.round(blob.pct * 1000) / 10;
+  const remaining = Math.max(0, blob.total - blob.visited - blob.skipped);
+  const tone =
+    blob.pct >= 0.8
+      ? "var(--bento-success)"
+      : blob.pct >= 0.4
+        ? "var(--bento-accent)"
+        : "var(--bento-warning)";
+  return (
+    <div className="bento-panel relative overflow-hidden p-4">
+      <div
+        className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full"
+        style={{ background: "var(--bento-accent-soft)" }}
+      />
+      <div className="relative flex items-center gap-3">
+        <span
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px]"
+          style={{ background: tone, color: "var(--bento-on-accent)" }}
+        >
+          <ListChecks className="h-4 w-4" strokeWidth={2} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="bento-label">Canvass progress</div>
+          <div className="font-display text-[22px] font-extrabold leading-none tracking-[-0.025em] text-[var(--bento-ink-1)]">
+            {pct.toFixed(1)}%
+          </div>
+        </div>
+        <span
+          className="rounded-full px-2.5 py-1 font-mono text-[11px] font-bold"
+          style={{ background: "var(--bento-surface-2)", color: "var(--bento-ink-2)" }}
+        >
+          {blob.visited.toLocaleString()} / {blob.total.toLocaleString()}
+        </span>
+      </div>
+      <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-[var(--bento-surface-3)]">
+        <div
+          className="h-full transition-all"
+          style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: tone }}
+        />
+      </div>
+      <div
+        className="relative mt-3 grid grid-cols-3 gap-1.5 border-t pt-3"
+        style={{ borderColor: "var(--bento-rule)" }}
+      >
+        <KpiTile v={blob.visited.toLocaleString()} l="Visited" tone="accent" />
+        <KpiTile v={remaining.toLocaleString()} l="Remaining" />
+        <KpiTile v={blob.skipped.toLocaleString()} l="Skipped" />
+      </div>
     </div>
   );
 }
