@@ -55,6 +55,10 @@ type Props = {
   /** True when current user is owner/admin/surveyor — gates slider editing. */
   canEditSymbology?: boolean;
   onCollapse: () => void;
+  /** M7: Saved Views switcher. */
+  savedViews?: Array<{ id: string; name: string; description: string | null; role_gate: string }>;
+  activeViewId?: string | null;
+  onSwitchView?: (viewId: string) => void;
 };
 
 export function DesktopLeftRail({
@@ -77,6 +81,9 @@ export function DesktopLeftRail({
   setSymbology,
   canEditSymbology = false,
   onCollapse,
+  savedViews = [],
+  activeViewId = null,
+  onSwitchView,
 }: Props) {
   // Which status row currently has its sliders open.
   const [openSymbId, setOpenSymbId] = useState<string | null>(null);
@@ -416,31 +423,53 @@ export function DesktopLeftRail({
         </div>
       </div>
 
-      {/* ── Saved views footer ──────────────────────────────────────── */}
-      <button className="bento-panel mt-auto flex w-full items-center gap-2.5 p-3 text-left transition hover:shadow-[var(--bento-shadow-md)]">
-        <span
-          className="inline-flex h-8 w-8 items-center justify-center rounded-[10px]"
-          style={{
-            background: "var(--bento-magenta-soft)",
-            color: "var(--bento-magenta)",
-          }}
-        >
-          <Bookmark className="h-3.5 w-3.5" strokeWidth={2} />
-        </span>
-        <span className="flex-1 leading-tight">
-          <span className="block text-[12px] font-semibold text-[var(--bento-ink-1)]">
-            Needs attention
+      {/* ── Saved views footer (M7 — Analyses Catalog switcher) ──────── */}
+      <div className="bento-panel mt-auto p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <span
+            className="inline-flex h-6 w-6 items-center justify-center rounded-[8px]"
+            style={{ background: "var(--bento-magenta-soft)", color: "var(--bento-magenta)" }}
+          >
+            <Bookmark className="h-3 w-3" strokeWidth={2} />
           </span>
-          <span className="block text-[10px] text-[var(--bento-ink-3)]">
-            F1 + R1 · {matchCounts.f1_count + matchCounts.r1_count} points
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-[var(--bento-ink-3)]">
+            Saved views
           </span>
-        </span>
-        <Star
-          className="h-3.5 w-3.5"
-          strokeWidth={1.8}
-          style={{ color: "var(--bento-ink-4)" }}
-        />
-      </button>
+        </div>
+        {savedViews.length === 0 ? (
+          <div className="text-[11px] text-[var(--bento-ink-3)]">
+            No views yet — admin curates them from the Catalog drawer.
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {savedViews.map((v) => {
+              const active = v.id === activeViewId;
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => onSwitchView?.(v.id)}
+                  className={`bento-focus flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12px] transition ${
+                    active
+                      ? "bg-[var(--bento-ink-1)] text-[var(--bento-bg)]"
+                      : "text-[var(--bento-ink-2)] hover:bg-[var(--bento-surface-2)]"
+                  }`}
+                  title={v.description ?? undefined}
+                >
+                  <span
+                    className={`inline-block h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--bento-bg)]" : "bg-[var(--bento-ink-3)]"}`}
+                  />
+                  <span className="flex-1 truncate font-semibold">{v.name}</span>
+                  {v.role_gate === "admin" && (
+                    <span className={`font-mono text-[8.5px] ${active ? "text-[var(--bento-bg)]" : "text-[var(--bento-ink-3)]"}`}>
+                      🔒
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </aside>
   );
 }

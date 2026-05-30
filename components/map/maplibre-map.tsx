@@ -46,6 +46,8 @@ type Props = {
   placingMode?: boolean;
   /** Fired when the user clicks the map while placingMode is true (and not on an existing point). */
   onPlace?: (lngLat: { lat: number; lon: number }) => void;
+  /** A0 colorizer: per-feature color override map. Key = point_id || response_id. */
+  featureColors?: Record<string, string> | null;
   /** Per-status paint overrides (Q4 locked). */
   symbology?: SymbologyMap;
   /** Optional project-boundary polygons (M6). Rendered under the points. */
@@ -126,6 +128,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     onPlace,
     symbology,
     boundaries,
+    featureColors,
   },
   ref,
 ) {
@@ -140,7 +143,10 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
 
   // Two GeoJSON FeatureCollections so heatmap/points can stay un-clustered
   // while clusters use a separate clustered source.
-  const fcRaw = useMemo(() => toGeoJSON(features, statusColors), [features, statusColors]);
+  const fcRaw = useMemo(
+    () => toGeoJSON(features, statusColors, featureColors ?? null),
+    [features, statusColors, featureColors],
+  );
 
   useImperativeHandle(ref, () => ({
     zoomIn: () => mapRef.current?.zoomIn(),
@@ -185,7 +191,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
         source: "ms-boundaries",
         layout: { visibility: layers.boundary === false ? "none" : "visible" },
         paint: {
-          "fill-color": "oklch(78% 0.155 234)",
+          "fill-color": "#5fc4ec",
           "fill-opacity": 0.06,
         },
       });
@@ -195,7 +201,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
         source: "ms-boundaries",
         layout: { visibility: layers.boundary === false ? "none" : "visible" },
         paint: {
-          "line-color": "oklch(78% 0.155 234)",
+          "line-color": "#5fc4ec",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 14, 2.2, 18, 3],
           "line-opacity": 0.9,
           "line-dasharray": [3, 2],
@@ -591,19 +597,31 @@ function applyLayerVisibility(map: Map, layers: LayerVisibility) {
   setVis("ms-boundary-line", layers.boundary !== false);
 }
 
-function toGeoJSON(features: MatchStatusRow[], statusColors: StatusColorMap): GeoJSON.FeatureCollection {
+function toGeoJSON(
+  features: MatchStatusRow[],
+  statusColors: StatusColorMap,
+  featureColors: Record<string, string> | null,
+): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
     features: features
       .filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lon))
-      .map((f) => ({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [f.lon, f.lat] },
-        properties: {
-          id: f.point_id ?? f.response_id,
-          match_status: f.match_status,
-          color: f.status_id ? statusColors[f.status_id] : "#a855f7",
-        },
-      })),
+      .map((f) => {
+        const id = f.point_id ?? f.response_id;
+        // A0 colorizer override has highest precedence; preserve F1 yellow
+        // tint via the caller by NOT supplying an override for F1 rows.
+        const override = featureColors?.[id ?? ""];
+        const fallback = f.status_id ? statusColors[f.status_id] : "#a855f7";
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [f.lon, f.lat] },
+          properties: {
+            id,
+            match_status: f.match_status,
+            status_id: f.status_id ?? null,
+            color: override ?? fallback,
+          },
+        };
+      }),
   };
 }
