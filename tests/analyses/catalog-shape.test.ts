@@ -56,4 +56,17 @@ describe("Analyses Catalog shape", () => {
       expect(keys).toContain(expected);
     }
   });
+
+  it("every non-stub m7Wave1 card has a viz-registry entry", async () => {
+    const { ANALYSES_REGISTRY } = await import("../../lib/analyses/registry");
+    const { VIZ_REGISTRY } = await import("../../lib/analyses/viz-registry");
+    const vizKeys = new Set(Object.keys(VIZ_REGISTRY));
+    const nonStubWave1 = ANALYSES_REGISTRY.filter((c) => c.m7Wave1 && !c.stub);
+    for (const card of nonStubWave1) {
+      expect(
+        vizKeys,
+        `card ${card.id} (vizComponent: ${card.vizComponent}) missing from VIZ_REGISTRY`,
+      ).toContain(card.vizComponent);
+    }
+  });
 });
