@@ -1,6 +1,13 @@
 export type AaporCounts = {
   I: number; P: number; R: number;
   NC: number; O: number; UH: number; UO: number;
+  /**
+   * Points whose status_id has no entry in project_aapor_mapping. These are
+   * EXCLUDED from every AAPOR rate denominator (treated as if they don't
+   * exist for rate-computation purposes). The count is surfaced separately
+   * via AaporRates.unmappedCount so the UI can warn the admin.
+   */
+  UNMAPPED?: number;
 };
 
 export type AaporRates = {
@@ -11,6 +18,8 @@ export type AaporRates = {
   ref1: number | null;
   con1: number | null;
   e: number;
+  /** Number of points with no AAPOR mapping (excluded from all denominators). */
+  unmappedCount: number;
 };
 
 function estimateEligibility(c: AaporCounts): number {
@@ -23,9 +32,16 @@ function estimateEligibility(c: AaporCounts): number {
 }
 
 export function computeAaporRates(c: AaporCounts): AaporRates {
+  // UNMAPPED points are excluded from every denominator — we mathematically
+  // pretend they don't exist. The count is surfaced on the returned object
+  // so the UI can warn the admin to finish their AAPOR mapping.
+  const unmappedCount = c.UNMAPPED ?? 0;
   const denom1 = c.I + c.P + c.R + c.NC + c.O + c.UH + c.UO;
   if (denom1 === 0) {
-    return { rr1: null, rr3: null, rr5: null, coop1: null, ref1: null, con1: null, e: 0 };
+    return {
+      rr1: null, rr3: null, rr5: null, coop1: null, ref1: null, con1: null,
+      e: 0, unmappedCount,
+    };
   }
   const e = estimateEligibility(c);
   const denom3 = c.I + c.P + c.R + c.NC + c.O + e * (c.UH + c.UO);
@@ -41,5 +57,6 @@ export function computeAaporRates(c: AaporCounts): AaporRates {
     ref1: ref1Denom > 0 ? c.R / ref1Denom : null,
     con1: con1Num / denom1,
     e,
+    unmappedCount,
   };
 }

@@ -33,4 +33,19 @@ describe("computeAaporRates", () => {
     const r = computeAaporRates({ I: 0, P: 0, R: 0, NC: 0, O: 0, UH: 0, UO: 0 });
     expect(r.rr1).toBeNull();
   });
+  it("UNMAPPED is EXCLUDED from every denominator and surfaced as count", () => {
+    const withUnmapped = { ...counts, UNMAPPED: 50 };
+    const rWith = computeAaporRates(withUnmapped);
+    const rWithout = computeAaporRates(counts);
+    // Every rate should be IDENTICAL whether or not 50 UNMAPPED rows exist.
+    expect(rWith.rr1).toBeCloseTo(rWithout.rr1 ?? -1, 10);
+    expect(rWith.rr3).toBeCloseTo(rWithout.rr3 ?? -1, 10);
+    expect(rWith.rr5).toBeCloseTo(rWithout.rr5 ?? -1, 10);
+    expect(rWith.coop1).toBeCloseTo(rWithout.coop1 ?? -1, 10);
+    expect(rWith.ref1).toBeCloseTo(rWithout.ref1 ?? -1, 10);
+    expect(rWith.con1).toBeCloseTo(rWithout.con1 ?? -1, 10);
+    // …but the count is preserved on the rates object for UI display.
+    expect(rWith.unmappedCount).toBe(50);
+    expect(rWithout.unmappedCount).toBe(0);
+  });
 });

@@ -22,6 +22,7 @@ export async function getAaporResult(projectId: string): Promise<AaporResult> {
     O:  raw.O  ?? 0,
     UH: raw.UH ?? 0,
     UO: raw.UO ?? 0,
+    UNMAPPED: raw.UNMAPPED ?? 0,
   };
   return { counts, rates: computeAaporRates(counts) };
 }

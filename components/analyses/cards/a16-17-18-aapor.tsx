@@ -68,6 +68,7 @@ export function AaporRatesPanel({ projectId }: { projectId?: string }) {
         <KpiTile label="RR5" v={fmt(r.rates.rr5)} />
       </div>
       <CountsRow counts={r.counts} />
+      <UnmappedWarning n={r.rates.unmappedCount} />
     </div>
   );
 }
@@ -114,6 +115,26 @@ function KpiTile({ label, v }: { label: string; v: string }) {
     <div className="rounded-lg bg-[var(--shell-2)] p-2 text-center">
       <div className="font-mono text-[9.5px] uppercase text-[var(--shell-text-muted)]">{label}</div>
       <div className="font-display text-[18px] font-extrabold tabular-nums">{v}</div>
+    </div>
+  );
+}
+
+/**
+ * Inline warning chip rendered when one or more points have no AAPOR mapping.
+ * Those points are EXCLUDED from every rate denominator, so the rates above
+ * are correct under that assumption — but the admin should finish the mapping.
+ */
+function UnmappedWarning({ n }: { n: number }) {
+  if (n <= 0) return null;
+  return (
+    <div
+      role="status"
+      className="mt-2 inline-flex items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 font-mono text-[10px] text-amber-700 dark:text-amber-300"
+    >
+      <span aria-hidden>!</span>
+      <span>
+        {n} point{n === 1 ? "" : "s"} have no AAPOR mapping (not included)
+      </span>
     </div>
   );
 }
