@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   BarChart3,
@@ -11,12 +11,16 @@ import {
   Clock,
   Sparkles,
   ListChecks,
+  Plus,
 } from "lucide-react";
 import type { MatchStatusCounts } from "@/lib/match/status";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import type { ChatMessage } from "@/lib/queries/chat";
 import type { StatusRow } from "./left-rail";
 import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
+import { CatalogDrawer } from "@/components/desktop/catalog-drawer";
+import { ANALYSES_REGISTRY, getCardById } from "@/lib/analyses/registry";
+import { RegistryCard } from "@/components/analyses/registry-card";
 
 export type RightRailTab = "pulse" | "analyze" | "team" | "inspect";
 export type SurveyorBrief = { collector_id: string | null; name: string; count: number };
@@ -52,14 +56,71 @@ type Props = {
   /** When non-null, Pulse swaps its KPI bento for a canvass-completion block. */
   canvass?: CanvassBlob | null;
   onCollapse: () => void;
+  /** M7: viewer role gates the [+ Catalog] button + admin-only cards. */
+  userRole?: "owner" | "admin" | "member" | "guest" | "surveyor" | "viewer" | null;
+  /** M7: named saved views the admin curates. Defaults to the 5 system seeds. */
+  savedViewNames?: string[];
+  /** M7: cards enabled in the active saved view (controls which appear in Analyze). */
+  activeViewCards?: string[];
 };
 
 export function DesktopRightRail({
   projectId, currentUserId, matchCounts, statuses, pointsTotal, todayDelta,
   unreadChats, daily = [], hourly = [], dow = [], surveyors = [], coverage,
   chatMembers = [], initialChat = [], canWriteChat = true, canvass = null, onCollapse,
+  userRole = null,
+  savedViewNames = ["Default", "Coverage", "QC", "Health-equity", "Velocity"],
+  activeViewCards,
 }: Props) {
   const [tab, setTab] = useState<RightRailTab>("pulse");
+  const [catalogOpen, setCatalogOpen] = useState(false);
+
+  const isAdmin = userRole === "owner" || userRole === "admin";
+
+  // Local "draft" set of enabled cards while admin is toggling in the drawer.
+  // Persisted to Supabase via "Save to view" footer (handler wired below).
+  const [enabledDraft, setEnabledDraft] = useState<Set<string>>(
+    () => new Set(activeViewCards ?? []),
+  );
+  useEffect(() => {
+    if (activeViewCards) setEnabledDraft(new Set(activeViewCards));
+  }, [activeViewCards]);
+
+  async function handleSaveToView(viewName: string) {
+    try {
+      await fetch(`/api/projects/${projectId}/saved-views`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: viewName, cards: [...enabledDraft] }),
+      });
+    } catch {
+      // intentionally swallow — non-blocking UX; toast can come later
+    }
+    setCatalogOpen(false);
+  }
+
+  async function handleVoteStub(cardId: string) {
+    try {
+      await fetch(`/api/projects/${projectId}/catalog/vote`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId }),
+      });
+    } catch { /* non-blocking */ }
+  }
+
+  // Hide "Coming" stubs from the rendered Analyze cards even if enabled.
+  const analyzeCards = useMemo(() => {
+    const ids = activeViewCards ?? [];
+    return ids
+      .map((id) => getCardById(id))
+      .filter((c): c is NonNullable<ReturnType<typeof getCardById>> => {
+        if (!c) return false;
+        if (c.stub) return false;
+        if (c.roleGate === "admin" && !isAdmin) return false;
+        return true;
+      });
+  }, [activeViewCards, isAdmin]);
 
   return (
     <aside className="flex h-full w-[360px] flex-col overflow-hidden border-l border-[var(--bento-rule)] bg-[var(--bento-bg)]">
@@ -122,6 +183,17 @@ export function DesktopRightRail({
         )}
         {tab === "analyze" && (
           <Scroll>
+            {/* M7: admin can open the catalog to curate which cards appear here */}
+            {isAdmin && (
+              <button
+                onClick={() => setCatalogOpen(true)}
+                className="bento-focus mb-1 inline-flex items-center gap-1.5 self-start rounded-full border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-1.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-2)] transition-colors hover:bg-[var(--shell-3)]"
+              >
+                <Plus className="h-3 w-3" strokeWidth={1.8} />
+                Catalog · {ANALYSES_REGISTRY.length} analyses
+              </button>
+            )}
+
             <AnalyzeTab
               matchCounts={matchCounts}
               hourly={hourly}
@@ -129,6 +201,17 @@ export function DesktopRightRail({
               surveyors={surveyors}
               coverage={coverage}
             />
+
+            {/* M7 wave-1: registry-driven cards for the active saved view.
+                Each card resolves its real viz component via VIZ_REGISTRY
+                and falls back to a Coming placeholder when still a stub. */}
+            {analyzeCards.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {analyzeCards.map((c) => (
+                  <RegistryCard key={c.id} cardId={c.id} projectId={projectId} userRole={userRole} />
+                ))}
+              </div>
+            )}
           </Scroll>
         )}
         {tab === "team" && (
@@ -142,6 +225,22 @@ export function DesktopRightRail({
       {/* GeoChatBot placeholder slot — bottom-right (locked decision Q8). */}
       {/* No LLM dependency in M4; future plug-in replaces the body without touching the mount. */}
       <GeoChatBotSlot />
+
+      {/* M7 Analyses Catalog drawer — admin-only */}
+      <CatalogDrawer
+        open={catalogOpen && isAdmin}
+        onClose={() => setCatalogOpen(false)}
+        enabledCards={enabledDraft}
+        onToggle={(id, enabled) => {
+          const next = new Set(enabledDraft);
+          if (enabled) next.add(id); else next.delete(id);
+          setEnabledDraft(next);
+        }}
+        onSaveToView={handleSaveToView}
+        onVoteStub={handleVoteStub}
+        viewNames={savedViewNames}
+        viewerRole={isAdmin ? "admin" : (userRole === "member" ? "member" : userRole === "surveyor" ? "surveyor" : "guest")}
+      />
     </aside>
   );
 }
