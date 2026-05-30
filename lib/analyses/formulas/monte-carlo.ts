@@ -26,6 +26,12 @@ export type Forecast = {
   p90Date: string | null;
   simulations: number;
   historyWindow: number;
+  /**
+   * Fraction of simulations that hit the 5-year cap (target unreachable).
+   * When > 0.5, callers should treat the forecast as "target may be
+   * unreachable" and surface a warning rather than the raw percentile dates.
+   */
+  truncatedPct: number;
 };
 
 export function forecastFinishDate(args: {
@@ -42,19 +48,22 @@ export function forecastFinishDate(args: {
       p50DaysOut: null, p75DaysOut: null, p90DaysOut: null,
       p50Date: null, p75Date: null, p90Date: null,
       simulations: sims, historyWindow: history.length,
+      truncatedPct: 0,
     };
   }
   const rand = makeRng(args.seed ?? 1337);
   const results: number[] = [];
+  const cap = 365 * 5;
+  let truncated = 0;
   for (let s = 0; s < sims; s++) {
     let cum = 0;
     let days = 0;
-    const cap = 365 * 5;
     while (cum < args.targetRemaining && days < cap) {
       const idx = Math.floor(rand() * history.length);
       cum += history[idx];
       days++;
     }
+    if (days === cap) truncated++;
     results.push(days);
   }
   results.sort((a, b) => a - b);
@@ -66,5 +75,6 @@ export function forecastFinishDate(args: {
     p50DaysOut: p50, p75DaysOut: p75, p90DaysOut: p90,
     p50Date: date(p50), p75Date: date(p75), p90Date: date(p90),
     simulations: sims, historyWindow: history.length,
+    truncatedPct: truncated / sims,
   };
 }

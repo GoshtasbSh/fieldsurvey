@@ -39,4 +39,24 @@ describe("forecastFinishDate", () => {
     expect(a.p50DaysOut).toBe(b.p50DaysOut);
     expect(a.p75DaysOut).toBe(b.p75DaysOut);
   });
+  it("reports truncatedPct=1 when target unreachable", () => {
+    const r = forecastFinishDate({
+      historicalDailyPoints: [0, 0, 0],
+      targetRemaining: 100,
+      startDate: new Date("2026-06-01T00:00:00Z"),
+      simulations: 100,
+    });
+    expect(r.truncatedPct).toBe(1);
+    expect(r.p50DaysOut).toBe(1825); // the cap value, not null
+  });
+  it("reports truncatedPct=0 when target reachable", () => {
+    const r = forecastFinishDate({
+      historicalDailyPoints: [10, 10, 10],
+      targetRemaining: 50,
+      startDate: new Date("2026-06-01T00:00:00Z"),
+      simulations: 500,
+      seed: 42,
+    });
+    expect(r.truncatedPct).toBe(0);
+  });
 });
