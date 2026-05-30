@@ -87,7 +87,7 @@ row was written (see § "Verify cache writes landed").
 Mirrors `sidecar/README.md` § "Rollback procedure":
 
 1. `vercel rollback <prev-prod-id>` to recover the previous build.
-2. Set `NEXT_PUBLIC_SIDECAR_URL=""` and redeploy to fall back to the
+2. Set `SIDECAR_URL=""` and redeploy to fall back to the
    postgres-strategy + placeholder branches of the dispatcher.
 3. Delete the offending `dashboard_cache` row if a single project's
    payload triggered the regression.

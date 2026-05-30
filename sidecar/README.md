@@ -27,7 +27,11 @@ to 15 minutes (matches the M6 cache TTL).
 | ---------------------------- | ---------------------------------- |
 | `SUPABASE_URL`               | Vercel project env (read at boot)  |
 | `SUPABASE_SERVICE_ROLE_KEY`  | Vercel project env (server-only)   |
-| `NEXT_PUBLIC_SIDECAR_URL`    | Set on Next.js side so the dispatcher knows where to POST |
+| `SIDECAR_URL`                | Server-only — Next.js dispatcher POST target |
+| `SIDECAR_SECRET`             | Server-only shared secret; sidecar rejects requests without it |
+
+`SIDECAR_URL` and `SIDECAR_SECRET` MUST NOT use the `NEXT_PUBLIC_` prefix —
+both values are server-only and must stay out of the client bundle.
 
 ## Deploy
 
@@ -73,24 +77,29 @@ curl http://localhost:8001/sidecar/healthz
 # Health
 curl https://<deployment>/sidecar/healthz
 
+# All POSTs to /sidecar/compute/* must include x-sidecar-secret.
 # A21 Monte Carlo
 curl -X POST https://<deployment>/sidecar/compute/A21_finish \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SIDECAR_SECRET" \
   -d '{"project_id":"<uuid>","history":[5,7,4,8,5,6,5,5,7,4],"target":100,"start":"2026-06-01"}'
 
 # A25 velocity change-points
 curl -X POST https://<deployment>/sidecar/compute/A25_velocity \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SIDECAR_SECRET" \
   -d '{"project_id":"<uuid>","daily_counts":[3,3,3,3,3,3,3,3,3,3,9,9,9,9,9,9,9,9,9,9]}'
 
 # A11 KDE
 curl -X POST https://<deployment>/sidecar/compute/A11_kde \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SIDECAR_SECRET" \
   -d '{"project_id":"<uuid>","points":[[-82.71,29.13],[-82.71,29.13]],"bandwidth":0.005,"grid_size":64}'
 
 # A8 Getis-Ord Gi*
 curl -X POST https://<deployment>/sidecar/compute/A8_gi_star \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SIDECAR_SECRET" \
   -d '{"project_id":"<uuid>","cells":[{"id":"p1","value":5,"lat":29.1,"lon":-82.7}],"k":5}'
 ```
 
@@ -109,19 +118,21 @@ Supabase, so tests run offline.
 ### 1. Vercel project env vars
 
 Set these on the Vercel project (Settings → Environment Variables) for the
-Production environment. None of these are exposed to the browser except
-`NEXT_PUBLIC_SIDECAR_URL`.
+Production environment. None of these are exposed to the browser.
 
 | Key                          | Example (redacted)                                | Scope            |
 | ---------------------------- | ------------------------------------------------- | ---------------- |
 | `SUPABASE_URL`               | `https://<project-ref>.supabase.co`               | Server           |
 | `SUPABASE_SERVICE_ROLE_KEY`  | `eyJhbGciOi...` (service-role JWT — server only)  | Server           |
-| `NEXT_PUBLIC_SIDECAR_URL`    | `https://fieldsurvey.vercel.app` (same origin)    | Client + Server  |
+| `SIDECAR_URL`                | `https://fieldsurvey.vercel.app` (same origin)    | Server           |
+| `SIDECAR_SECRET`             | `<32-byte random string — required>`              | Server           |
 
 If sidecar lives on the same Vercel project as the Next.js app, set
-`NEXT_PUBLIC_SIDECAR_URL` to the project's primary domain so the dispatcher
-POSTs to `https://<domain>/sidecar/compute/<card>` and Vercel rewrites
-route it to `sidecar/app.py`.
+`SIDECAR_URL` to the project's primary domain so the dispatcher POSTs to
+`https://<domain>/sidecar/compute/<card>` and Vercel rewrites route it to
+`sidecar/app.py`. `SIDECAR_SECRET` must match between the Next.js env and
+the sidecar function env (same Vercel project → automatically shared).
+Generate with `openssl rand -hex 32`. Without it the sidecar returns 503.
 
 ### 2. Apply pending migrations BEFORE deploy
 
@@ -156,25 +167,30 @@ curl -sS https://<deployment>/sidecar/version
 ```bash
 PROJECT_ID="<a real project uuid you own>"
 DEPLOY="https://<deployment>"
+SECRET="$SIDECAR_SECRET"   # same shared secret used by the dispatcher
 
 # A21 — Monte Carlo finish-date forecast
 curl -sS -X POST "$DEPLOY/sidecar/compute/A21_finish" \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SECRET" \
   -d "{\"project_id\":\"$PROJECT_ID\",\"history\":[5,7,4,8,5,6,5,5,7,4,6,5,7,6,5],\"target\":250,\"start\":\"2026-06-01\"}"
 
 # A25 — PELT change-point detection on daily counts
 curl -sS -X POST "$DEPLOY/sidecar/compute/A25_velocity" \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SECRET" \
   -d "{\"project_id\":\"$PROJECT_ID\",\"daily_counts\":[3,3,3,3,3,3,3,3,3,3,9,9,9,9,9,9,9,9,9,9]}"
 
 # A11 — Gaussian FFT KDE
 curl -sS -X POST "$DEPLOY/sidecar/compute/A11_kde" \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SECRET" \
   -d "{\"project_id\":\"$PROJECT_ID\",\"points\":[[-82.71,29.13],[-82.71,29.13],[-82.72,29.14]],\"bandwidth\":0.005,\"grid_size\":64}"
 
 # A8 — Getis-Ord Gi* (k=5 KNN, 999 permutations)
 curl -sS -X POST "$DEPLOY/sidecar/compute/A8_gi_star" \
   -H 'content-type: application/json' \
+  -H "x-sidecar-secret: $SECRET" \
   -d "{\"project_id\":\"$PROJECT_ID\",\"cells\":[{\"id\":\"p1\",\"value\":5,\"lat\":29.1,\"lon\":-82.7},{\"id\":\"p2\",\"value\":7,\"lat\":29.11,\"lon\":-82.71},{\"id\":\"p3\",\"value\":2,\"lat\":29.12,\"lon\":-82.72}],\"k\":2}"
 ```
 
@@ -202,7 +218,7 @@ spec, or `/sidecar/healthz` returns non-200 for >2 minutes:
 
 1. **Revert deploy:** `vercel rollback <previous-prod-deployment-id>`.
    Sidecar comes back online with the prior wheel cache.
-2. **Disable sidecar dispatch in the app:** flip the `NEXT_PUBLIC_SIDECAR_URL`
+2. **Disable sidecar dispatch in the app:** flip the `SIDECAR_URL`
    env var to an empty string and redeploy. The Next.js dispatcher
    falls back to the postgres-strategy cards and renders the 4 sidecar
    cards' `n < min` placeholders.
