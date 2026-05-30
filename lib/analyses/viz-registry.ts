@@ -17,7 +17,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   DowHourHeatmap:        lazy(() => import("@/components/analyses/cards/a24-dow-heatmap").then(m => ({ default: m.DowHourHeatmap }))),
   // VelocityLineCI:        lazy(() => import("@/components/analyses/cards/a25-velocity").then(m => ({ default: m.VelocityLineCI }))),
   // MonteCarloFan:         lazy(() => import("@/components/analyses/cards/a21-finish-fan").then(m => ({ default: m.MonteCarloFan }))),
-  // ProductivityBullet:    lazy(() => import("@/components/analyses/cards/a28-productivity").then(m => ({ default: m.ProductivityBullet }))),
+  ProductivityBullet:    lazy(() => import("@/components/analyses/cards/a28-productivity").then(m => ({ default: m.ProductivityBullet }))),
   // TopKBlocks:            lazy(() => import("@/components/analyses/cards/a51-topk-blocks").then(m => ({ default: m.TopKBlocks }))),
   DivergingBar:          lazy(() => import("@/components/analyses/cards/a01-univariate").then(m => ({ default: m.DivergingBar }))),
   HistogramBoxplot:      lazy(() => import("@/components/analyses/cards/a02-numeric-summary").then(m => ({ default: m.HistogramBoxplot }))),
