@@ -19,15 +19,22 @@ export function VelocityLineCI({ projectId }: { projectId?: string }) {
 
   useEffect(() => {
     if (!projectId) return;
-    fetch(`/api/projects/${projectId}/analyses/A25_velocity`)
+    const ac = new AbortController();
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}/analyses/A25_velocity`, { signal: ac.signal })
       .then((res) => res.json())
       .then((j: DispatchEnvelope) => {
+        if (cancelled) return;
         if (j.data && j.data.payload) {
           setR(j.data.payload);
           setComputedAt(j.data.computedAt ?? j.computedAt ?? null);
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
   }, [projectId]);
 
   if (!r) return null;

@@ -24,15 +24,22 @@ export function MonteCarloFan({ projectId }: { projectId?: string }) {
 
   useEffect(() => {
     if (!projectId) return;
-    fetch(`/api/projects/${projectId}/analyses/A21_finish`)
+    const ac = new AbortController();
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}/analyses/A21_finish`, { signal: ac.signal })
       .then((res) => res.json())
       .then((j: DispatchEnvelope) => {
+        if (cancelled) return;
         if (j.data && j.data.payload) {
           setR(j.data.payload);
           setComputedAt(j.data.computedAt ?? j.computedAt ?? null);
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
   }, [projectId]);
 
   if (!r || r.p50_days == null) return null;
