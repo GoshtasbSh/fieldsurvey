@@ -67,9 +67,17 @@ export async function GET(
     const data = await handler(projectId);
     return NextResponse.json({ data, computedAt: new Date().toISOString() });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "failed" },
-      { status: 500 },
-    );
+    // Sanitize errors before surfacing to the client. RLS / RPC errors leak
+    // internal function names and Postgres error codes when forwarded raw.
+    const raw = err instanceof Error ? err.message : "";
+    const rawLow = raw.toLowerCase();
+    const isPermission = rawLow.includes("permission denied") || rawLow.includes("rls") || rawLow.includes("policy");
+    const isAuth = rawLow.includes("auth") || rawLow.includes("not authenticated");
+    if (isPermission || isAuth) {
+      return NextResponse.json({ error: "forbidden", cardId }, { status: 403 });
+    }
+    // Generic 500 — do not leak the raw message; log server-side for ops.
+    console.error(`[analyses/${cardId}] handler error:`, raw);
+    return NextResponse.json({ error: "card_failed", cardId }, { status: 500 });
   }
 }
