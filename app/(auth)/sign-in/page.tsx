@@ -13,7 +13,7 @@ export default function SignInPage() {
   const [mode, setMode] = useState<Mode>("member");
   const [error, setError] = useState<string | null>(null);
   const [magicSent, setMagicSent] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(true);
   const [pending, startTransition] = useTransition();
 
   return (
