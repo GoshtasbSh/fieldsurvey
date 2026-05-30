@@ -22,4 +22,9 @@ describe("wilsonInterval", () => {
     expect(low).toBe(0);
     expect(high).toBe(0);
   });
+  it("guards malformed input — successes > n", () => {
+    const r = wilsonInterval(15, 10);
+    expect(r.low).toBe(0);
+    expect(r.high).toBe(1);
+  });
 });
