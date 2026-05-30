@@ -25,7 +25,7 @@ export function RankedBullet({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a20-undersampled`,
+          `/api/projects/${projectId}/analyses/A20_undersampled`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

@@ -26,7 +26,7 @@ export function RateChoropleth({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a13-cov-heatmap`,
+          `/api/projects/${projectId}/analyses/A13_cov_heatmap`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

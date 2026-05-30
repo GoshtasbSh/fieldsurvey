@@ -26,7 +26,7 @@ export function OffBoundaryMapList({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a33-off-boundary`,
+          `/api/projects/${projectId}/analyses/A33_off_boundary`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

@@ -7,10 +7,9 @@ import type { AaporResult } from "@/lib/queries/aapor";
 /**
  * Shared hook for the three AAPOR panels.
  *
- * The unified `/api/projects/[projectId]/analyses/aapor` endpoint doesn't
- * exist yet (Batch 5 wires the dispatcher) — until then, the fetch fails
- * silently (network error → null state → component returns null), which is
- * exactly the "no data yet" path the cards already handle.
+ * The dispatcher routes A16_rr, A17_coop_ref, and A18_con to the same
+ * `getAaporResult` handler — so we only need to fetch one of them and all
+ * three panels share the payload. Uses A16_rr as the canonical key.
  *
  * Wraps fetch in AbortController so an unmount mid-flight doesn't trigger
  * a setState-on-unmounted React warning.
@@ -24,7 +23,7 @@ function useAapor(projectId: string | undefined): AaporResult | null {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/aapor`,
+          `/api/projects/${projectId}/analyses/A16_rr`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

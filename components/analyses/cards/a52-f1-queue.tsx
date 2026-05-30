@@ -27,7 +27,7 @@ export function F1QueueListMap({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a52-f1-queue`,
+          `/api/projects/${projectId}/analyses/A52_f1_queue`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

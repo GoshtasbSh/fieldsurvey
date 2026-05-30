@@ -25,7 +25,7 @@ export function TopKBlocks({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a51-topk-blocks`,
+          `/api/projects/${projectId}/analyses/A51_topk`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

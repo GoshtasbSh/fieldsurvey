@@ -17,6 +17,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// cardId convention: registry format (uppercase snake-case, e.g. A19_universe_map,
+// A28_productivity, A51_topk). Cards must fetch `/analyses/<registry-card-id>` —
+// the registry in `lib/analyses/registry.ts` is the single source of truth.
 const POSTGRES_DISPATCH: Record<string, (projectId: string) => Promise<unknown>> = {
   A16_rr: getAaporResult,
   A17_coop_ref: getAaporResult,

@@ -26,7 +26,7 @@ export function UniverseMap({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a19-universe-map`,
+          `/api/projects/${projectId}/analyses/A19_universe_map`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

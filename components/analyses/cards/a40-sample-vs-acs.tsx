@@ -26,7 +26,7 @@ export function SampleVsAcsBars({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a40-sample-vs-acs`,
+          `/api/projects/${projectId}/analyses/A40_sample_vs_acs`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

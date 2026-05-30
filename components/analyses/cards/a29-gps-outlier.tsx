@@ -26,7 +26,7 @@ export function GpsOutlierBox({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a29-gps-outlier`,
+          `/api/projects/${projectId}/analyses/A29_gps_outlier`,
           { signal: ac.signal },
         );
         if (!res.ok) return;

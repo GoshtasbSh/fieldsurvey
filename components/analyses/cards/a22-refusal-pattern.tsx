@@ -32,7 +32,7 @@ export function RefusalSmallMultiples({ projectId }: { projectId?: string }) {
     (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/analyses/a22-refusal-pattern`,
+          `/api/projects/${projectId}/analyses/A22_refusal_pattern`,
           { signal: ac.signal },
         );
         if (!res.ok) return;
