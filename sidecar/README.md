@@ -103,3 +103,113 @@ python3.13 -m pytest sidecar/tests/ -v
 
 Each card has a unit test that exercises `compute()` directly without hitting
 Supabase, so tests run offline.
+
+## Production deploy (T35)
+
+### 1. Vercel project env vars
+
+Set these on the Vercel project (Settings → Environment Variables) for the
+Production environment. None of these are exposed to the browser except
+`NEXT_PUBLIC_SIDECAR_URL`.
+
+| Key                          | Example (redacted)                                | Scope            |
+| ---------------------------- | ------------------------------------------------- | ---------------- |
+| `SUPABASE_URL`               | `https://<project-ref>.supabase.co`               | Server           |
+| `SUPABASE_SERVICE_ROLE_KEY`  | `eyJhbGciOi...` (service-role JWT — server only)  | Server           |
+| `NEXT_PUBLIC_SIDECAR_URL`    | `https://fieldsurvey.vercel.app` (same origin)    | Client + Server  |
+
+If sidecar lives on the same Vercel project as the Next.js app, set
+`NEXT_PUBLIC_SIDECAR_URL` to the project's primary domain so the dispatcher
+POSTs to `https://<domain>/sidecar/compute/<card>` and Vercel rewrites
+route it to `sidecar/app.py`.
+
+### 2. Apply pending migrations BEFORE deploy
+
+```bash
+# Order matters: 015 creates analyses_saved_views, 016 adds RPCs the
+# dispatcher calls for postgres-strategy cards, 017 widens the cache
+# CHECK so sidecar writes don't trip a constraint violation.
+supabase db push   # or apply 015 → 016 → 017 individually
+```
+
+### 3. Build + deploy
+
+```bash
+vercel --prod
+# Expected duration: 4-6 minutes (Next.js build + Python wheel install).
+# Python deps (numpy, scipy, ruptures, KDEpy, scikit-learn) take ~90s
+# on a cold deploy; subsequent deploys reuse the wheel cache.
+```
+
+### 4. Health smoke
+
+```bash
+curl -sS https://<deployment>/sidecar/healthz
+# → {"ok": true}
+
+curl -sS https://<deployment>/sidecar/version
+# → {"version": "1.0.0"}
+```
+
+### 5. Per-route POST smoke (with realistic payloads)
+
+```bash
+PROJECT_ID="<a real project uuid you own>"
+DEPLOY="https://<deployment>"
+
+# A21 — Monte Carlo finish-date forecast
+curl -sS -X POST "$DEPLOY/sidecar/compute/A21_finish" \
+  -H 'content-type: application/json' \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"history\":[5,7,4,8,5,6,5,5,7,4,6,5,7,6,5],\"target\":250,\"start\":\"2026-06-01\"}"
+
+# A25 — PELT change-point detection on daily counts
+curl -sS -X POST "$DEPLOY/sidecar/compute/A25_velocity" \
+  -H 'content-type: application/json' \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"daily_counts\":[3,3,3,3,3,3,3,3,3,3,9,9,9,9,9,9,9,9,9,9]}"
+
+# A11 — Gaussian FFT KDE
+curl -sS -X POST "$DEPLOY/sidecar/compute/A11_kde" \
+  -H 'content-type: application/json' \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"points\":[[-82.71,29.13],[-82.71,29.13],[-82.72,29.14]],\"bandwidth\":0.005,\"grid_size\":64}"
+
+# A8 — Getis-Ord Gi* (k=5 KNN, 999 permutations)
+curl -sS -X POST "$DEPLOY/sidecar/compute/A8_gi_star" \
+  -H 'content-type: application/json' \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"cells\":[{\"id\":\"p1\",\"value\":5,\"lat\":29.1,\"lon\":-82.7},{\"id\":\"p2\",\"value\":7,\"lat\":29.11,\"lon\":-82.71},{\"id\":\"p3\",\"value\":2,\"lat\":29.12,\"lon\":-82.72}],\"k\":2}"
+```
+
+Expected response shape for each: `{ "ok": true, "data_type": "<key>",
+"computed_at": "<iso>" }`. Sidecar writes the full payload to
+`dashboard_cache`; the dispatcher reads it on the next request.
+
+### 6. Verify cache writes landed
+
+```sql
+-- Run via Supabase SQL editor or psql with the service-role connection.
+select project_id, data_type, computed_at
+  from public.dashboard_cache
+ where data_type in ('A21_finish','A25_velocity','A11_kde','A8_gi_star')
+ order by computed_at desc
+ limit 10;
+```
+
+`computed_at` should be within the last minute of each smoke POST.
+
+### 7. Rollback procedure
+
+If p95 latency on the sidecar route exceeds the **2 s SLO** in the M7
+spec, or `/sidecar/healthz` returns non-200 for >2 minutes:
+
+1. **Revert deploy:** `vercel rollback <previous-prod-deployment-id>`.
+   Sidecar comes back online with the prior wheel cache.
+2. **Disable sidecar dispatch in the app:** flip the `NEXT_PUBLIC_SIDECAR_URL`
+   env var to an empty string and redeploy. The Next.js dispatcher
+   falls back to the postgres-strategy cards and renders the 4 sidecar
+   cards' `n < min` placeholders.
+3. **Quarantine the offending payload:** check `dashboard_cache` for the
+   most recent entry with `computed_at` near the incident — if a single
+   project's payload triggered the regression, delete its row and pin
+   that project to the placeholder branch.
+4. **File an incident ticket** referencing the deployment id, sidecar
+   route, p95 timing from `get_runtime_logs`, and the offending project.
+
