@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { MoeBracket } from "@/components/analyses/moe-bracket";
 
 describe("MoeBracket", () => {
-  it("renders ±MoE in basis points", () => {
+  it("renders ±MoE in percentage points", () => {
     const { getByText } = render(<MoeBracket successes={50} n={100} confidence={0.95} />);
     expect(getByText(/\d+\.?\d*%/)).toBeTruthy();
   });

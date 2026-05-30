@@ -9,7 +9,14 @@ export function NMinPlaceholder({ cardName, n, nMin }: { cardName: string; n: nu
         You have {n} of {nMin}.
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-[var(--shell-3)]">
+        <div
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${pct}% of required responses collected`}
+          className="flex-1 h-1.5 overflow-hidden rounded-full bg-[var(--shell-3)]"
+        >
           <div className="h-full rounded-full bg-[var(--shell-text-muted)]" style={{ width: `${pct}%` }} />
         </div>
         <span className="font-mono text-[10px] tabular-nums text-[var(--shell-text-muted)]">{pct}%</span>
