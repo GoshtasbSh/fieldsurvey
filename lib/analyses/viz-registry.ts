@@ -21,7 +21,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   // TopKBlocks:            lazy(() => import("@/components/analyses/cards/a51-topk-blocks").then(m => ({ default: m.TopKBlocks }))),
   DivergingBar:          lazy(() => import("@/components/analyses/cards/a01-univariate").then(m => ({ default: m.DivergingBar }))),
   HistogramBoxplot:      lazy(() => import("@/components/analyses/cards/a02-numeric-summary").then(m => ({ default: m.HistogramBoxplot }))),
-  // UpSetPlot:             lazy(() => import("@/components/analyses/cards/a03-upset").then(m => ({ default: m.UpSetPlot }))),
+  UpSetPlot:             lazy(() => import("@/components/analyses/cards/a03-upset").then(m => ({ default: m.UpSetPlot }))),
   // SignificanceChoropleth:lazy(() => import("@/components/analyses/cards/a08-gi-star").then(m => ({ default: m.SignificanceChoropleth }))),
   // LisaMap:               lazy(() => import("@/components/analyses/cards/a09-lisa").then(m => ({ default: m.LisaMap }))),
   // KdeRaster:             lazy(() => import("@/components/analyses/cards/a11-kde").then(m => ({ default: m.KdeRaster }))),
