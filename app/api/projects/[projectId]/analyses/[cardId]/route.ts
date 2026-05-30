@@ -7,6 +7,13 @@ import { getOffBoundary } from "@/lib/queries/off-boundary";
 import { getDemographicsSchema } from "@/lib/queries/representativeness";
 import { getTopKBlocks } from "@/lib/queries/topk-blocks";
 import { getF1Queue } from "@/lib/queries/f1-queue";
+import { callSidecar } from "@/lib/queries/sidecar";
+import {
+  buildA21FinishInput,
+  buildA25VelocityInput,
+  buildA11KdeInput,
+  buildA8GiStarInput,
+} from "@/lib/queries/sidecar-inputs";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +33,24 @@ const POSTGRES_DISPATCH: Record<string, (projectId: string) => Promise<unknown>>
   A52_f1_queue: getF1Queue,
 };
 
-const SIDECAR_PENDING = new Set(["A21_finish", "A25_velocity", "A11_kde", "A8_gi_star"]);
+const SIDECAR_DISPATCH: Record<string, (projectId: string) => Promise<unknown>> = {
+  A21_finish: async (projectId) => {
+    const body = await buildA21FinishInput(projectId);
+    return callSidecar(projectId, "A21_finish", body);
+  },
+  A25_velocity: async (projectId) => {
+    const body = await buildA25VelocityInput(projectId);
+    return callSidecar(projectId, "A25_velocity", body);
+  },
+  A11_kde: async (projectId) => {
+    const body = await buildA11KdeInput(projectId);
+    return callSidecar(projectId, "A11_kde", body);
+  },
+  A8_gi_star: async (projectId) => {
+    const body = await buildA8GiStarInput(projectId);
+    return callSidecar(projectId, "A8_gi_star", body);
+  },
+};
 
 export async function GET(
   _req: Request,
@@ -34,15 +58,7 @@ export async function GET(
 ) {
   const { projectId, cardId } = await params;
 
-  if (SIDECAR_PENDING.has(cardId)) {
-    return NextResponse.json({
-      data: null,
-      status: "sidecar_pending",
-      computedAt: new Date().toISOString(),
-    });
-  }
-
-  const handler = POSTGRES_DISPATCH[cardId];
+  const handler = POSTGRES_DISPATCH[cardId] ?? SIDECAR_DISPATCH[cardId];
   if (!handler) {
     return NextResponse.json({ error: "unknown card" }, { status: 404 });
   }
