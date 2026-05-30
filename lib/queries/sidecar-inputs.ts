@@ -130,10 +130,14 @@ export async function buildA8GiStarInput(
   projectId: string,
 ): Promise<{ cells: { id: string; value: number; lat: number; lon: number }[]; k: number }> {
   const sb = await createServerSupabase();
+  // Cap raw fetch at 50k points — keeps cold reads bounded on large projects.
+  // The 250m binning below collapses density anyway, so further raw points
+  // contribute marginal cell-value precision but linear memory cost.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await ((sb.from("points") as any)
     .select("lat, lon")
-    .eq("project_id", projectId)) as { data: Array<{ lat: number | null; lon: number | null }> | null };
+    .eq("project_id", projectId)
+    .limit(50000)) as { data: Array<{ lat: number | null; lon: number | null }> | null };
 
   // Quick-and-cheap binning to ~250m cells (≈0.0025deg lat at FL) to keep the
   // KNN graph tractable. The sidecar does the actual spatial stats; this just
