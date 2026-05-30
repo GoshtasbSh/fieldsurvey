@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn==0.32.0
+supabase==2.7.2
+numpy==2.1.1
+pysal==24.07
+libpysal==4.12.1
+esda==2.6.0
+KDEpy==1.1.10
+ruptures==1.1.9
+python-dateutil==2.9.0

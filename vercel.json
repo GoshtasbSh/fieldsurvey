@@ -1,5 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "functions": {
+    "sidecar/app.py": { "runtime": "python3.13", "maxDuration": 60, "memory": 1024 }
+  },
+  "rewrites": [
+    { "source": "/sidecar/:path*", "destination": "/sidecar/app.py" }
+  ],
   "crons": [
     { "path": "/api/cron/daily-digest", "schedule": "0 13 * * *" }
   ]
