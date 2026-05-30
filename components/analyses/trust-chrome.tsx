@@ -1,3 +1,5 @@
+"use client";
+
 type Props = {
   cardName: string;
   n?: number;
