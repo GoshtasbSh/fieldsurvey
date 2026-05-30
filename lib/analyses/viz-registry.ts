@@ -25,7 +25,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   // SignificanceChoropleth:lazy(() => import("@/components/analyses/cards/a08-gi-star").then(m => ({ default: m.SignificanceChoropleth }))),
   // LisaMap:               lazy(() => import("@/components/analyses/cards/a09-lisa").then(m => ({ default: m.LisaMap }))),
   // KdeRaster:             lazy(() => import("@/components/analyses/cards/a11-kde").then(m => ({ default: m.KdeRaster }))),
-  // RateChoropleth:        lazy(() => import("@/components/analyses/cards/a13-cov-heatmap").then(m => ({ default: m.RateChoropleth }))),
+  RateChoropleth:        lazy(() => import("@/components/analyses/cards/a13-cov-heatmap").then(m => ({ default: m.RateChoropleth }))),
   UniverseMap:           lazy(() => import("@/components/analyses/cards/a19-universe-map").then(m => ({ default: m.UniverseMap }))),
   RankedBullet:          lazy(() => import("@/components/analyses/cards/a20-undersampled").then(m => ({ default: m.RankedBullet }))),
   RefusalSmallMultiples: lazy(() => import("@/components/analyses/cards/a22-refusal-pattern").then(m => ({ default: m.RefusalSmallMultiples }))),
