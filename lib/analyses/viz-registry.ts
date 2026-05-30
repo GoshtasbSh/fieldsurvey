@@ -19,7 +19,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   // MonteCarloFan:         lazy(() => import("@/components/analyses/cards/a21-finish-fan").then(m => ({ default: m.MonteCarloFan }))),
   // ProductivityBullet:    lazy(() => import("@/components/analyses/cards/a28-productivity").then(m => ({ default: m.ProductivityBullet }))),
   // TopKBlocks:            lazy(() => import("@/components/analyses/cards/a51-topk-blocks").then(m => ({ default: m.TopKBlocks }))),
-  // DivergingBar:          lazy(() => import("@/components/analyses/cards/a01-univariate").then(m => ({ default: m.DivergingBar }))),
+  DivergingBar:          lazy(() => import("@/components/analyses/cards/a01-univariate").then(m => ({ default: m.DivergingBar }))),
   // HistogramBoxplot:      lazy(() => import("@/components/analyses/cards/a02-numeric-summary").then(m => ({ default: m.HistogramBoxplot }))),
   // UpSetPlot:             lazy(() => import("@/components/analyses/cards/a03-upset").then(m => ({ default: m.UpSetPlot }))),
   // SignificanceChoropleth:lazy(() => import("@/components/analyses/cards/a08-gi-star").then(m => ({ default: m.SignificanceChoropleth }))),
