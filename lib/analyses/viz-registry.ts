@@ -1,6 +1,10 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
-export type CardComponent = LazyExoticComponent<ComponentType<{ projectId: string; userRole?: string | null }>>;
+// Cards may accept additional optional props (e.g. cached data passed by a
+// future dispatcher); the registry contract only guarantees `projectId` +
+// optional `userRole` from `<RegistryCard>`. Widen to Record<string, unknown>
+// so each card declares its own prop shape without TS narrowing failures.
+export type CardComponent = LazyExoticComponent<ComponentType<Record<string, unknown>>>;
 
 export const VIZ_REGISTRY: Record<string, CardComponent> = {
   FreshnessChip:         lazy(() => import("@/components/analyses/cards/a39-freshness").then(m => ({ default: m.FreshnessChip }))),
@@ -9,7 +13,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   // AaporRatesPanel:       lazy(() => import("@/components/analyses/cards/a16-17-18-aapor").then(m => ({ default: m.AaporRatesPanel }))),
   // AaporCoopRefPanel:     lazy(() => import("@/components/analyses/cards/a16-17-18-aapor").then(m => ({ default: m.AaporCoopRefPanel }))),
   // AaporContactTile:      lazy(() => import("@/components/analyses/cards/a16-17-18-aapor").then(m => ({ default: m.AaporContactTile }))),
-  // HourHistogram:         lazy(() => import("@/components/analyses/cards/a23-hour-local").then(m => ({ default: m.HourHistogram }))),
+  HourHistogram:         lazy(() => import("@/components/analyses/cards/a23-hour-local").then(m => ({ default: m.HourHistogram }))),
   // DowHourHeatmap:        lazy(() => import("@/components/analyses/cards/a24-dow-heatmap").then(m => ({ default: m.DowHourHeatmap }))),
   // VelocityLineCI:        lazy(() => import("@/components/analyses/cards/a25-velocity").then(m => ({ default: m.VelocityLineCI }))),
   // MonteCarloFan:         lazy(() => import("@/components/analyses/cards/a21-finish-fan").then(m => ({ default: m.MonteCarloFan }))),

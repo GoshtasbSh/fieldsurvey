@@ -88,19 +88,42 @@ export async function getCoverageMetrics(projectId: string): Promise<CoverageMet
   return { match_rate_pct, median_accuracy_m, photo_coverage_pct, density_per_km2 };
 }
 
-/** Count points by hour of day (UTC). Returns 24 buckets, 0–23. */
-export async function getHourlyDistribution(projectId: string): Promise<HourBucket[]> {
+/** Count points by hour of day in the project's local timezone. Returns 24 buckets, 0–23. */
+export async function getHourlyDistribution(projectId: string, tz = "UTC"): Promise<HourBucket[]> {
   const sb = await createServerSupabase();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (sb.from("points") as any)
     .select("collected_at")
     .eq("project_id", projectId) as { data: Array<{ collected_at: string }> | null };
   const counts = new Array(24).fill(0) as number[];
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false });
   for (const r of data ?? []) {
-    const h = new Date(r.collected_at).getUTCHours();
-    counts[h]++;
+    const hStr = fmt.format(new Date(r.collected_at));
+    const h = parseInt(hStr, 10);
+    if (Number.isFinite(h) && h >= 0 && h < 24) counts[h]++;
   }
   return counts.map((total, hour) => ({ hour, total }));
+}
+
+export type DowHourCell = { dow: number; hour: number; count: number };
+/** Count points by (day-of-week × hour) in the project's local timezone. Returns 7×24 cells. */
+export async function getDowHourMatrix(projectId: string, tz = "UTC"): Promise<DowHourCell[]> {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb.from("points") as any)
+    .select("collected_at")
+    .eq("project_id", projectId) as { data: Array<{ collected_at: string }> | null };
+  const grid = Array.from({ length: 7 }, () => new Array(24).fill(0) as number[]);
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "numeric", hour12: false });
+  const wkMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  for (const r of data ?? []) {
+    const parts = fmt.formatToParts(new Date(r.collected_at));
+    const wk = parts.find((p) => p.type === "weekday")?.value ?? "Sun";
+    const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const dow = wkMap[wk] ?? 0;
+    if (Number.isFinite(h) && h >= 0 && h < 24) grid[dow][h]++;
+  }
+  return grid.flatMap((row, dow) => row.map((count, hour) => ({ dow, hour, count })));
 }
 
 /** Count points by day of week (0=Sun … 6=Sat, UTC). Returns 7 buckets. */
