@@ -18,7 +18,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   // VelocityLineCI:        lazy(() => import("@/components/analyses/cards/a25-velocity").then(m => ({ default: m.VelocityLineCI }))),
   // MonteCarloFan:         lazy(() => import("@/components/analyses/cards/a21-finish-fan").then(m => ({ default: m.MonteCarloFan }))),
   ProductivityBullet:    lazy(() => import("@/components/analyses/cards/a28-productivity").then(m => ({ default: m.ProductivityBullet }))),
-  // TopKBlocks:            lazy(() => import("@/components/analyses/cards/a51-topk-blocks").then(m => ({ default: m.TopKBlocks }))),
+  TopKBlocks:            lazy(() => import("@/components/analyses/cards/a51-topk-blocks").then(m => ({ default: m.TopKBlocks }))),
   DivergingBar:          lazy(() => import("@/components/analyses/cards/a01-univariate").then(m => ({ default: m.DivergingBar }))),
   HistogramBoxplot:      lazy(() => import("@/components/analyses/cards/a02-numeric-summary").then(m => ({ default: m.HistogramBoxplot }))),
   UpSetPlot:             lazy(() => import("@/components/analyses/cards/a03-upset").then(m => ({ default: m.UpSetPlot }))),
@@ -32,7 +32,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   GpsOutlierBox:         lazy(() => import("@/components/analyses/cards/a29-gps-outlier").then(m => ({ default: m.GpsOutlierBox }))),
   OffBoundaryMapList:    lazy(() => import("@/components/analyses/cards/a33-off-boundary").then(m => ({ default: m.OffBoundaryMapList }))),
   SampleVsAcsBars:       lazy(() => import("@/components/analyses/cards/a40-sample-vs-acs").then(m => ({ default: m.SampleVsAcsBars }))),
-  // F1QueueListMap:        lazy(() => import("@/components/analyses/cards/a52-f1-queue").then(m => ({ default: m.F1QueueListMap }))),
+  F1QueueListMap:        lazy(() => import("@/components/analyses/cards/a52-f1-queue").then(m => ({ default: m.F1QueueListMap }))),
 };
 
 export function getVizComponent(name: string): CardComponent | null {
