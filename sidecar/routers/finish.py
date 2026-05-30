@@ -36,17 +36,27 @@ def compute(history, target, start, sims=10_000, seed=1337):
             "p90_date": None,
             "sims": sims,
             "history_window": int(len(hist)),
+            "truncated_pct": 0.0,
         }
     days = np.zeros(sims, dtype=int)
+    truncated = 0
+    cap = 365 * 5
     for s in range(sims):
         cum, d = 0, 0
-        while cum < target and d < 365 * 5:
+        while cum < target and d < cap:
             cum += int(rng.choice(hist))
             d += 1
         days[s] = d
-    p50 = int(np.percentile(days, 50))
-    p75 = int(np.percentile(days, 75))
-    p90 = int(np.percentile(days, 90))
+        if d == cap:
+            truncated += 1
+    # Discrete lower-order-statistic percentile (matches TS mirror exactly).
+    sorted_days = np.sort(days)
+
+    def pct(q: float) -> int:
+        return int(sorted_days[int(q * len(sorted_days))])
+
+    p50, p75, p90 = pct(0.5), pct(0.75), pct(0.9)
+    truncated_pct = truncated / sims if sims > 0 else 0.0
     start_d = date.fromisoformat(start)
     return {
         "p50_days": p50,
@@ -57,6 +67,7 @@ def compute(history, target, start, sims=10_000, seed=1337):
         "p90_date": (start_d + timedelta(days=p90)).isoformat(),
         "sims": sims,
         "history_window": int(len(hist)),
+        "truncated_pct": truncated_pct,
     }
 
 
