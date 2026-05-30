@@ -8,18 +8,22 @@ describe("computeAaporRates", () => {
     const { rr1 } = computeAaporRates(counts);
     expect(rr1).toBeCloseTo(200 / 630, 4);
   });
-  it("RR3 includes an estimate of eligibility among UH+UO", () => {
-    const { rr3 } = computeAaporRates(counts);
-    expect(rr3).toBeGreaterThan(0.3);
-    expect(rr3).toBeLessThan(0.5);
+  it("RR3 sits between RR1 and RR5 (eligibility-adjusted)", () => {
+    const { rr1, rr3, rr5 } = computeAaporRates(counts);
+    expect(rr1).not.toBeNull();
+    expect(rr3).not.toBeNull();
+    expect(rr5).not.toBeNull();
+    expect(rr3!).toBeGreaterThan(rr1!);
+    expect(rr3!).toBeLessThan(rr5!);
+    expect(rr3!).toBeCloseTo(0.3203, 3);
   });
   it("COOP1 = I / (I+P+R)", () => {
     const { coop1 } = computeAaporRates(counts);
     expect(coop1).toBeCloseTo(200 / 350, 4);
   });
-  it("REF1 = R / (I+P+R+NC+O)", () => {
+  it("REF1 = R / (I+P+R+NC+O+UH+UO) — full AAPOR denominator", () => {
     const { ref1 } = computeAaporRates(counts);
-    expect(ref1).toBeCloseTo(100 / 530, 4);
+    expect(ref1).toBeCloseTo(100 / 630, 4);
   });
   it("CON1 = (I+P+R+O) / (I+P+R+NC+O+UH+UO)", () => {
     const { con1 } = computeAaporRates(counts);

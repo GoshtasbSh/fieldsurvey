@@ -14,8 +14,12 @@ export type AaporRates = {
 };
 
 function estimateEligibility(c: AaporCounts): number {
-  const known = c.I + c.P + c.R + c.NC + c.O;
-  return known === 0 ? 0 : 1.0; // all known cases are eligible by definition
+  // CASRO-style: among cases of known status, what proportion are eligible?
+  // Eligible-known = I + P + R + NC (people we could/should have surveyed).
+  // Ineligible-known = O (other, treated here as ineligible by convention).
+  const eligibleKnown = c.I + c.P + c.R + c.NC;
+  const known = eligibleKnown + c.O;
+  return known === 0 ? 1 : eligibleKnown / known;
 }
 
 export function computeAaporRates(c: AaporCounts): AaporRates {
@@ -27,7 +31,7 @@ export function computeAaporRates(c: AaporCounts): AaporRates {
   const denom3 = c.I + c.P + c.R + c.NC + c.O + e * (c.UH + c.UO);
   const denom5 = c.I + c.P + c.R + c.NC + c.O;
   const coop1Denom = c.I + c.P + c.R;
-  const ref1Denom = c.I + c.P + c.R + c.NC + c.O;
+  const ref1Denom = denom1;
   const con1Num = c.I + c.P + c.R + c.O;
   return {
     rr1: c.I / denom1,
