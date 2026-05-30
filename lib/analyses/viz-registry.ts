@@ -27,7 +27,7 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   // KdeRaster:             lazy(() => import("@/components/analyses/cards/a11-kde").then(m => ({ default: m.KdeRaster }))),
   // RateChoropleth:        lazy(() => import("@/components/analyses/cards/a13-cov-heatmap").then(m => ({ default: m.RateChoropleth }))),
   UniverseMap:           lazy(() => import("@/components/analyses/cards/a19-universe-map").then(m => ({ default: m.UniverseMap }))),
-  // RankedBullet:          lazy(() => import("@/components/analyses/cards/a20-undersampled").then(m => ({ default: m.RankedBullet }))),
+  RankedBullet:          lazy(() => import("@/components/analyses/cards/a20-undersampled").then(m => ({ default: m.RankedBullet }))),
   // RefusalSmallMultiples: lazy(() => import("@/components/analyses/cards/a22-refusal-pattern").then(m => ({ default: m.RefusalSmallMultiples }))),
   // GpsOutlierBox:         lazy(() => import("@/components/analyses/cards/a29-gps-outlier").then(m => ({ default: m.GpsOutlierBox }))),
   // OffBoundaryMapList:    lazy(() => import("@/components/analyses/cards/a33-off-boundary").then(m => ({ default: m.OffBoundaryMapList }))),

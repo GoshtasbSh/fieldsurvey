@@ -26,3 +26,36 @@ export async function getCoverageBlocks(projectId: string): Promise<CoverageRow[
   if (error) throw new Error(error.message);
   return (data ?? []) as CoverageRow[];
 }
+
+/**
+ * One row per under-sampled parcel returned by `undersampled_blocks` (016).
+ * `achieved_pct` is points/universe%, `gap_pct` is (target − achieved) %.
+ */
+export type UndersampledRow = {
+  block_geoid: string;
+  achieved_pct: number | null;
+  gap_pct: number | null;
+  universe_addresses: number;
+};
+
+/**
+ * A20 — top-K parcels ranked by deficit vs target coverage %.
+ *
+ * RPC defaults: target=0.7 (70%), limit=10. RPC filters to parcels with
+ * universe_addresses ≥ 5 so we don't rank tiny pools.
+ */
+export async function getUndersampledBlocks(
+  projectId: string,
+  targetPct = 0.7,
+  limit = 10,
+): Promise<UndersampledRow[]> {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (sb as any).rpc("undersampled_blocks", {
+    p_project_id: projectId,
+    p_target_pct: targetPct,
+    p_limit: limit,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as UndersampledRow[];
+}
