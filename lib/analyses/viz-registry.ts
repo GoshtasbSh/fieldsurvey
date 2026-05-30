@@ -9,7 +9,7 @@ export type CardComponent = LazyExoticComponent<ComponentType<Record<string, unk
 export const VIZ_REGISTRY: Record<string, CardComponent> = {
   FreshnessChip:         lazy(() => import("@/components/analyses/cards/a39-freshness").then(m => ({ default: m.FreshnessChip }))),
   // TODO: M7 wave-1 tasks 8-32 — restore as each card lands.
-  // MatchDonut:            lazy(() => import("@/components/analyses/cards/match-donut").then(m => ({ default: m.MatchDonut }))),
+  MatchDonut:            lazy(() => import("@/components/analyses/cards/match-donut").then(m => ({ default: m.MatchDonut }))),
   // AaporRatesPanel:       lazy(() => import("@/components/analyses/cards/a16-17-18-aapor").then(m => ({ default: m.AaporRatesPanel }))),
   // AaporCoopRefPanel:     lazy(() => import("@/components/analyses/cards/a16-17-18-aapor").then(m => ({ default: m.AaporCoopRefPanel }))),
   // AaporContactTile:      lazy(() => import("@/components/analyses/cards/a16-17-18-aapor").then(m => ({ default: m.AaporContactTile }))),
