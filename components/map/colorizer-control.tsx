@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Palette, ChevronDown, X, Search } from "lucide-react";
 import type { ColorizeSpec, ColumnProfile, ClassificationMethod, ColorRamp } from "@/lib/analyses/types";
-import { continuousRampStops, categoricalColors, defaultRampFor, MISSING_COLOR } from "@/lib/colorize/palettes";
+import { continuousRampStops, categoricalColors, MISSING_COLOR } from "@/lib/colorize/palettes";
 import { defaultSpecFor, resolveBreaks } from "@/lib/colorize/auto-classify";
 
 type Props = {

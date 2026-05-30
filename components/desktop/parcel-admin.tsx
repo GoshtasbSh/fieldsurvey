@@ -87,7 +87,7 @@ export function ParcelAdmin({ projectId }: { projectId: string }) {
         </h3>
         <p className="mt-0.5 text-[12px] text-[var(--bento-ink-3)]">
           Upload a GeoJSON FeatureCollection of parcel polygons. Centroids are computed automatically.
-          Universe imports then snap each address to the matching parcel's centroid when available.
+          Universe imports then snap each address to the matching parcel&apos;s centroid when available.
         </p>
       </div>
 

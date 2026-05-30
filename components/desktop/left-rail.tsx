@@ -9,7 +9,6 @@ import {
   Activity,
   Group,
   Map as MapIcon,
-  Star,
   Settings,
   ChevronsLeft,
   Bookmark,
