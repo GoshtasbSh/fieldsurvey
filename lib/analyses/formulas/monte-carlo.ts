@@ -4,7 +4,7 @@
  * until the cumulative sum reaches `targetRemaining`. Repeat N times.
  * Return the 50/75/90 percentile days-to-finish.
  *
- * Pure deterministic randomness via xoshiro128** so unit tests are stable.
+ * Pure deterministic randomness via splitmix32 so unit tests are stable.
  */
 function makeRng(seed: number): () => number {
   let s = seed | 0;
