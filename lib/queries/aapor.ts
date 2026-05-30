@@ -1,3 +1,4 @@
+import "server-only";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { computeAaporRates, type AaporCounts, type AaporRates } from "@/lib/analyses/formulas/aapor";
 
