@@ -702,13 +702,302 @@ With rationale per the deep-research validation:
 
 Reserved for the implementation plan (next skill: `writing-plans`). Sketch:
 
-- **M7.2 wave 1** (this spec) — A0 (real, not stub) + universal chrome + S6 (Postgres-only, no sidecar dependency). Ships first.
-- **M7.2 wave 2** — Sidecar deploy + S1 + S2 + S3.
-- **M7.2 wave 3** — S5, S7, S8.
-- **M7.2 wave 4** — S4 (SaTScan wiring — slowest, depends on SaTScan CLI binary being deployed to Fluid Compute).
+- **M7.2 Wave 0 — Toolbox UX scaffolding.** Migrations 020–023. `AddAnalysisModal` (left-rail toolbox nav + center cards grid). Card catalog content for all 9 cards (`previewImage`, `questionsAnswered`, `whatItDoes`, `settingsSchema`). 5 Wikimedia images downloaded + license registry. 4 custom SVG previews authored. Schema-driven `SettingsDrawer` renderer (6 input types). `AnalyzeTabAnalysesList` with state machine (loading/ready/awaiting_data/error/stale). `added_analyses` persistence + add/remove RPCs. Toolbox UX shippable without any of S1–S8 actually computing — cards render "awaiting data" while showing exactly what they will do.
+- **M7.2 Wave 1 — Foundation + zero-sidecar cards.** A0 Question Colorizer (real, replaces the stub) + universal chrome (sufficiency overlay, suppression, FDR display) + S6 Coverage × Response Bivariate (Postgres-only). Spatial weights cache infrastructure (`project_spatial_weights` table, k-NN materializer worker) shipped here even though Wave 1 cards don't use it — Wave 2 needs it pre-built.
+- **M7.2 Wave 2 — Sidecar deploy + canonical clustering.** Python sidecar deployment to Vercel Fluid Compute (Python 3.13, PySAL `esda`, scipy, numpy). S1 Spatial Autocorrelation + S2 Hot/Cold Spot (Gi\*) + S3 LISA. FDR cutoff via `esda.fdr` wired into all three.
+- **M7.2 Wave 3 — Distance, heterogeneity, bivariate.** S5 Distance-Decay (sidecar permutation envelope) + S7 Local Geary (PySAL `Geary_Local` with winsorization) + S8 Bivariate Lee's L (sidecar `Moran_Local_BV` or Lee's L).
+- **M7.2 Wave 4 — SaTScan.** S4 Spatial Scan. SaTScan CLI binary deployed to Fluid Compute (or vendored into the sidecar image). Bernoulli + Poisson models. Cap max window at 25–50% of population.
+
+Each wave is independently shippable. Wave 0 in particular delivers user-facing value (the modal + curated card library + "this is what we're building" preview) even with zero compute backends online — Wave 0 alone is a demo-able milestone.
 
 ---
 
-## §11 Open questions for the user (none blocking)
+## §11 UX — Spatial Analysis Toolbox (Add-Analysis modal)
+
+### 11.1 Mental model
+
+The Analyze tab is empty by default. Admin clicks **`+ Add spatial analysis`** at the top of the Analyze tab. A modal opens with an **ArcGIS-style toolbox layout** — left rail of toolboxes (grouped by methodological purpose), center grid of analysis cards. Each card shows a preview image, a one-sentence "what it answers," a 2-3 sentence "what it does," input requirements, and an **`Add to Analyze tab`** button.
+
+Once added, the analysis appears as a row in the Analyze tab's analyses list. Clicking the row opens a **right-side settings drawer** with all the per-card inputs and method settings the user can modify (question selector, FDR alpha, POI picker for S5, second-question picker for S8, etc.). The analysis re-computes on settings change.
+
+### 11.2 Toolbox structure (v1)
+
+5 toolboxes, 9 cards total:
+
+| # | Toolbox | Icon | Description (shown in left rail) | Cards |
+|---|---------|------|----------------------------------|-------|
+| 1 | **Symbology & Visualization** | 🎨 | "Color your map points by any survey response." | A0 |
+| 2 | **Analyzing Patterns** | 📊 | "Global statistics — is the answer spatially clustered at all?" | S1 |
+| 3 | **Mapping Clusters** | 🔥 | "Local statistics — where are the clusters, outliers, and hot/cold spots?" | S2, S3, S4, S7 |
+| 4 | **Modeling Spatial Relationships** | 📐 | "Distance, proximity, and multi-question spatial patterns." | S5, S8 |
+| 5 | **Survey Coverage & Equity** | 📋 | "Did we BOTH cover the universe AND get representative answers?" | S6 |
+
+### 11.3 v2 placeholder toolboxes (greyed in modal)
+
+Visible to communicate the roadmap; cards inside show "v2 — coming soon" badge and are not clickable:
+
+| # | Toolbox | Icon | v2 cards |
+|---|---------|------|----------|
+| 6 | **Space-Time Pattern Mining** | ⏰ | Emerging Hot Spot |
+| 7 | **Spatial Regression** | 📈 | GWR / MGWR |
+| 8 | **Sampling Equity** | ⚖️ | Segregation indices (dissimilarity, isolation) |
+
+### 11.4 Modal layout
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Spatial Analysis Toolbox                              [Close]  │
+├──────────────────┬──────────────────────────────────────────────┤
+│ TOOLBOXES        │  Mapping Clusters · 4 analyses               │
+│                  │  Local statistics — where are the clusters,  │
+│ 🎨 Symbology     │  outliers, and hot/cold spots?               │
+│    & Visualiz.   │                                              │
+│ 📊 Analyzing     │  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│    Patterns      │  │ [image]  │  │ [image]  │  │ [image]  │    │
+│ 🔥 Mapping       │  │ S2 Hot   │  │ S3 LISA  │  │ S4 Scan  │    │
+│    Clusters  ✓   │  │ Spot Gi* │  │ Cluster& │  │ (Kulldorff)│  │
+│ 📐 Spatial Rel.  │  │ ──────── │  │ Outlier  │  │ ──────── │    │
+│ 📋 Coverage      │  │ Answers… │  │ ──────── │  │ Answers… │    │
+│    & Equity      │  │ Does…    │  │ Answers… │  │ Does…    │    │
+│                  │  │ + Add    │  │ + Add    │  │ + Add    │    │
+│ ─── v2 ───       │  └──────────┘  └──────────┘  └──────────┘    │
+│ ⏰ Space-Time    │                                              │
+│ 📈 Regression    │  ┌──────────┐                                │
+│ ⚖️ Sampling Eq.  │  │ S7 Local │                                │
+│                  │  │ Geary    │                                │
+│                  │  │ ──────── │                                │
+│                  │  │ Answers… │                                │
+│                  │  │ Does…    │                                │
+│                  │  │ + Add    │                                │
+│                  │  └──────────┘                                │
+└──────────────────┴──────────────────────────────────────────────┘
+```
+
+Cards laid out in a responsive grid (3 across at desktop, 2 at tablet, 1 at mobile). Adding to a card in a toolbox doesn't close the modal — admin can browse multiple toolboxes and add multiple analyses in one session.
+
+### 11.5 Card content schema
+
+Each card descriptor extends the existing `CardDescriptor` (lib/analyses/types.ts) with:
+
+```ts
+type SpatialCardCatalogEntry = CardDescriptor & {
+  toolbox: "symbology" | "analyzing_patterns" | "mapping_clusters"
+         | "spatial_relationships" | "coverage_equity"
+         // v2:
+         | "space_time" | "spatial_regression" | "sampling_equity";
+
+  // Card front-matter for the modal
+  previewImage: {
+    src: string;          // /public/analyses-previews/<card_id>.png
+    alt: string;          // accessibility caption
+    sourceUrl: string;    // attribution link
+    sourceTitle: string;  // "PySAL ESDA documentation"
+    license: string;      // "CC-BY-4.0"
+  };
+  questionsAnswered: string[];  // 1-3 specific spatial questions in plain English
+  whatItDoes: string;           // 2-3 sentence professional description
+  inputRequirements: string[];  // ["1 question (numeric or binary)", "Spatial weights matrix"]
+  settingsSchema: SettingSchema[];  // see 11.7
+};
+```
+
+Example for S2 (Hot/Cold Spot Gi*):
+
+```ts
+{
+  id: "S2_gi_star_q",
+  toolbox: "mapping_clusters",
+  previewImage: {
+    src: "/public/analyses-previews/S2_gi_star.png",
+    alt: "Map showing red hot-spot and blue cold-spot clusters from Getis-Ord Gi*",
+    sourceUrl: "https://...",        // filled in §11.8 from image-research agent
+    sourceTitle: "...",
+    license: "...",
+  },
+  questionsAnswered: [
+    "Where are the statistically significant clusters of high values for this question?",
+    "Where are the statistically significant clusters of low values?",
+    "Which spots are noise vs real?",
+  ],
+  whatItDoes:
+    "Runs the Getis-Ord Gi* local statistic against your spatial weights matrix " +
+    "with 999 permutations. Applies a False Discovery Rate (FDR) cutoff so the map " +
+    "doesn't over-flag at the α·n rate. Each point gets a hot/cold/insignificant label.",
+  inputRequirements: [
+    "1 question (numeric, Likert, or binary)",
+    "Spatial weights matrix (auto-built on first use)",
+    "FDR alpha (default 0.05)",
+  ],
+  settingsSchema: [
+    { key: "questionKey", type: "question_picker", default: "inherit_global" },
+    { key: "fdrAlpha", type: "slider", min: 0.01, max: 0.10, step: 0.01, default: 0.05 },
+    { key: "weightsType", type: "select", options: ["knn8","dband_500m","queen"], default: "knn8" },
+    { key: "nPermutations", type: "select", options: [999, 9999], default: 999 },
+  ],
+}
+```
+
+### 11.6 Analyze-tab list (after adding)
+
+Each added analysis becomes a row in the Analyze tab. State per row:
+
+| Visual state | Trigger |
+|--------------|---------|
+| `loading` | Cache miss + sidecar compute in flight |
+| `ready` | Result rendered |
+| `awaiting_data` | n < nMin / weights missing / no POI |
+| `error` | Sidecar exception (sanitized) |
+| `stale` | Cache > TTL but not refreshed yet |
+
+Row layout:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ 🔥 S2 Hot/Cold Spot Analysis (Gi*)              [⚙ ✕]   │
+│ ├── Question: "Q7. Support for Project X" (inherited)    │
+│ ├── Status: ●  Computed 3 min ago                        │
+│ └── Result preview: 12 hot, 8 cold, 247 NS               │
+│                                                          │
+│  [▼ Expand to see full result on the map]                │
+└──────────────────────────────────────────────────────────┘
+```
+
+- ⚙ → opens settings drawer
+- ✕ → removes from list (with confirm)
+- Drag handle on left → reorder
+
+### 11.7 Settings drawer
+
+Right-side drawer (40% wide on desktop, full-screen on mobile). Contents driven by `card.settingsSchema`:
+
+```
+┌────────────────────────────────────────────────┐
+│ S2 Hot/Cold Spot Analysis (Gi*)        [Close] │
+├────────────────────────────────────────────────┤
+│ INPUTS                                         │
+│                                                │
+│ Question:                                      │
+│  ◉ Inherit global active question (Q7)         │
+│  ○ Override with…   [▼ pick a question]        │
+│                                                │
+│ FDR α (false-discovery cutoff):                │
+│  ├─◯──────────  0.05                           │
+│ 0.01           0.10                            │
+│                                                │
+│ Spatial weights type:                          │
+│  [▼ k-Nearest Neighbors (k=8)]                 │
+│                                                │
+│ Permutations:                                  │
+│  ◉ 999 (interactive, default)                  │
+│  ○ 9 999 (publish-grade, slower)               │
+│                                                │
+│ ──────────────────────────────────             │
+│                                                │
+│ METHOD DETAILS                                 │
+│ Getis-Ord Gi* local statistic …  [ⓘ docs]     │
+│                                                │
+│ ──────────────────────────────────             │
+│                                                │
+│ [Re-compute]    [Save as default]              │
+└────────────────────────────────────────────────┘
+```
+
+Setting types supported by the schema-driven renderer:
+
+| `type` | Renders as | Notes |
+|--------|------------|-------|
+| `question_picker` | Dropdown with all schema-detected questions + "inherit_global" radio | Surfaces global + per-card override |
+| `answer_picker` | Dropdown showing answer values for the selected question | For S6 |
+| `poi_picker` | Lat/lon input + "click on map" mode | For S5 |
+| `slider` | Numeric slider with min/max/step | For FDR α |
+| `select` | Dropdown of fixed options | Weights type, permutations |
+| `toggle` | Boolean switch | Winsorize on/off (S7) |
+
+### 11.8 Preview images
+
+All preview images live in `public/analyses-previews/<card_id>.{png,svg}` and are referenced via the `previewImage` field. Attribution rendered as a small footnote on the card: "Image © <source>, <license>" with the source URL as a link.
+
+**5 cards use Wikimedia Commons images** (downloaded at build time to `public/analyses-previews/` and CDN-served from our origin, with attribution kept on the card):
+
+| Card | Image | License | Caption |
+|------|-------|---------|---------|
+| **A0** | [U.S. Presidential election margin, 2004–2016](https://upload.wikimedia.org/wikipedia/commons/2/23/U.S._Presidential_election_margin%2C_2004-2016.png) | CC-BY-SA 4.0, Bplewe ([source](https://commons.wikimedia.org/wiki/File:U.S._Presidential_election_margin,_2004-2016.png)) | U.S. counties colored on a bi-polar (blue–red) ramp by aggregate 2004–2016 presidential vote margin. |
+| **S1** | [Moran's I scatterplot — Columbus Crime](https://upload.wikimedia.org/wikipedia/commons/5/52/Moran_ScatterPlot_Columbus_Crime.PNG) | Public Domain, Lgalvis74 ([source](https://commons.wikimedia.org/wiki/File:Moran_ScatterPlot_Columbus_Crime.PNG)) | The textbook Moran's I scatterplot of crime rates by neighborhood, Columbus, OH. |
+| **S2** | [USA Contiguous Unemployment Rate 2020 (Gi\*)](https://upload.wikimedia.org/wikipedia/commons/a/a0/USA_Contiguous_Unemployment_Rate_2020.jpg) | CC-BY 4.0, GeogSage ([source](https://commons.wikimedia.org/wiki/File:USA_Contiguous_Unemployment_Rate_2020.jpg)) | Getis-Ord Gi* hot/cold spot map of U.S. county unemployment, 2020. |
+| **S3** | [USA Contiguous Poverty 2020 — LISA clusters](https://upload.wikimedia.org/wikipedia/commons/7/72/USA_Contiguous_Poverty_2020_clusters.jpg) | CC-BY-SA 4.0, GeogSage ([source](https://commons.wikimedia.org/wiki/File:USA_Contiguous_Poverty_2020_clusters.jpg)) | Anselin Local Moran cluster map (HH/LL/HL/LH) of U.S. county poverty, 2020. |
+| **S6** | [Black-Hispanic Bivariate Map](https://upload.wikimedia.org/wikipedia/commons/4/41/Black_Hispanic_Bivariate_Map.png) | CC-BY-SA 4.0, Bplewe ([source](https://commons.wikimedia.org/wiki/File:Black_Hispanic_Bivariate_Map.png)) | Bivariate choropleth of U.S. counties showing the joint distribution of Black and Hispanic population share. Overlay a 3×3 legend swatch on top of this image in the card to reinforce the "% touched × % picked" frame. |
+
+**4 cards use custom SVG previews** generated by us — no clean publicly-licensed canonical map exists. The custom SVGs share a visual system (same desaturated grey basemap, same accent palette as the rest of the modal). Specs:
+
+| Card | Custom SVG spec |
+|------|-----------------|
+| **S4 Spatial Scan (Kulldorff)** | Light-grey choropleth of regional polygons. **2 red circular outlines** of different radii — one primary (thick stroke, label "p<0.001") and one secondary (thinner, dashed). 8–10 jittered red dots inside each circle. Conveys "scan window over a map." |
+| **S5 Distance-Decay** | Mini line chart, x = "Distance from POI (m)", y = "Mean response". Descending half-exponential curve with a translucent grey 95% envelope band behind it. Star marker at x=0 = POI. Minimal labels, no tick numbers. |
+| **S7 Local Geary** | Hex-grid mosaic (~40 cells) using a **diverging palette** (teal → white → magenta). Banded cluster of teal cells, opposing band of magenta cells, scattered neutral whites elsewhere. Right-side legend strip: "Similar  ←→  Different". |
+| **S8 Lee's L Bivariate** | Same hex mosaic as S7 but using a **4-class palette** (dark red = HH, dark blue = LL, pink = HL, light blue = LH), with categories clustered into 4 quadrants. Inset showing two stacked variable swatches ("X" and "Y") to signal bivariate. Distinguishes visually from S3 by the inset. |
+
+**Build pipeline.** At build time, a script `scripts/build-analysis-previews.ts` (a) downloads the 5 Wikimedia images to `public/analyses-previews/` with their license/attribution checked into `public/analyses-previews/CREDITS.json`, and (b) reads SVG source from `assets/analyses-previews/*.svg` (where the custom SVGs are stored). The 5 Wikimedia images are rehosted on our CDN (not hot-linked) for stability and to keep attribution visible. License metadata renders into the card footer at runtime.
+
+**Folder layout:**
+
+```
+public/
+  analyses-previews/
+    A0_colorizer.png        ← from Wikimedia (rehosted)
+    S1_autocorr.png         ← from Wikimedia (rehosted)
+    S2_gi_star_q.jpg        ← from Wikimedia (rehosted)
+    S3_lisa_q.jpg           ← from Wikimedia (rehosted)
+    S4_satscan.svg          ← custom (built from assets/)
+    S5_distance_decay.svg   ← custom
+    S6_coverage_response.png← from Wikimedia (rehosted)
+    S7_local_geary.svg      ← custom
+    S8_bivariate.svg        ← custom
+    CREDITS.json            ← attribution registry
+assets/analyses-previews/
+    S4_satscan.svg          ← hand-authored SVG sources
+    S5_distance_decay.svg
+    S7_local_geary.svg
+    S8_bivariate.svg
+scripts/
+    build-analysis-previews.ts ← downloads Wikimedia images + copies custom SVGs
+```
+
+### 11.9 Modal entry points
+
+- Primary: **`+ Add spatial analysis`** button at the top of the Analyze tab when at least 0 analyses added.
+- Empty state: when the analyses list is empty, the Analyze tab body is the modal contents inline (no extra click needed).
+- Keyboard: ⌘K opens a quick-add palette (search across all 9 cards by name + keywords).
+
+### 11.10 Persistence
+
+User's added-analyses list persists to `user_view_state.added_analyses jsonb` (new column in migration 021):
+
+```sql
+alter table public.user_view_state
+  add column if not exists added_analyses jsonb default '[]'::jsonb;
+
+comment on column public.user_view_state.added_analyses is
+'Ordered array of {cardId, settings}. Persists across sessions per (user_id, project_id).';
+```
+
+Saved Views (existing) can bundle a default analyses list — admin saves "My survey overview" with A0 + S2 + S6 pre-added.
+
+### 11.11 Accessibility
+
+- Modal traps focus; ESC closes.
+- All cards have `aria-label` "Add <cardName> to Analyze tab."
+- Toolbox left-rail is a list of `role="tab"` with `aria-selected`.
+- Preview images have `alt` text describing the analysis result, not just "image."
+- Settings drawer announces its title to screen readers on open.
+
+### 11.12 Telemetry
+
+For each `+ Add` click, log to `analysis_versions` audit:
+- `(user_id, project_id, card_id, added_at)`.
+- Aggregated weekly: which toolboxes are most browsed, which cards are most-added, which are added then removed within 24 h (low-value signal).
+
+---
+
+## §12 Open questions for the user (none blocking)
 
 None — all design decisions locked. Spec ready for review.
