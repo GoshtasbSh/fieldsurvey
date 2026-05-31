@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" fill="#1a1a2e"/>
+  <text x="10" y="18" fill="#94a3b8" font-size="11" font-family="monospace">Coverage Equity (Lorenz)</text>
+  <line x1="40" y1="25" x2="40" y2="155" stroke="#334155" stroke-width="1"/>
+  <line x1="40" y1="155" x2="290" y2="155" stroke="#334155" stroke-width="1"/>
+  <line x1="40" y1="155" x2="290" y2="25" stroke="#334155" stroke-width="1" stroke-dasharray="4,3"/>
+  <polyline points="40,155 80,150 120,140 160,125 200,103 245,75 290,25" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="320" stroke-dashoffset="320">
+    <animate attributeName="stroke-dashoffset" from="320" to="0" dur="1.4s" fill="freeze"/>
+  </polyline>
+  <text x="200" y="118" fill="#f59e0b" font-size="11" font-family="monospace" opacity="0">Gini<animate attributeName="opacity" from="0" to="1" dur="0.3s" begin="1.4s" fill="freeze"/></text>
+  <text x="10" y="172" fill="#64748b" font-size="8" font-family="monospace">cumulative coverage vs cumulative universe</text>
+</svg>

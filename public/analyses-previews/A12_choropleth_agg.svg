@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" fill="#1a1a2e"/>
+  <text x="10" y="18" fill="#94a3b8" font-size="11" font-family="monospace">Choropleth Aggregation</text>
+  <rect x="20" y="30" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#1d4ed8" dur="0.4s" begin="0.0s" fill="freeze"/></rect>
+  <rect x="85" y="30" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#3b82f6" dur="0.4s" begin="0.1s" fill="freeze"/></rect>
+  <rect x="150" y="30" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#60a5fa" dur="0.4s" begin="0.2s" fill="freeze"/></rect>
+  <rect x="215" y="30" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#93c5fd" dur="0.4s" begin="0.3s" fill="freeze"/></rect>
+  <rect x="20" y="75" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#2563eb" dur="0.4s" begin="0.2s" fill="freeze"/></rect>
+  <rect x="85" y="75" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#1d4ed8" dur="0.4s" begin="0.3s" fill="freeze"/></rect>
+  <rect x="150" y="75" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#7dd3fc" dur="0.4s" begin="0.4s" fill="freeze"/></rect>
+  <rect x="215" y="75" width="60" height="40" rx="3" fill="#1e3a5f"><animate attributeName="fill" from="#1e3a5f" to="#bfdbfe" dur="0.4s" begin="0.5s" fill="freeze"/></rect>
+  <text x="10" y="165" fill="#64748b" font-size="8" font-family="monospace">points aggregated to grid cells</text>
+</svg>

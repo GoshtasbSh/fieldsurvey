@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" fill="#1a1a2e"/>
+  <text x="10" y="18" fill="#94a3b8" font-size="11" font-family="monospace">Segment Differences (FDR)</text>
+  <line x1="160" y1="28" x2="160" y2="155" stroke="#334155" stroke-width="1"/>
+  <rect x="160" y="33" height="14" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="95" dur="0.5s" fill="freeze"/></rect>
+  <rect x="160" y="52" height="14" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="72" dur="0.5s" begin="0.1s" fill="freeze"/></rect>
+  <rect x="160" y="71" height="14" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="50" dur="0.5s" begin="0.2s" fill="freeze"/></rect>
+  <rect y="93" height="14" fill="#f87171" rx="2"><animate attributeName="x" from="160" to="80" dur="0.5s" begin="0.3s" fill="freeze"/><animate attributeName="width" from="0" to="80" dur="0.5s" begin="0.3s" fill="freeze"/></rect>
+  <rect y="112" height="14" fill="#f87171" rx="2"><animate attributeName="x" from="160" to="105" dur="0.5s" begin="0.4s" fill="freeze"/><animate attributeName="width" from="0" to="55" dur="0.5s" begin="0.4s" fill="freeze"/></rect>
+  <text x="10" y="170" fill="#64748b" font-size="8" font-family="monospace">p_fdr &lt; 0.05 · Mann-Whitney / chi-square</text>
+</svg>

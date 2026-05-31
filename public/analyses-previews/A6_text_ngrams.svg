@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" fill="#1a1a2e"/>
+  <text x="10" y="18" fill="#94a3b8" font-size="11" font-family="monospace">Top N-grams</text>
+  <text x="10" y="38" fill="#e2e8f0" font-size="9" font-family="monospace">clean water</text>
+  <rect x="90" y="27" height="13" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="180" dur="0.5s" fill="freeze"/></rect>
+  <text x="10" y="58" fill="#e2e8f0" font-size="9" font-family="monospace">road safety</text>
+  <rect x="90" y="47" height="13" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="140" dur="0.5s" begin="0.1s" fill="freeze"/></rect>
+  <text x="10" y="78" fill="#e2e8f0" font-size="9" font-family="monospace">public park</text>
+  <rect x="90" y="67" height="13" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="110" dur="0.5s" begin="0.2s" fill="freeze"/></rect>
+  <text x="10" y="98" fill="#e2e8f0" font-size="9" font-family="monospace">more jobs</text>
+  <rect x="90" y="87" height="13" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="85" dur="0.5s" begin="0.3s" fill="freeze"/></rect>
+  <text x="10" y="118" fill="#e2e8f0" font-size="9" font-family="monospace">better schools</text>
+  <rect x="90" y="107" height="13" fill="#34d399" rx="2"><animate attributeName="width" from="0" to="60" dur="0.5s" begin="0.4s" fill="freeze"/></rect>
+  <text x="10" y="165" fill="#64748b" font-size="8" font-family="monospace">frequency · stopwords removed</text>
+</svg>

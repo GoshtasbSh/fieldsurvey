@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" fill="#1a1a2e"/>
+  <text x="10" y="20" fill="#94a3b8" font-size="11" font-family="monospace">Multi-select Co-occurrence</text>
+  <rect x="10" y="35" height="18" fill="#60a5fa" rx="2"><animate attributeName="width" from="0" to="90" dur="0.6s" fill="freeze"/></rect>
+  <rect x="10" y="58" height="18" fill="#60a5fa" rx="2"><animate attributeName="width" from="0" to="70" dur="0.7s" begin="0.1s" fill="freeze"/></rect>
+  <rect x="10" y="81" height="18" fill="#60a5fa" rx="2"><animate attributeName="width" from="0" to="55" dur="0.7s" begin="0.2s" fill="freeze"/></rect>
+  <rect x="10" y="104" height="18" fill="#60a5fa" rx="2"><animate attributeName="width" from="0" to="40" dur="0.7s" begin="0.3s" fill="freeze"/></rect>
+  <rect x="165" y="35" height="18" fill="#f472b6" rx="2"><animate attributeName="width" from="0" to="110" dur="0.6s" begin="0.5s" fill="freeze"/></rect>
+  <rect x="165" y="58" height="18" fill="#f472b6" rx="2"><animate attributeName="width" from="0" to="75" dur="0.6s" begin="0.6s" fill="freeze"/></rect>
+  <rect x="165" y="81" height="18" fill="#f472b6" rx="2"><animate attributeName="width" from="0" to="45" dur="0.6s" begin="0.7s" fill="freeze"/></rect>
+  <text x="10" y="140" fill="#94a3b8" font-size="9" font-family="monospace">Options</text>
+  <text x="165" y="140" fill="#94a3b8" font-size="9" font-family="monospace">Intersections</text>
+  <line x1="150" y1="28" x2="150" y2="135" stroke="#334155" stroke-width="1"/>
+</svg>
