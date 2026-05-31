@@ -6,7 +6,12 @@
 type Props = {
   cardName: string;
   cardId?: string;
-  reason?: "no-data" | "needs-universe" | "needs-aapor-mapping" | "needs-demographics" | "needs-boundary" | "sidecar-pending";
+  reason?:
+    | "no-data" | "needs-universe" | "needs-aapor-mapping"
+    | "needs-demographics" | "needs-boundary" | "sidecar-pending"
+    // NEW (Wave 0):
+    | "needs-weights" | "needs-poi" | "needs-second-question"
+    | "non-stationary" | "sample-too-large" | "wave-pending";
 };
 
 const REASON_HINT: Record<NonNullable<Props["reason"]>, string> = {
@@ -16,6 +21,14 @@ const REASON_HINT: Record<NonNullable<Props["reason"]>, string> = {
   "needs-demographics": "Declare demographic stratifier columns to enable representativeness.",
   "needs-boundary": "Draw a project boundary (left rail → Boundary) to enable spatial filters.",
   "sidecar-pending": "Python sidecar not deployed yet — see runbook.",
+  // NEW:
+  "needs-weights": "Spatial weights matrix not built yet — admin can click 'Rebuild weights' in Settings.",
+  "needs-poi": "Drop a point of interest on the map to enable this analysis.",
+  "needs-second-question": "Pick a second question in Settings to enable the bivariate analysis.",
+  "non-stationary": "Global autocorrelation came back non-significant — local cluster maps may be unreliable.",
+  "sample-too-large": "More than 50 000 points. Toggle 'Compute on a 10 k sample' in Settings.",
+  "wave-pending":
+    "Compute backend ships in a later wave of the M7.2 spatial-analysis rollout — preview only.",
 };
 
 export function AwaitingDataPanel({ cardName, cardId, reason = "no-data" }: Props) {

@@ -33,6 +33,26 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   OffBoundaryMapList:    lazy(() => import("@/components/analyses/cards/a33-off-boundary").then(m => ({ default: m.OffBoundaryMapList }))),
   SampleVsAcsBars:       lazy(() => import("@/components/analyses/cards/a40-sample-vs-acs").then(m => ({ default: m.SampleVsAcsBars }))),
   F1QueueListMap:        lazy(() => import("@/components/analyses/cards/a52-f1-queue").then(m => ({ default: m.F1QueueListMap }))),
+  A0ColorizerPlaceholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.A0ColorizerPlaceholder }))),
+  S1Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S1Placeholder }))),
+  S2Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S2Placeholder }))),
+  S3Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S3Placeholder }))),
+  S4Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S4Placeholder }))),
+  S5Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S5Placeholder }))),
+  S6Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S6Placeholder }))),
+  S7Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S7Placeholder }))),
+  S8Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S8Placeholder }))),
+  V2Placeholder: lazy(() =>
+    import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.V2Placeholder }))),
 };
 
 export function getVizComponent(name: string): CardComponent | null {
