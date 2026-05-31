@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { DowHourCell } from "@/lib/queries/analytics";
 
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -23,7 +24,15 @@ export function DowHourHeatmap({
   // Accepted to match the registry contract.
   projectId?: string;
 }) {
-  if (!cells || cells.length === 0) return null;
+  if (!cells || cells.length === 0) {
+    return (
+      <AwaitingDataPanel
+        cardName="Day-of-week heatmap"
+        cardId="A24_dow"
+        reason="no-data"
+      />
+    );
+  }
   const max = Math.max(1, ...cells.map((c) => c.count));
   const total = cells.reduce((a, b) => a + b.count, 0);
 

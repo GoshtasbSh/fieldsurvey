@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 
 type GiStarResult = { id: string; z: number; p: number };
 
@@ -14,7 +15,10 @@ type GiStarPayload = {
 type DispatchEnvelope = {
   data?: { payload: GiStarPayload; computedAt: string } | null;
   computedAt?: string;
+  status?: string;
 };
+
+type Status = "loading" | "ready" | "sidecar-pending";
 
 /**
  * Placeholder list of the top significant cells. The actual choropleth lives
@@ -25,6 +29,7 @@ type DispatchEnvelope = {
 export function SignificanceChoropleth({ projectId }: { projectId?: string }) {
   const [r, setR] = useState<GiStarPayload | null>(null);
   const [computedAt, setComputedAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
     if (!projectId) return;
@@ -37,16 +42,29 @@ export function SignificanceChoropleth({ projectId }: { projectId?: string }) {
         if (j.data && j.data.payload) {
           setR(j.data.payload);
           setComputedAt(j.data.computedAt ?? j.computedAt ?? null);
+          setStatus("ready");
+        } else {
+          setStatus("sidecar-pending");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setStatus("sidecar-pending");
+      });
     return () => {
       cancelled = true;
       ac.abort();
     };
   }, [projectId]);
 
-  if (!r || r.n < 30) return null;
+  if (status === "sidecar-pending" || !r || r.n < 30) {
+    return (
+      <AwaitingDataPanel
+        cardName="Getis-Ord Gi* hot-spots"
+        cardId="A8_gi_star"
+        reason="sidecar-pending"
+      />
+    );
+  }
 
   const sigCount = r.results.filter((c) => c.p < 0.05).length;
   const top = [...r.results]

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 
 type VelocityPayload = {
   changepoints: number[];
@@ -11,11 +12,15 @@ type VelocityPayload = {
 type DispatchEnvelope = {
   data?: { payload: VelocityPayload; computedAt: string } | null;
   computedAt?: string;
+  status?: string;
 };
+
+type Status = "loading" | "ready" | "sidecar-pending";
 
 export function VelocityLineCI({ projectId }: { projectId?: string }) {
   const [r, setR] = useState<VelocityPayload | null>(null);
   const [computedAt, setComputedAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
     if (!projectId) return;
@@ -28,16 +33,29 @@ export function VelocityLineCI({ projectId }: { projectId?: string }) {
         if (j.data && j.data.payload) {
           setR(j.data.payload);
           setComputedAt(j.data.computedAt ?? j.computedAt ?? null);
+          setStatus("ready");
+        } else {
+          setStatus("sidecar-pending");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setStatus("sidecar-pending");
+      });
     return () => {
       cancelled = true;
       ac.abort();
     };
   }, [projectId]);
 
-  if (!r) return null;
+  if (status === "sidecar-pending" || !r) {
+    return (
+      <AwaitingDataPanel
+        cardName="Velocity + change-points"
+        cardId="A25_velocity"
+        reason="sidecar-pending"
+      />
+    );
+  }
   return (
     <div className="bento-panel p-4">
       <TrustChrome

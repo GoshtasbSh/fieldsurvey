@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { DemographicsSchemaRow } from "@/lib/queries/representativeness";
 
 /**
@@ -42,17 +43,23 @@ export function SampleVsAcsBars({ projectId }: { projectId?: string }) {
     };
   }, [projectId]);
 
-  if (schema === null) return null;
+  if (schema === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Sample vs ACS"
+        cardId="A40_sample_vs_acs"
+        reason="needs-demographics"
+      />
+    );
+  }
 
   if (schema.length === 0) {
     return (
-      <div className="bento-panel p-4">
-        <div className="bento-label mb-2">Sample vs ACS</div>
-        <div className="rounded-lg bg-[var(--shell-2)] p-3 text-[11.5px] leading-snug text-[var(--shell-text-muted)]">
-          No demographic stratifiers declared for this project. Add demographic
-          columns and an ACS join in project settings to enable this card.
-        </div>
-      </div>
+      <AwaitingDataPanel
+        cardName="Sample vs ACS"
+        cardId="A40_sample_vs_acs"
+        reason="needs-demographics"
+      />
     );
   }
 

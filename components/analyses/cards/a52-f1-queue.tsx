@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { F1QueueRow } from "@/lib/queries/f1-queue";
 
 /**
@@ -54,7 +55,15 @@ export function F1QueueListMap({ projectId }: { projectId?: string }) {
     return copy;
   }, [rows, sort]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Follow-ups due (F1 queue)"
+        cardId="A52_f1_queue"
+        reason="no-data"
+      />
+    );
+  }
 
   if (rows.length === 0) {
     return (

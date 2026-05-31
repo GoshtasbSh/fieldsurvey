@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { CoverageRow } from "@/lib/queries/universe-coverage";
 
 /**
@@ -69,7 +70,15 @@ export function RateChoropleth({ projectId }: { projectId?: string }) {
       .slice(0, WORST_K);
   }, [filtered]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Coverage vs universe"
+        cardId="A13_cov_heatmap"
+        reason="needs-universe"
+      />
+    );
+  }
   if (filtered.length < N_MIN) {
     return <NMinPlaceholder cardName="Coverage vs universe" n={filtered.length} nMin={N_MIN} />;
   }

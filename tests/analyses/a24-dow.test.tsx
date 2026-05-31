@@ -12,8 +12,8 @@ describe("DowHourHeatmap", () => {
     const { container } = render(<DowHourHeatmap cells={cells} tz="UTC" />);
     expect(container.querySelectorAll("div.aspect-square").length).toBe(7 * 24);
   });
-  it("renders nothing for undefined cells", () => {
+  it("renders AwaitingDataPanel for undefined cells", () => {
     const { container } = render(<DowHourHeatmap />);
-    expect(container.innerHTML).toBe("");
+    expect(container.textContent).toContain("Awaiting data");
   });
 });

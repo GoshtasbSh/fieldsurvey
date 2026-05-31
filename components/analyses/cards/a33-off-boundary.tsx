@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { OffBoundaryRow } from "@/lib/queries/off-boundary";
 
 /**
@@ -55,7 +56,15 @@ export function OffBoundaryMapList({ projectId }: { projectId?: string }) {
     return sum / rows.length;
   }, [rows]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Off-boundary stops"
+        cardId="A33_off_boundary"
+        reason="needs-boundary"
+      />
+    );
+  }
 
   if (rows.length === 0) {
     return (

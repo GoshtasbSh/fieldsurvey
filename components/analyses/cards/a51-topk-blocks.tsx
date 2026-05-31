@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { TopKBlockRow } from "@/lib/queries/topk-blocks";
 
 /**
@@ -41,7 +42,15 @@ export function TopKBlocks({ projectId }: { projectId?: string }) {
     };
   }, [projectId]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Top-K blocks to revisit"
+        cardId="A51_topk"
+        reason="needs-universe"
+      />
+    );
+  }
   if (rows.length < N_MIN) {
     return <NMinPlaceholder cardName="Top revisit candidates" n={rows.length} nMin={N_MIN} />;
   }

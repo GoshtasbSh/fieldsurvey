@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { CoverageRow } from "@/lib/queries/universe-coverage";
 
 /**
@@ -42,7 +43,15 @@ export function UniverseMap({ projectId }: { projectId?: string }) {
     };
   }, [projectId]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Universe penetration map"
+        cardId="A19_universe_map"
+        reason="needs-universe"
+      />
+    );
+  }
   const totalUniverse = rows.reduce((s, r) => s + (r.universe_addresses ?? 0), 0);
   if (totalUniverse < N_MIN) {
     return <NMinPlaceholder cardName="Universe penetration" n={totalUniverse} nMin={N_MIN} />;

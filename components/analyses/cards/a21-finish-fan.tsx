@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 
 type Fan = {
   p50_days: number | null;
@@ -16,11 +17,15 @@ type Fan = {
 type DispatchEnvelope = {
   data?: { payload: Fan; computedAt: string } | null;
   computedAt?: string;
+  status?: string;
 };
+
+type Status = "loading" | "ready" | "sidecar-pending";
 
 export function MonteCarloFan({ projectId }: { projectId?: string }) {
   const [r, setR] = useState<Fan | null>(null);
   const [computedAt, setComputedAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
     if (!projectId) return;
@@ -33,16 +38,29 @@ export function MonteCarloFan({ projectId }: { projectId?: string }) {
         if (j.data && j.data.payload) {
           setR(j.data.payload);
           setComputedAt(j.data.computedAt ?? j.computedAt ?? null);
+          setStatus("ready");
+        } else {
+          setStatus("sidecar-pending");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setStatus("sidecar-pending");
+      });
     return () => {
       cancelled = true;
       ac.abort();
     };
   }, [projectId]);
 
-  if (!r || r.p50_days == null) return null;
+  if (status === "sidecar-pending" || !r || r.p50_days == null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Predicted finish date"
+        cardId="A21_finish"
+        reason="sidecar-pending"
+      />
+    );
+  }
   return (
     <div className="bento-panel p-4">
       <TrustChrome

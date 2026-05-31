@@ -8,12 +8,12 @@ describe("HourHistogram", () => {
     const { container } = render(<HourHistogram buckets={buckets} tz="America/New_York" />);
     expect(container.querySelectorAll(".grid-cols-24 > div").length).toBe(24);
   });
-  it("renders nothing for undefined buckets", () => {
+  it("renders AwaitingDataPanel for undefined buckets", () => {
     const { container } = render(<HourHistogram />);
-    expect(container.innerHTML).toBe("");
+    expect(container.textContent).toContain("Awaiting data");
   });
-  it("renders nothing for empty buckets", () => {
+  it("renders AwaitingDataPanel for empty buckets", () => {
     const { container } = render(<HourHistogram buckets={[]} />);
-    expect(container.innerHTML).toBe("");
+    expect(container.textContent).toContain("Awaiting data");
   });
 });

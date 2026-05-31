@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { GpsOutlierRow } from "@/lib/queries/productivity";
 
 /**
@@ -51,7 +52,15 @@ export function GpsOutlierBox({ projectId }: { projectId?: string }) {
     [rows],
   );
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="GPS accuracy outliers"
+        cardId="A29_gps_outlier"
+        reason="no-data"
+      />
+    );
+  }
   if (totalPoints < N_MIN) {
     return <NMinPlaceholder cardName="GPS accuracy" n={totalPoints} nMin={N_MIN} />;
   }

@@ -1,10 +1,19 @@
 "use client";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { MatchStatusCounts } from "@/lib/match/status";
 
 type Props = { projectId?: string; counts?: MatchStatusCounts };
 
 export function MatchDonut({ counts }: Props) {
-  if (!counts) return null;
+  if (!counts) {
+    return (
+      <AwaitingDataPanel
+        cardName="Match-status composition"
+        cardId="match_donut"
+        reason="no-data"
+      />
+    );
+  }
   const total = counts.total_with_status + counts.r1_count;
   return (
     <div className="bento-panel p-4">

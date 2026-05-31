@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { RefusalPatternRow } from "@/lib/queries/refusal-pattern";
 
 /**
@@ -62,7 +63,15 @@ export function RefusalSmallMultiples({ projectId }: { projectId?: string }) {
     return out;
   }, [rows]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Refusal/not-home pattern"
+        cardId="A22_refusal_pattern"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
   if (totalN < N_MIN) {
     return <NMinPlaceholder cardName="Refusal & not-home pattern" n={totalN} nMin={N_MIN} />;
   }

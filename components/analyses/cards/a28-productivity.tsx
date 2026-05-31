@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { ProductivityRow } from "@/lib/queries/productivity";
 
 /**
@@ -47,7 +48,15 @@ export function ProductivityBullet({ projectId }: { projectId?: string }) {
     return { median: m, maxPpShift: Math.max(1, ...vals) };
   }, [rows]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Productivity per surveyor"
+        cardId="A28_productivity"
+        reason="no-data"
+      />
+    );
+  }
   if (rows.length < N_MIN) {
     return <NMinPlaceholder cardName="Productivity per surveyor" n={rows.length} nMin={N_MIN} />;
   }

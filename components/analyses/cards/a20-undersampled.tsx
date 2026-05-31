@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { UndersampledRow } from "@/lib/queries/universe-coverage";
 
 /**
@@ -41,7 +42,15 @@ export function RankedBullet({ projectId }: { projectId?: string }) {
     };
   }, [projectId]);
 
-  if (rows === null) return null;
+  if (rows === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Under-sampled tracts"
+        cardId="A20_undersampled"
+        reason="needs-universe"
+      />
+    );
+  }
   if (rows.length < N_MIN) {
     return <NMinPlaceholder cardName="Under-sampled parcels" n={rows.length} nMin={N_MIN} />;
   }

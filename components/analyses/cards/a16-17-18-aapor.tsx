@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { TrustChrome } from "../trust-chrome";
 import { NMinPlaceholder } from "../n-min-placeholder";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 import type { AaporResult } from "@/lib/queries/aapor";
 
 /**
@@ -51,7 +52,15 @@ function sumCounts(c: AaporResult["counts"]): number {
 
 export function AaporRatesPanel({ projectId }: { projectId?: string }) {
   const r = useAapor(projectId);
-  if (r === null) return null;
+  if (r === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="AAPOR response rates"
+        cardId="A16_rr"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
   const n = sumCounts(r.counts);
   if (n < 50) return <NMinPlaceholder cardName="AAPOR rates" n={n} nMin={50} />;
   return (
@@ -74,7 +83,15 @@ export function AaporRatesPanel({ projectId }: { projectId?: string }) {
 
 export function AaporCoopRefPanel({ projectId }: { projectId?: string }) {
   const r = useAapor(projectId);
-  if (r === null) return null;
+  if (r === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Cooperation + refusal"
+        cardId="A17_coop_ref"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
   const n = sumCounts(r.counts);
   if (n < 50) return <NMinPlaceholder cardName="COOP1 + REF1" n={n} nMin={50} />;
   return (
@@ -94,7 +111,15 @@ export function AaporCoopRefPanel({ projectId }: { projectId?: string }) {
 
 export function AaporContactTile({ projectId }: { projectId?: string }) {
   const r = useAapor(projectId);
-  if (r === null) return null;
+  if (r === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Contact rate"
+        cardId="A18_con"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
   const n = sumCounts(r.counts);
   if (n < 50) return <NMinPlaceholder cardName="CON1 contact rate" n={n} nMin={50} />;
   return (

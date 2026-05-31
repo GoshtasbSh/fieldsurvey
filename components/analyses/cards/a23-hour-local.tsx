@@ -1,6 +1,7 @@
 "use client";
 
 import { TrustChrome } from "../trust-chrome";
+import { AwaitingDataPanel } from "@/components/analyses/awaiting-data-panel";
 
 type Bucket = { hour: number; total: number };
 
@@ -25,7 +26,15 @@ export function HourHistogram({
   // use it to fetch buckets via `/api/projects/:id/analyses/A23_hour_local`.
   projectId?: string;
 }) {
-  if (!buckets || buckets.length === 0) return null;
+  if (!buckets || buckets.length === 0) {
+    return (
+      <AwaitingDataPanel
+        cardName="Hour of day (local tz)"
+        cardId="A23_hour_local"
+        reason="no-data"
+      />
+    );
+  }
   const max = Math.max(1, ...buckets.map((b) => b.total));
   const total = buckets.reduce((a, b) => a + b.total, 0);
   return (
