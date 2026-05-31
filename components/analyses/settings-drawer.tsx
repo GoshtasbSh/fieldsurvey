@@ -10,6 +10,7 @@ import { PoiPicker } from "./inputs/poi-picker";
 import { SettingSlider } from "./inputs/setting-slider";
 import { SettingSelect } from "./inputs/setting-select";
 import { SettingToggle } from "./inputs/setting-toggle";
+import { getResultPanel } from "@/components/analyses/results";
 
 type Props = {
   open: boolean;
@@ -90,12 +91,14 @@ function ResultPanel({
   error,
   data,
   computedAt,
+  cardId,
   onPin,
 }: {
   loading: boolean;
   error: string | null;
   data: unknown | null;
   computedAt: string | null;
+  cardId: string;
   onPin: (result: unknown) => void;
 }) {
   if (loading) {
@@ -115,6 +118,7 @@ function ResultPanel({
   }
   if (data === null) return null;
 
+  const SpecificPanel = getResultPanel(cardId);
   const isWavePending =
     typeof data === "object" &&
     data !== null &&
@@ -136,6 +140,8 @@ function ResultPanel({
         <p className="text-[11.5px] text-[var(--shell-text-muted)]">
           Compute backend ships in a later wave — result preview not available yet.
         </p>
+      ) : SpecificPanel ? (
+        <SpecificPanel data={data} />
       ) : (
         <p className="text-[11.5px] font-mono break-all text-[var(--shell-text-muted)]">
           {JSON.stringify(data).slice(0, 200)}…
@@ -216,6 +222,7 @@ export function SettingsDrawer(p: Props) {
                 error={error}
                 data={data}
                 computedAt={computedAt}
+                cardId={p.card.id}
                 onPin={p.onPin}
               />
             )}
