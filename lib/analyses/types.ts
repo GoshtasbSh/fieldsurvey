@@ -189,3 +189,20 @@ export type AnalysisListItem = {
   settings: Record<string, unknown>;
   addedAt: string; // ISO timestamp
 };
+
+export type PinnedAnalysisLayer = {
+  /** Registry card id, e.g. "S2_gi_star_q". */
+  cardId: string;
+  /** User-editable display name shown in the left-rail Analysis tab. */
+  layerName: string;
+  /** The settings used when the analysis was run. */
+  settings: Record<string, unknown>;
+  /** Whether this layer is currently shown on the map. */
+  visible: boolean;
+  /** ISO timestamp of when the user pinned this layer. */
+  pinnedAt: string;
+  /** Cached dispatcher result payload — undefined until first successful run. */
+  cachedResult?: unknown;
+  /** ISO timestamp of the cached result. */
+  cachedAt?: string;
+};
