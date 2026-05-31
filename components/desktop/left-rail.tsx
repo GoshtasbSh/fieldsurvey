@@ -15,6 +15,9 @@ import {
   Sliders,
   ChevronDown,
 } from "lucide-react";
+import * as Tabs from "@radix-ui/react-tabs";
+import { AnalysisLayersPanel } from "@/components/analyses/analysis-layers-panel";
+import type { PinnedAnalysisLayer } from "@/lib/analyses/types";
 import type { MatchStatusCounts, MatchStatus } from "@/lib/match/status";
 import {
   SymbologyEditor,
@@ -58,6 +61,13 @@ type Props = {
   savedViews?: Array<{ id: string; name: string; description: string | null; role_gate: string }>;
   activeViewId?: string | null;
   onSwitchView?: (viewId: string) => void;
+  /** M7.2: Pinned analysis layers for the Analysis tab. */
+  pinnedLayers?: PinnedAnalysisLayer[];
+  pinnedLayersLoading?: boolean;
+  onTogglePinnedVisibility?: (cardId: string, pinnedAt: string, visible: boolean) => void;
+  onUnpinLayer?: (cardId: string, pinnedAt: string) => void;
+  onOpenPinnedSettings?: (cardId: string, pinnedAt: string) => void;
+  onRenamePinnedLayer?: (cardId: string, pinnedAt: string, name: string) => void;
 };
 
 export function DesktopLeftRail({
@@ -83,6 +93,12 @@ export function DesktopLeftRail({
   savedViews = [],
   activeViewId = null,
   onSwitchView,
+  pinnedLayers = [],
+  pinnedLayersLoading = false,
+  onTogglePinnedVisibility,
+  onUnpinLayer,
+  onOpenPinnedSettings,
+  onRenamePinnedLayer,
 }: Props) {
   // Which status row currently has its sliders open.
   const [openSymbId, setOpenSymbId] = useState<string | null>(null);
@@ -94,7 +110,36 @@ export function DesktopLeftRail({
   const matchTotal = matchCounts.m1_count + matchCounts.f1_count + matchCounts.r1_count;
 
   return (
-    <aside className="flex h-full w-[280px] flex-col gap-3 overflow-y-auto border-r border-[var(--bento-rule)] bg-[var(--bento-bg)] p-3">
+    <aside className="flex h-full w-[280px] flex-col border-r border-[var(--bento-rule)] bg-[var(--bento-bg)]">
+      <Tabs.Root defaultValue="layers" className="flex flex-col h-full">
+        {/* Tab bar */}
+        <Tabs.List className="flex border-b border-[var(--bento-rule)] shrink-0">
+          <Tabs.Trigger
+            value="layers"
+            className="flex-1 py-2 text-[11.5px] font-semibold text-[var(--bento-ink-3)]
+                       data-[state=active]:text-[var(--bento-ink-1)] data-[state=active]:border-b-2
+                       data-[state=active]:border-[var(--bento-accent)] transition-colors"
+          >
+            Layers
+          </Tabs.Trigger>
+          <Tabs.Trigger
+            value="analysis"
+            className="flex-1 py-2 text-[11.5px] font-semibold text-[var(--bento-ink-3)]
+                       data-[state=active]:text-[var(--bento-ink-1)] data-[state=active]:border-b-2
+                       data-[state=active]:border-[var(--bento-accent)] transition-colors"
+          >
+            Analysis
+            {pinnedLayers.length > 0 && (
+              <span className="ml-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bento-accent)] text-[9px] font-bold text-white">
+                {pinnedLayers.length}
+              </span>
+            )}
+          </Tabs.Trigger>
+        </Tabs.List>
+
+        {/* Tab 1 — Layers (all existing content) */}
+        <Tabs.Content value="layers" className="flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-3 p-3">
       {/* ── Project hero card ────────────────────────────────────────── */}
       <div className="bento-panel relative overflow-hidden p-4">
         <div
@@ -469,6 +514,21 @@ export function DesktopLeftRail({
           </div>
         )}
       </div>
+          </div>
+        </Tabs.Content>
+
+        {/* Tab 2 — Analysis layers */}
+        <Tabs.Content value="analysis" className="flex-1 overflow-y-auto p-3">
+          <AnalysisLayersPanel
+            layers={pinnedLayers}
+            loading={pinnedLayersLoading}
+            onToggleVisibility={onTogglePinnedVisibility ?? (() => {})}
+            onUnpin={onUnpinLayer ?? (() => {})}
+            onOpenSettings={onOpenPinnedSettings ?? (() => {})}
+            onRename={onRenamePinnedLayer ?? (() => {})}
+          />
+        </Tabs.Content>
+      </Tabs.Root>
     </aside>
   );
 }
