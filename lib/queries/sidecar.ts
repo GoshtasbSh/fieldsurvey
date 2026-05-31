@@ -1,4 +1,3 @@
-import "server-only";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 const FRESH_S = 15 * 60;
