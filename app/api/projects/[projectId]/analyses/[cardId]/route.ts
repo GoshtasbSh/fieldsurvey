@@ -21,6 +21,8 @@ import {
   buildS7Input,
   buildS8Input,
 } from "@/lib/queries/sidecar-inputs";
+import { getMultiselectUpset, getWeightedVsUnweighted, getChoroplethAgg, getWhosMissing, getLorenzCurve } from "@/lib/queries/medium-analyses";
+import { buildA6Input, buildA35Input, buildA43Input, buildA46Input } from "@/lib/queries/sidecar-inputs";
 import { getCoverageResponse } from "@/lib/queries/coverage-response";
 import { getColumnValuesById } from "@/lib/queries/columns";
 import { defaultSpecFor, resolveBreaks } from "@/lib/colorize/auto-classify";
@@ -45,6 +47,11 @@ const POSTGRES_DISPATCH: Record<string, (projectId: string, settings: Record<str
   A40_sample_vs_acs: (projectId, _settings) => getDemographicsSchema(projectId),
   A51_topk: (projectId, _settings) => getTopKBlocks(projectId),
   A52_f1_queue: (projectId, _settings) => getF1Queue(projectId),
+  A3_multiselect_upset: (projectId, settings) => getMultiselectUpset(projectId, settings),
+  A7_weighted_vs_unweighted: (projectId, settings) => getWeightedVsUnweighted(projectId, settings),
+  A12_choropleth_agg: (projectId, settings) => getChoroplethAgg(projectId, settings),
+  A41_whos_missing: (projectId, settings) => getWhosMissing(projectId, settings),
+  A42_lorenz: (projectId, settings) => getLorenzCurve(projectId, settings),
   S6_coverage_response: async (projectId, settings) => getCoverageResponse(projectId, settings),
   A0_colorizer: async (projectId, settings) => {
     const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
@@ -117,6 +124,26 @@ const SIDECAR_DISPATCH: Record<string, (projectId: string, settings: Record<stri
     const body = await buildS8Input(projectId, settings);
     if (!body) return { reason: "wave-pending", message: "Two questions required." };
     return callSidecar(projectId, "S8_bivariate", body);
+  },
+  A6_text_ngrams: async (projectId, settings) => {
+    const body = await buildA6Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No text question selected." };
+    return callSidecar(projectId, "A6_text_ngrams", body);
+  },
+  A35_straight_line: async (projectId, settings) => {
+    const body = await buildA35Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "Need ≥3 numeric/Likert questions in the survey." };
+    return callSidecar(projectId, "A35_straight_line", body);
+  },
+  A43_raking_diag: async (projectId, settings) => {
+    const body = await buildA43Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No grouping question selected." };
+    return callSidecar(projectId, "A43_raking_diag", body);
+  },
+  A46_segment_diff: async (projectId, settings) => {
+    const body = await buildA46Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No grouping question selected." };
+    return callSidecar(projectId, "A46_segment_diff", body);
   },
 };
 

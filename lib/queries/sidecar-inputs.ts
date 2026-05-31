@@ -376,3 +376,76 @@ export async function buildS8Input(projectId: string, settings: Record<string, s
     n_permutations: Number(settings["nPermutations"] ?? 999),
   };
 }
+
+/** A6: Text n-grams — fetch raw text values for a question column */
+export async function buildA6Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  if (!qk) return null;
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb as any).from("survey_responses")
+    .select("raw_data").eq("project_id", projectId) as
+    { data: Array<{ raw_data: Record<string, unknown> | null }> | null };
+  const texts = (data ?? []).map(r => String(r.raw_data?.[qk] ?? ""));
+  return { texts, n_gram: settings["nGram"] ?? "both", max_terms: Number(settings["maxTerms"] ?? 20) };
+}
+
+/** A35: Straight-line detector — fetch all numeric/Likert values */
+export async function buildA35Input(projectId: string, settings: Record<string, string>) {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb as any).from("survey_responses")
+    .select("id, raw_data").eq("project_id", projectId) as
+    { data: Array<{ id: string; raw_data: Record<string, unknown> | null }> | null };
+  if (!data || data.length === 0) return null;
+  const sample = data.find(r => r.raw_data)?.raw_data ?? {};
+  const numericKeys = Object.keys(sample).filter(k => {
+    const vals = data.map(r => r.raw_data?.[k]).filter(v => v !== null && v !== undefined && v !== "");
+    return vals.length >= 3 && vals.every(v => Number.isFinite(Number(v)));
+  });
+  const minQuestions = Number(settings["minQuestions"] ?? 3);
+  if (numericKeys.length < minQuestions) return null;
+  const rows = data.map(r => ({
+    response_id: r.id,
+    values: numericKeys.map(k => {
+      const v = r.raw_data?.[k];
+      return (v !== null && v !== undefined && v !== "") ? Number(v) : null;
+    }),
+  }));
+  return { rows, question_keys: numericKeys, threshold: Number(settings["threshold"] ?? 0.8), min_questions: minQuestions };
+}
+
+/** A43: Raking diagnostic — fetch group values for one question */
+export async function buildA43Input(projectId: string, settings: Record<string, string>) {
+  const groupKey = settings["groupKey"] ?? settings["groupkey"] ?? "";
+  if (!groupKey) return null;
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb as any).from("survey_responses")
+    .select("raw_data").eq("project_id", projectId) as
+    { data: Array<{ raw_data: Record<string, unknown> | null }> | null };
+  const groupValues = (data ?? []).map(r => String(r.raw_data?.[groupKey] ?? "")).filter(Boolean);
+  if (groupValues.length === 0) return null;
+  return { group_values: groupValues, trim_cap: Number(settings["trimCap"] ?? 5) };
+}
+
+/** A46: Segment diff — fetch all responses with group + question values */
+export async function buildA46Input(projectId: string, settings: Record<string, string>) {
+  const groupKey = settings["groupKey"] ?? settings["groupkey"] ?? "";
+  if (!groupKey) return null;
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb as any).from("survey_responses")
+    .select("id, raw_data").eq("project_id", projectId) as
+    { data: Array<{ id: string; raw_data: Record<string, unknown> | null }> | null };
+  if (!data) return null;
+  const rows = data
+    .filter(r => r.raw_data?.[groupKey])
+    .map(r => ({
+      response_id: r.id,
+      group_value: String(r.raw_data![groupKey]),
+      question_values: Object.fromEntries(Object.entries(r.raw_data ?? {}).filter(([k]) => k !== groupKey)),
+    }));
+  if (rows.length === 0) return null;
+  return { rows, group_key: groupKey, fdr_alpha: Number(settings["fdrAlpha"] ?? 0.05), min_n: Number(settings["minN"] ?? 10) };
+}
