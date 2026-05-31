@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 140" role="img" aria-label="Schematic Kulldorff scan windows over a polygon basemap">
+  <rect width="280" height="140" fill="#F4F4F5"/>
+  <!-- Basemap polygons (light grey) -->
+  <g fill="#E4E4E7" stroke="#D4D4D8" stroke-width="0.6">
+    <polygon points="10,30 60,20 75,55 50,80 15,75"/>
+    <polygon points="60,20 130,30 125,75 75,55"/>
+    <polygon points="130,30 210,35 220,90 125,75"/>
+    <polygon points="210,35 270,40 265,110 220,90"/>
+    <polygon points="15,75 50,80 60,120 20,115"/>
+    <polygon points="60,120 125,115 130,75 75,55 50,80"/>
+    <polygon points="125,115 220,110 220,90 125,75"/>
+  </g>
+  <!-- Scan circles -->
+  <circle cx="115" cy="65" r="32" fill="rgba(239,68,68,0.10)" stroke="#DC2626" stroke-width="2.2"/>
+  <circle cx="205" cy="85" r="20" fill="rgba(239,68,68,0.06)" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <!-- Case dots inside primary -->
+  <g fill="#B91C1C">
+    <circle cx="100" cy="55" r="2"/><circle cx="120" cy="50" r="2"/>
+    <circle cx="130" cy="70" r="2"/><circle cx="105" cy="78" r="2"/>
+    <circle cx="120" cy="80" r="2"/><circle cx="95" cy="68" r="2"/>
+    <circle cx="115" cy="65" r="2"/>
+  </g>
+  <!-- Case dots inside secondary -->
+  <g fill="#B91C1C">
+    <circle cx="200" cy="80" r="2"/><circle cx="210" cy="90" r="2"/>
+    <circle cx="215" cy="80" r="2"/><circle cx="198" cy="92" r="2"/>
+  </g>
+  <!-- Labels -->
+  <text x="115" y="44" font-family="ui-monospace, monospace" font-size="8" fill="#7F1D1D" text-anchor="middle">primary · p&lt;0.001</text>
+  <text x="205" y="64" font-family="ui-monospace, monospace" font-size="7" fill="#7F1D1D" text-anchor="middle">secondary</text>
+</svg>
