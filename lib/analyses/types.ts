@@ -137,3 +137,55 @@ export type ColumnProfile = {
   /** Detected when type is likert; ordered low→high. */
   likertOrder?: string[];
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Spatial Analysis Toolbox (Wave 0)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ToolboxSlug =
+  // v1
+  | "symbology"
+  | "analyzing_patterns"
+  | "mapping_clusters"
+  | "spatial_relationships"
+  | "coverage_equity"
+  // v2 placeholders
+  | "space_time"
+  | "spatial_regression"
+  | "sampling_equity";
+
+export type PreviewImage = {
+  /** Absolute path under public/, e.g. "/analyses-previews/S2_gi_star_q.jpg". */
+  src: string;
+  /** Screen-reader description. */
+  alt: string;
+  /** Attribution link. */
+  sourceUrl: string;
+  /** Human-readable source name. */
+  sourceTitle: string;
+  /** SPDX-ish license string, e.g. "CC-BY-4.0", "Public Domain". */
+  license: string;
+};
+
+export type SettingSchema =
+  | { key: string; type: "question_picker"; label: string; defaultValue?: "inherit_global" | string }
+  | { key: string; type: "answer_picker"; label: string; questionKeyRef: string; defaultValue?: string }
+  | { key: string; type: "poi_picker"; label: string; defaultValue?: { lat: number; lon: number } | null }
+  | { key: string; type: "slider"; label: string; min: number; max: number; step: number; defaultValue: number }
+  | { key: string; type: "select"; label: string; options: Array<{ value: string | number; label: string }>; defaultValue: string | number }
+  | { key: string; type: "toggle"; label: string; defaultValue: boolean };
+
+export type SpatialCardCatalogEntry = CardDescriptor & {
+  toolbox: ToolboxSlug;
+  previewImage: PreviewImage;
+  questionsAnswered: string[];
+  whatItDoes: string;
+  inputRequirements: string[];
+  settingsSchema: SettingSchema[];
+};
+
+export type AnalysisListItem = {
+  cardId: string;
+  settings: Record<string, unknown>;
+  addedAt: string; // ISO timestamp
+};
