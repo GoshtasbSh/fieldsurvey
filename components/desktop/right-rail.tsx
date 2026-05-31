@@ -815,7 +815,7 @@ function AnalyzeTabContainer({ projectId }: { projectId: string }) {
             void updateSettings(settingsFor.cardId, settingsFor.addedAt, { ...settingsFor.settings, ...patch });
           }}
           onClose={() => setSettingsFor(null)}
-          onRecompute={() => { /* Wave-1: triggers dispatcher refresh */ }}
+          onPin={() => { /* Wave-1: wire up pinnedLayers state */ }}
         />
       )}
     </div>
