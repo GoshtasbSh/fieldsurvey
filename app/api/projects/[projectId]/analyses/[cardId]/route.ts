@@ -20,46 +20,50 @@ export const dynamic = "force-dynamic";
 // cardId convention: registry format (uppercase snake-case, e.g. A19_universe_map,
 // A28_productivity, A51_topk). Cards must fetch `/analyses/<registry-card-id>` —
 // the registry in `lib/analyses/registry.ts` is the single source of truth.
-const POSTGRES_DISPATCH: Record<string, (projectId: string) => Promise<unknown>> = {
-  A16_rr: getAaporResult,
-  A17_coop_ref: getAaporResult,
-  A18_con: getAaporResult,
-  A13_cov_heatmap: getCoverageBlocks,
-  A19_universe_map: getCoverageBlocks,
-  A20_undersampled: getUndersampledBlocks,
-  A22_refusal_pattern: getRefusalPattern,
-  A28_productivity: getProductivity,
-  A29_gps_outlier: getGpsOutliers,
-  A33_off_boundary: getOffBoundary,
-  A40_sample_vs_acs: getDemographicsSchema,
-  A51_topk: getTopKBlocks,
-  A52_f1_queue: getF1Queue,
+const POSTGRES_DISPATCH: Record<string, (projectId: string, settings: Record<string, string>) => Promise<unknown>> = {
+  A16_rr: (projectId, _settings) => getAaporResult(projectId),
+  A17_coop_ref: (projectId, _settings) => getAaporResult(projectId),
+  A18_con: (projectId, _settings) => getAaporResult(projectId),
+  A13_cov_heatmap: (projectId, _settings) => getCoverageBlocks(projectId),
+  A19_universe_map: (projectId, _settings) => getCoverageBlocks(projectId),
+  A20_undersampled: (projectId, _settings) => getUndersampledBlocks(projectId),
+  A22_refusal_pattern: (projectId, _settings) => getRefusalPattern(projectId),
+  A28_productivity: (projectId, _settings) => getProductivity(projectId),
+  A29_gps_outlier: (projectId, _settings) => getGpsOutliers(projectId),
+  A33_off_boundary: (projectId, _settings) => getOffBoundary(projectId),
+  A40_sample_vs_acs: (projectId, _settings) => getDemographicsSchema(projectId),
+  A51_topk: (projectId, _settings) => getTopKBlocks(projectId),
+  A52_f1_queue: (projectId, _settings) => getF1Queue(projectId),
 };
 
-const SIDECAR_DISPATCH: Record<string, (projectId: string) => Promise<unknown>> = {
-  A21_finish: async (projectId) => {
+const SIDECAR_DISPATCH: Record<string, (projectId: string, settings: Record<string, string>) => Promise<unknown>> = {
+  A21_finish: async (projectId, _settings) => {
     const body = await buildA21FinishInput(projectId);
     return callSidecar(projectId, "A21_finish", body);
   },
-  A25_velocity: async (projectId) => {
+  A25_velocity: async (projectId, _settings) => {
     const body = await buildA25VelocityInput(projectId);
     return callSidecar(projectId, "A25_velocity", body);
   },
-  A11_kde: async (projectId) => {
+  A11_kde: async (projectId, _settings) => {
     const body = await buildA11KdeInput(projectId);
     return callSidecar(projectId, "A11_kde", body);
   },
-  A8_gi_star: async (projectId) => {
+  A8_gi_star: async (projectId, _settings) => {
     const body = await buildA8GiStarInput(projectId);
     return callSidecar(projectId, "A8_gi_star", body);
   },
 };
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ projectId: string; cardId: string }> },
 ) {
   const { projectId, cardId } = await params;
+
+  const url = new URL(req.url);
+  const settings: Record<string, string> = {};
+  url.searchParams.forEach((v, k) => { settings[k] = v; });
 
   const handler = POSTGRES_DISPATCH[cardId] ?? SIDECAR_DISPATCH[cardId];
   if (!handler) {
@@ -67,7 +71,7 @@ export async function GET(
   }
 
   try {
-    const data = await handler(projectId);
+    const data = await handler(projectId, settings);
     return NextResponse.json({ data, computedAt: new Date().toISOString() });
   } catch (err) {
     // Sanitize errors before surfacing to the client. RLS / RPC errors leak
