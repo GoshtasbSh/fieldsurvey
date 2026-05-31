@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity,
   BarChart3,
@@ -11,7 +11,6 @@ import {
   Clock,
   Sparkles,
   ListChecks,
-  Plus,
 } from "lucide-react";
 import type { MatchStatusCounts } from "@/lib/match/status";
 import { ChatPanel } from "@/components/chat/chat-panel";
@@ -19,8 +18,12 @@ import type { ChatMessage } from "@/lib/queries/chat";
 import type { StatusRow } from "./left-rail";
 import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
 import { CatalogDrawer } from "@/components/desktop/catalog-drawer";
-import { ANALYSES_REGISTRY, getCardById } from "@/lib/analyses/registry";
-import { RegistryCard } from "@/components/analyses/registry-card";
+import { getCardById } from "@/lib/analyses/registry";
+import { AddAnalysisModal } from "@/components/analyses/add-analysis-modal";
+import { AnalysesList } from "@/components/analyses/analyses-list";
+import { SettingsDrawer } from "@/components/analyses/settings-drawer";
+import { useAddedAnalyses } from "@/hooks/use-added-analyses";
+import type { SpatialCardCatalogEntry, AnalysisListItem } from "@/lib/analyses/types";
 
 export type RightRailTab = "pulse" | "analyze" | "team" | "inspect";
 export type SurveyorBrief = { collector_id: string | null; name: string; count: number };
@@ -66,6 +69,7 @@ type Props = {
 
 export function DesktopRightRail({
   projectId, currentUserId, matchCounts, statuses, pointsTotal, todayDelta,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   unreadChats, daily = [], hourly = [], dow = [], surveyors = [], coverage,
   chatMembers = [], initialChat = [], canWriteChat = true, canvass = null, onCollapse,
   userRole = null,
@@ -108,19 +112,6 @@ export function DesktopRightRail({
       });
     } catch { /* non-blocking */ }
   }
-
-  // Hide "Coming" stubs from the rendered Analyze cards even if enabled.
-  const analyzeCards = useMemo(() => {
-    const ids = activeViewCards ?? [];
-    return ids
-      .map((id) => getCardById(id))
-      .filter((c): c is NonNullable<ReturnType<typeof getCardById>> => {
-        if (!c) return false;
-        if (c.stub) return false;
-        if (c.roleGate === "admin" && !isAdmin) return false;
-        return true;
-      });
-  }, [activeViewCards, isAdmin]);
 
   return (
     <aside className="flex h-full w-[360px] flex-col overflow-hidden border-l border-[var(--bento-rule)] bg-[var(--bento-bg)]">
@@ -182,37 +173,7 @@ export function DesktopRightRail({
           </Scroll>
         )}
         {tab === "analyze" && (
-          <Scroll>
-            {/* M7: admin can open the catalog to curate which cards appear here */}
-            {isAdmin && (
-              <button
-                onClick={() => setCatalogOpen(true)}
-                className="bento-focus mb-1 inline-flex items-center gap-1.5 self-start rounded-full border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-1.5 font-mono text-[10.5px] font-bold uppercase tracking-[0.07em] text-[var(--shell-text-2)] transition-colors hover:bg-[var(--shell-3)]"
-              >
-                <Plus className="h-3 w-3" strokeWidth={1.8} />
-                Catalog · {ANALYSES_REGISTRY.length} analyses
-              </button>
-            )}
-
-            <AnalyzeTab
-              matchCounts={matchCounts}
-              hourly={hourly}
-              dow={dow}
-              surveyors={surveyors}
-              coverage={coverage}
-            />
-
-            {/* M7 wave-1: registry-driven cards for the active saved view.
-                Each card resolves its real viz component via VIZ_REGISTRY
-                and falls back to a Coming placeholder when still a stub. */}
-            {analyzeCards.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {analyzeCards.map((c) => (
-                  <RegistryCard key={c.id} cardId={c.id} projectId={projectId} userRole={userRole} />
-                ))}
-              </div>
-            )}
-          </Scroll>
+          <AnalyzeTabContainer projectId={projectId} />
         )}
         {tab === "team" && (
           currentUserId
@@ -416,8 +377,10 @@ function PulseTab({
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ANALYZE TAB — spatial survey analytics: patterns, trends, quality
+// Retained for Wave 1: will re-appear as a Saved View in the new toolbox UX.
 // ──────────────────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AnalyzeTab({
   matchCounts, hourly, dow, surveyors, coverage,
 }: {
@@ -800,6 +763,61 @@ function Placeholder({ label }: { label: string }) {
   return (
     <div className="flex flex-1 items-center justify-center text-center text-[12px] text-[var(--shell-text-muted)]">
       <span>{label}</span>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ANALYZE TAB CONTAINER — Wave-0 Spatial Toolbox UX (M7.2)
+// Hosts the Add-Analysis modal, analyses list, and settings drawer.
+// Legacy AnalyzeTab cards return in Wave 1 as part of saved views.
+// ──────────────────────────────────────────────────────────────────────────────
+
+function AnalyzeTabContainer({ projectId }: { projectId: string }) {
+  const { items, activeQuestion, add, remove, updateSettings } = useAddedAnalyses(projectId);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [settingsFor, setSettingsFor] = useState<AnalysisListItem | null>(null);
+
+  const settingsCard = settingsFor
+    ? (getCardById(settingsFor.cardId) as SpatialCardCatalogEntry | undefined)
+    : undefined;
+
+  return (
+    <div className="h-full p-3">
+      <AnalysesList
+        items={items}
+        projectId={projectId}
+        globalActiveQuestion={activeQuestion}
+        onAddClick={() => setModalOpen(true)}
+        onOpenSettings={(cardId) => {
+          const item = items.find((i) => i.cardId === cardId);
+          if (item) setSettingsFor(item);
+        }}
+        onRemove={(cardId) => {
+          const item = items.find((i) => i.cardId === cardId);
+          if (item) remove(item.cardId, item.addedAt);
+        }}
+      />
+      <AddAnalysisModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        onAdd={(cardId) => { add(cardId); setModalOpen(false); }}
+      />
+      {settingsFor && settingsCard && (
+        <SettingsDrawer
+          open
+          card={settingsCard}
+          projectId={projectId}
+          globalActiveQuestion={activeQuestion}
+          settings={settingsFor.settings}
+          onChange={(patch) => {
+            setSettingsFor((cur) => cur ? { ...cur, settings: { ...cur.settings, ...patch } } : cur);
+            void updateSettings(settingsFor.cardId, settingsFor.addedAt, { ...settingsFor.settings, ...patch });
+          }}
+          onClose={() => setSettingsFor(null)}
+          onRecompute={() => { /* Wave-1: triggers dispatcher refresh */ }}
+        />
+      )}
     </div>
   );
 }
