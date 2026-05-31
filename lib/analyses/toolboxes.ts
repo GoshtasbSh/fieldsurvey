@@ -54,6 +54,22 @@ export const TOOLBOXES: Toolbox[] = [
     sortOrder: 50,
   },
   {
+    slug: "survey_response",
+    label: "Survey Response",
+    icon: "📊",
+    description: "Aggregate and cross-tabulate survey response distributions across the project.",
+    isV2: false,
+    sortOrder: 55,
+  },
+  {
+    slug: "quality_bias",
+    label: "Quality & Bias",
+    icon: "🔍",
+    description: "Detect data-quality issues, interviewer effects, and potential response bias.",
+    isV2: false,
+    sortOrder: 58,
+  },
+  {
     slug: "space_time",
     label: "Space-Time Pattern Mining",
     icon: "⏰",

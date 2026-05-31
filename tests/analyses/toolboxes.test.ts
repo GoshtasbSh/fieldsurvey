@@ -3,10 +3,11 @@ import { describe, it, expect } from "vitest";
 import { TOOLBOXES, v1Toolboxes, v2Toolboxes } from "@/lib/analyses/toolboxes";
 
 describe("toolboxes", () => {
-  it("ships 5 v1 toolboxes in spec order", () => {
+  it("ships 7 v1 toolboxes in spec order", () => {
     expect(v1Toolboxes().map(t => t.slug)).toEqual([
       "symbology", "analyzing_patterns", "mapping_clusters",
       "spatial_relationships", "coverage_equity",
+      "survey_response", "quality_bias",
     ]);
   });
 

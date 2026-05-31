@@ -149,6 +149,8 @@ export type ToolboxSlug =
   | "mapping_clusters"
   | "spatial_relationships"
   | "coverage_equity"
+  | "survey_response"
+  | "quality_bias"
   // v2 placeholders
   | "space_time"
   | "spatial_regression"
