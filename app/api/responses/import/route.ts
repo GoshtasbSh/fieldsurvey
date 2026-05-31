@@ -9,6 +9,11 @@ const ImportBody = z.object({
   filename: z.string().min(1).max(200),
   address_column: z.string().min(1),
   external_id_column: z.string().nullable().optional(),
+  // City/state/ZIP appended to every address before geocoding. Required
+  // because the U.S. Census one-line geocoder cannot resolve street-only
+  // inputs (e.g. "Harvard Avenue" exists in every state). The wizard
+  // prompts and confirms this on every run — never silent.
+  geocode_address_suffix: z.string().min(2).max(120),
   rows: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))).min(1).max(20000),
   source: z.enum(["qualtrics_csv", "google_forms_csv", "manual"]).default("qualtrics_csv"),
 });
@@ -107,9 +112,13 @@ export async function POST(req: NextRequest) {
     inserted += slice.length;
   }
 
+  const suffix = body.geocode_address_suffix.trim();
   await sbAny.from("project_settings").update({
     response_address_column: body.address_column,
     external_id_column: body.external_id_column ?? null,
+    // Save the user's confirmed suffix so the next import pre-fills with it.
+    // The wizard still re-prompts every time — this is just the default.
+    geocode_address_suffix: suffix,
   }).eq("project_id", body.project_id);
 
   // Drive the matcher synchronously: the user is waiting on the wizard's
@@ -119,6 +128,7 @@ export async function POST(req: NextRequest) {
   // 100% of imported responses stayed ungeocoded.
   const pyUrl = new URL("/api/py/match_responses", req.url);
   pyUrl.searchParams.set("project_id", body.project_id);
+  pyUrl.searchParams.set("address_suffix", suffix);
 
   let matcher: MatcherSummary | null = null;
   let matcherError: string | null = null;

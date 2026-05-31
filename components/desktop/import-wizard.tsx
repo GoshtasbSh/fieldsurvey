@@ -14,14 +14,28 @@ type Row = Record<string, string | number | boolean | null>;
  *      optional external-id column for de-dup
  *   3. Confirm → POST /api/responses/import → server matches via Python
  */
-export function ImportWizard({ projectId }: { projectId: string }) {
+export function ImportWizard({
+  projectId,
+  defaultAddressSuffix = "",
+  defaultAddressColumn = "",
+  defaultExternalIdColumn = "",
+}: {
+  projectId: string;
+  defaultAddressSuffix?: string;
+  defaultAddressColumn?: string;
+  defaultExternalIdColumn?: string;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [filename, setFilename] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
-  const [addressColumn, setAddressColumn] = useState("");
-  const [externalIdColumn, setExternalIdColumn] = useState<string>("");
+  const [addressColumn, setAddressColumn] = useState(defaultAddressColumn);
+  const [externalIdColumn, setExternalIdColumn] = useState<string>(defaultExternalIdColumn);
+  // Project-level suffix the user must confirm before each geocode run.
+  // Pre-filled with the project's last-used value, but the user always sees
+  // the input and re-confirms — never silent.
+  const [addressSuffix, setAddressSuffix] = useState<string>(defaultAddressSuffix);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rerunning, setRerunning] = useState(false);
@@ -39,16 +53,23 @@ export function ImportWizard({ projectId }: { projectId: string }) {
     if (!parsed.rows.length) { setError("CSV has no rows"); return; }
     setHeaders(parsed.headers);
     setRows(parsed.rows);
-    // Heuristic: pick the column with "address" in its name
-    const guess = parsed.headers.find((h) => /address|street|location/i.test(h)) ?? "";
-    setAddressColumn(guess);
-    const idGuess = parsed.headers.find((h) => /response.*id|external.*id|^id$/i.test(h)) ?? "";
-    setExternalIdColumn(idGuess);
+    // Heuristic: pick the column with "address" in its name — only if the
+    // user hasn't already locked one in from project defaults.
+    if (!addressColumn) {
+      const guess = parsed.headers.find((h) => /address|street|location/i.test(h)) ?? "";
+      setAddressColumn(guess);
+    }
+    if (!externalIdColumn) {
+      const idGuess = parsed.headers.find((h) => /response.*id|external.*id|^id$/i.test(h)) ?? "";
+      setExternalIdColumn(idGuess);
+    }
     setStep("configure");
   }
 
   async function onCommit() {
     if (!addressColumn) { setError("Pick the address column."); return; }
+    const suffix = addressSuffix.trim();
+    if (!suffix) { setError("Type the city, state, ZIP (or any locality) to append to every address. Census can't resolve street-only addresses."); return; }
     setBusy(true);
     setStep("running");
     try {
@@ -60,6 +81,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           filename,
           address_column: addressColumn,
           external_id_column: externalIdColumn || null,
+          geocode_address_suffix: suffix,
           rows,
         }),
       });
@@ -85,9 +107,23 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   }
 
   async function onRerunMatch() {
+    // Re-confirm the suffix every time. Use the wizard's current value
+    // (which mirrors the project default unless the user edited it).
+    const fresh = window.prompt(
+      "Confirm the city, state, ZIP (or any locality) to append to every street address before geocoding.\n" +
+      "Census needs more than the street to resolve the location.",
+      addressSuffix || "",
+    );
+    if (fresh === null) return;
+    const suffix = fresh.trim();
+    if (!suffix) { setResult((p) => p ? { ...p, matcher_error: "Suffix is required for geocoding." } : p); return; }
+    setAddressSuffix(suffix);
     setRerunning(true);
     try {
-      const r = await fetch(`/api/match?project_id=${encodeURIComponent(projectId)}`, { method: "POST" });
+      const r = await fetch(
+        `/api/match?project_id=${encodeURIComponent(projectId)}&address_suffix=${encodeURIComponent(suffix)}`,
+        { method: "POST" },
+      );
       const j = (await r.json()) as { error?: string; geocoded?: number; matched_now?: number; m1_count?: number; f1_count?: number; r1_count?: number };
       if (!r.ok) throw new Error(j.error ?? `match failed (${r.status})`);
       setResult((prev) => prev ? {
@@ -154,6 +190,26 @@ export function ImportWizard({ projectId }: { projectId: string }) {
             </select>
           </div>
 
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">
+              City, state, ZIP to append to every address <span className="text-[oklch(68%_0.21_25)]">required</span>
+            </label>
+            <input
+              type="text"
+              value={addressSuffix}
+              onChange={(e) => setAddressSuffix(e.target.value)}
+              placeholder="e.g. Keystone Heights, FL 32656"
+              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-mono text-[12px]"
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+              The Census geocoder can&apos;t resolve street-only addresses like &ldquo;6116 Harvard Avenue&rdquo; — Harvard Avenue exists in every state. We append this to every row before geocoding. {defaultAddressSuffix ? (
+                <span className="text-[var(--shell-text-2)]">Pre-filled from this project&apos;s last import; edit it if this CSV is from a different area.</span>
+              ) : (
+                <span>Required on the first import. We&apos;ll save it on the project so future imports default to the same value (but you can always change it).</span>
+              )}
+            </p>
+          </div>
+
           <PreviewTable rows={rows.slice(0, 5)} addressColumn={addressColumn} />
 
           {error && <p className="text-[12px] text-[oklch(68%_0.21_25)]">{error}</p>}
@@ -167,7 +223,7 @@ export function ImportWizard({ projectId }: { projectId: string }) {
             </button>
             <button
               onClick={onCommit}
-              disabled={busy || !addressColumn}
+              disabled={busy || !addressColumn || !addressSuffix.trim()}
               className="ml-auto inline-flex items-center gap-2 rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50 transition"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}

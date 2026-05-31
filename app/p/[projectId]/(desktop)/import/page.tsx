@@ -1,11 +1,23 @@
 import { getProjectForUser } from "@/lib/queries/project";
 import { ImportWizard } from "@/components/desktop/import-wizard";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 
 export default async function ImportPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const res = await getProjectForUser(projectId);
   if (!res || (res.role !== "owner" && res.role !== "admin")) notFound();
+
+  // Pre-fill: project's last-used address suffix + address column
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as any;
+  const { data: settings } = await sbAny
+    .from("project_settings")
+    .select("geocode_address_suffix,response_address_column,external_id_column")
+    .eq("project_id", projectId)
+    .maybeSingle();
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
       <a href={`/p/${projectId}/map`} className="text-[12px] text-[oklch(58%_0.014_250)] hover:text-[oklch(78%_0.155_234)]">← Back to map</a>
@@ -13,7 +25,12 @@ export default async function ImportPage({ params }: { params: Promise<{ project
       <p className="mt-1 text-sm text-[oklch(58%_0.014_250)]">
         Drop a Qualtrics or Google Forms CSV. We&apos;ll ask you which column holds the respondent&apos;s home address, then re-geocode every row server-side via the U.S. Census geocoder — never trusting the response&apos;s own lat/lon.
       </p>
-      <ImportWizard projectId={projectId} />
+      <ImportWizard
+        projectId={projectId}
+        defaultAddressSuffix={settings?.geocode_address_suffix ?? ""}
+        defaultAddressColumn={settings?.response_address_column ?? ""}
+        defaultExternalIdColumn={settings?.external_id_column ?? ""}
+      />
     </main>
   );
 }

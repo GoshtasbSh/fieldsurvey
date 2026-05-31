@@ -52,11 +52,18 @@ def _sb(path: str, method: str = "GET", body=None, params=None):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def census_geocode(address: str):
-    if not address or not address.strip():
+def census_geocode(address: str, suffix: str = ""):
+    # Build the full one-line address the Census geocoder needs.
+    # Most field-collected CSVs only have the street (e.g. "6116 Harvard Avenue")
+    # which Census cannot resolve uniquely. The project-level suffix
+    # (e.g. "Keystone Heights, FL 32656") disambiguates it.
+    base = (address or "").strip()
+    if not base:
         return None
+    suf = (suffix or "").strip().lstrip(",").strip()
+    full = f"{base}, {suf}" if suf else base
     params = {
-        "address": address,
+        "address": full,
         "benchmark": "Public_AR_Current",
         "format": "json",
     }
@@ -86,13 +93,15 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
-def run_match(project_id: str):
-    # Project settings → radius
+def run_match(project_id: str, address_suffix_override: str = ""):
+    # Project settings → radius + address suffix
     settings = _sb(
         "/project_settings",
-        params={"project_id": f"eq.{project_id}", "select": "match_radius_m,response_address_column"},
+        params={"project_id": f"eq.{project_id}", "select": "match_radius_m,response_address_column,geocode_address_suffix"},
     )
-    radius_m = (settings[0] if settings else {}).get("match_radius_m") or 30
+    s0 = settings[0] if settings else {}
+    radius_m = s0.get("match_radius_m") or 30
+    suffix = (address_suffix_override or "").strip() or (s0.get("geocode_address_suffix") or "").strip()
 
     # 1. Geocode responses missing coords
     to_geo = _sb(
@@ -108,7 +117,7 @@ def run_match(project_id: str):
         addr = r.get("address_used")
         if not addr:
             continue
-        g = census_geocode(addr)
+        g = census_geocode(addr, suffix)
         if not g or g.get("lat") is None:
             continue
         _sb(
@@ -197,12 +206,13 @@ class handler(BaseHTTPRequestHandler):
                 return
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             project_id = (q.get("project_id") or [""])[0]
+            suffix_override = (q.get("address_suffix") or [""])[0]
             if not project_id:
                 self.send_response(400)
                 self.end_headers()
                 self.wfile.write(b'{"error":"project_id required"}')
                 return
-            result = run_match(project_id)
+            result = run_match(project_id, suffix_override)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
