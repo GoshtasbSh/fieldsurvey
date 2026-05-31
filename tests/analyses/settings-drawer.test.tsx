@@ -17,7 +17,7 @@ describe("SettingsDrawer", () => {
         settings={{}}
         onChange={() => {}}
         onClose={() => {}}
-        onRecompute={() => {}}
+        onPin={() => {}}
       />
     );
     // Use getAllByText for labels that may also appear in the method description
@@ -37,7 +37,7 @@ describe("SettingsDrawer", () => {
         settings={{ fdrAlpha: 0.05 }}
         onChange={onChange}
         onClose={() => {}}
-        onRecompute={() => {}}
+        onPin={() => {}}
       />
     );
     const slider = screen.getByLabelText(/FDR alpha/i);

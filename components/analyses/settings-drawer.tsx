@@ -1,7 +1,9 @@
 // components/analyses/settings-drawer.tsx
 "use client";
+import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { SpatialCardCatalogEntry, SettingSchema } from "@/lib/analyses/types";
+import { useAnalysisResult } from "@/hooks/use-analysis-result";
 import { QuestionPicker } from "./inputs/question-picker";
 import { AnswerPicker } from "./inputs/answer-picker";
 import { PoiPicker } from "./inputs/poi-picker";
@@ -17,7 +19,8 @@ type Props = {
   settings: Record<string, unknown>;
   onChange: (patch: Record<string, unknown>) => void;
   onClose: () => void;
-  onRecompute: () => void;
+  /** Called with the raw result payload when the user clicks "Pin to left panel". */
+  onPin: (result: unknown) => void;
 };
 
 function renderField(
@@ -82,8 +85,84 @@ function renderField(
   }
 }
 
+function ResultPanel({
+  loading,
+  error,
+  data,
+  computedAt,
+  onPin,
+}: {
+  loading: boolean;
+  error: string | null;
+  data: unknown | null;
+  computedAt: string | null;
+  onPin: (result: unknown) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-[var(--shell-2)] p-3 animate-pulse">
+        <div className="h-2 w-2/3 rounded bg-[var(--shell-border)] mb-2" />
+        <div className="h-2 w-1/2 rounded bg-[var(--shell-border)]" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-[11.5px] text-red-400">
+        {error}
+      </div>
+    );
+  }
+  if (data === null) return null;
+
+  const isWavePending =
+    typeof data === "object" &&
+    data !== null &&
+    (data as Record<string, unknown>).reason === "wave-pending";
+
+  return (
+    <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[9.5px] uppercase tracking-[0.06em] text-[var(--shell-text-muted)]">
+          Result
+        </span>
+        {computedAt && (
+          <span className="font-mono text-[9px] text-[var(--shell-text-muted)]">
+            {new Date(computedAt).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+      {isWavePending ? (
+        <p className="text-[11.5px] text-[var(--shell-text-muted)]">
+          Compute backend ships in a later wave — result preview not available yet.
+        </p>
+      ) : (
+        <p className="text-[11.5px] font-mono break-all text-[var(--shell-text-muted)]">
+          {JSON.stringify(data).slice(0, 200)}…
+        </p>
+      )}
+      {!isWavePending && (
+        <button
+          onClick={() => onPin(data)}
+          aria-label="Pin to left panel"
+          className="w-full rounded-md bg-[var(--shell-1)] border border-[var(--shell-border)] text-[12px] font-semibold py-1.5 px-3 hover:bg-[var(--accent-1,#0EA5E9)] hover:text-white hover:border-transparent transition-colors"
+        >
+          📌 Pin to left panel
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SettingsDrawer(p: Props) {
   const emit = (key: string, v: unknown) => p.onChange({ ...p.settings, [key]: v });
+  const { data, loading, error, computedAt, run } = useAnalysisResult(p.projectId, p.card.id, p.settings);
+  const [hasRun, setHasRun] = useState(false);
+
+  const handleRun = async () => {
+    setHasRun(true);
+    await run();
+  };
 
   return (
     <Dialog.Root open={p.open} onOpenChange={(o) => !o && p.onClose()}>
@@ -99,17 +178,26 @@ export function SettingsDrawer(p: Props) {
               <Dialog.Title className="text-sm font-semibold">{p.card.name}</Dialog.Title>
               <p className="text-[11px] text-[var(--shell-text-muted)] font-mono">{p.card.id}</p>
             </div>
-            <Dialog.Close aria-label="Close" className="text-[var(--shell-text-muted)] hover:text-[var(--shell-text)]">✕</Dialog.Close>
+            <Dialog.Close aria-label="Close" className="text-[var(--shell-text-muted)] hover:text-[var(--shell-text)]">
+              ✕
+            </Dialog.Close>
           </header>
+
           <div className="flex-1 overflow-auto p-4 space-y-4">
             <section className="space-y-3">
               <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-[var(--shell-text-muted)]">
                 Inputs
               </div>
               {p.card.settingsSchema.map((s) =>
-                renderField(s, { projectId: p.projectId, globalActiveQuestion: p.globalActiveQuestion, settings: p.settings, emit })
+                renderField(s, {
+                  projectId: p.projectId,
+                  globalActiveQuestion: p.globalActiveQuestion,
+                  settings: p.settings,
+                  emit,
+                }),
               )}
             </section>
+
             <section>
               <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-[var(--shell-text-muted)] mb-1">
                 Method
@@ -121,13 +209,26 @@ export function SettingsDrawer(p: Props) {
                 </p>
               )}
             </section>
+
+            {hasRun && (
+              <ResultPanel
+                loading={loading}
+                error={error}
+                data={data}
+                computedAt={computedAt}
+                onPin={p.onPin}
+              />
+            )}
           </div>
+
           <footer className="p-3 border-t border-[var(--shell-border)] flex justify-end gap-2">
             <button
-              onClick={p.onRecompute}
-              className="rounded-md bg-[var(--accent-1,#0EA5E9)] text-white text-[12px] font-semibold py-1.5 px-3"
+              onClick={handleRun}
+              disabled={loading}
+              aria-label="Run analysis"
+              className="rounded-md bg-[var(--accent-1,#0EA5E9)] text-white text-[12px] font-semibold py-1.5 px-3 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Re-compute
+              {loading ? "Running…" : "Run analysis"}
             </button>
           </footer>
         </Dialog.Content>
