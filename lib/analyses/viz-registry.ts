@@ -53,6 +53,17 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
     import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.S8Placeholder }))),
   V2Placeholder: lazy(() =>
     import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.V2Placeholder }))),
+
+  // M7 wave-1 — placeholder stubs until real implementations land.
+  UpSetResult:       lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.UpSetResult }))),
+  NgramResult:        lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.NgramResult }))),
+  WeightedResult:     lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.WeightedResult }))),
+  ChoroplethResult:   lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.ChoroplethResult }))),
+  StraightLineResult: lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.StraightLineResult }))),
+  WhosMissingResult:  lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.WhosMissingResult }))),
+  LorenzResult:       lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.LorenzResult }))),
+  RakingResult:       lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.RakingResult }))),
+  SegmentDiffResult:  lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.SegmentDiffResult }))),
 };
 
 export function getVizComponent(name: string): CardComponent | null {
