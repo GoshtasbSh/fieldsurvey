@@ -42,11 +42,9 @@ test.describe("M2 smoke — routes and API security", () => {
     expect(r.status()).toBe(401);
   });
 
-  test("api/geocode reverse returns json", async ({ request }) => {
+  test("api/geocode reverse without auth returns 401", async ({ request }) => {
     const r = await request.get("/api/geocode?reverse=1&lat=29.65&lon=-82.32");
-    expect(r.ok()).toBeTruthy();
-    const j = await r.json();
-    expect(j).toHaveProperty("displayName");
+    expect(r.status()).toBe(401);
   });
 
   test("PWA manifest is served", async ({ request }) => {
