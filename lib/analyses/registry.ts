@@ -6,27 +6,27 @@
 // registry resolver. Implement the viz component, register it in
 // lib/analyses/viz-registry.ts, and (optionally) implement the compute fn.
 
-import type { CardDescriptor } from "./types";
+import type { CardDescriptor, SpatialCardCatalogEntry } from "./types";
 
 const M = false; // mobileVisible — all Analyze cards are desktop-only.
 
-export const ANALYSES_REGISTRY: CardDescriptor[] = [
+export const ANALYSES_REGISTRY: Array<CardDescriptor | SpatialCardCatalogEntry> = [
   // ───────────────────────────────────────────────────────────────────────────
   // Cornerstone
   // ───────────────────────────────────────────────────────────────────────────
   {
     id: "A0_colorizer",
     section: "cornerstone",
-    name: "Question colorizer",
-    short: "Color every map point by any survey response column.",
+    name: "Question Colorizer",
+    short: "Pick a question — color every map point by the answer.",
     requiredInputs: ["responses", "raw_data_key_categorical"],
     nMin: 10,
     roleGate: "guest",
     mobileVisible: M,
     computeStrategy: "client",
-    vizComponent: "MapColorizer",
+    vizComponent: "A0ColorizerPlaceholder",
     defaultPack: true,
-    m7Wave1: true,
+    m7Wave1: false,
     stub: true,
     trustSignals: ["n_non_null", "pct_missing", "classification_method"],
     pitfalls: [
@@ -35,6 +35,42 @@ export const ANALYSES_REGISTRY: CardDescriptor[] = [
     ],
     sourceInspiration: "Mapbox + Felt graduated-symbol patterns",
     cardOrder: 0,
+    toolbox: "symbology",
+    previewImage: {
+      src: "/analyses-previews/A0_colorizer.png",
+      alt: "U.S. counties colored on a blue–red ramp by 2004–2016 presidential vote margin.",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:U.S._Presidential_election_margin,_2004-2016.png",
+      sourceTitle: "Wikimedia Commons — Bplewe",
+      license: "CC-BY-SA-4.0",
+    },
+    questionsAnswered: [
+      "What did each respondent answer to a chosen question, mapped to their location?",
+      "Are certain answers concentrated in specific areas?",
+    ],
+    whatItDoes:
+      "Infers the question's data type (categorical, Likert, numeric, boolean, date) and " +
+      "picks a sensible classification (quantile, equal-interval, or Jenks natural breaks) and " +
+      "color ramp. Every map point is colored by its answer. Missing values render grey.",
+    inputRequirements: [
+      "1 question from the survey response schema",
+      "≥10 geocoded responses",
+    ],
+    settingsSchema: [
+      { key: "questionKey", type: "question_picker", label: "Question", defaultValue: "inherit_global" },
+      { key: "classification", type: "select", label: "Classification",
+        options: [
+          { value: "quantile", label: "Quantile (default)" },
+          { value: "equal_interval", label: "Equal interval" },
+          { value: "natural_breaks", label: "Jenks natural breaks" },
+        ],
+        defaultValue: "quantile" },
+      { key: "classCount", type: "select", label: "Class count",
+        options: [
+          { value: 3, label: "3" }, { value: 5, label: "5" },
+          { value: 7, label: "7" }, { value: 9, label: "9" },
+        ],
+        defaultValue: 5 },
+    ],
   },
 
   // Existing UI we keep — match-status donut
@@ -56,6 +92,242 @@ export const ANALYSES_REGISTRY: CardDescriptor[] = [
     pitfalls: ["R1 without an F1 chase queue means stale 'don't revisit' is invisible"],
     sourceInspiration: "Keystone G1/G2/G3 semantics",
     cardOrder: 1,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Spatial Analysis Toolbox (M7.2 — Wave 0 placeholders, real compute in Wave 1-4)
+  // ───────────────────────────────────────────────────────────────────────────
+  {
+    id: "S1_autocorr",
+    section: "spatial",
+    name: "Spatial Autocorrelation",
+    short: "Is this answer spatially clustered at all? (Moran's I + Geary's C)",
+    requiredInputs: ["points", "responses"],
+    nMin: 30,
+    roleGate: "member",
+    mobileVisible: M,
+    computeStrategy: "python_sidecar",
+    vizComponent: "S1Placeholder",
+    defaultPack: false,
+    m7Wave1: false,
+    stub: true,
+    trustSignals: ["n_permutations", "weights_type", "p_value_method"],
+    pitfalls: ["Moran's I assumes stationarity — non-stationary fields mislead it."],
+    sourceInspiration: "PySAL esda — Moran / Geary",
+    cardOrder: 100,
+    toolbox: "analyzing_patterns",
+    previewImage: {
+      src: "/analyses-previews/S1_autocorr.png",
+      alt: "Moran's I scatterplot of crime rates by neighborhood, Columbus, OH.",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Moran_ScatterPlot_Columbus_Crime.PNG",
+      sourceTitle: "Wikimedia Commons — Lgalvis74",
+      license: "Public Domain",
+    },
+    questionsAnswered: [
+      "Is the answer to this question spatially clustered, dispersed, or random?",
+      "Should I even look at local cluster maps for this question?",
+    ],
+    whatItDoes:
+      "Computes Moran's I and Geary's C with a 999-permutation null distribution. " +
+      "Both global statistics are shown — agreement signals a stationary spatial pattern; " +
+      "disagreement flags non-stationarity. Renders a single KPI tile with a clustered / " +
+      "dispersed / random / non-stationary verdict.",
+    inputRequirements: [
+      "1 question (numeric, Likert, or binary)",
+      "Spatial weights matrix (auto-built on first use)",
+    ],
+    settingsSchema: [
+      { key: "questionKey", type: "question_picker", label: "Question", defaultValue: "inherit_global" },
+      { key: "weightsType", type: "select", label: "Spatial weights",
+        options: [
+          { value: "knn8", label: "k-Nearest Neighbors (k=8) — default" },
+          { value: "dband_500m", label: "Distance band 500 m" },
+          { value: "queen", label: "Queen contiguity (zones)" },
+        ],
+        defaultValue: "knn8" },
+      { key: "nPermutations", type: "select", label: "Permutations",
+        options: [
+          { value: 999, label: "999 (interactive, default)" },
+          { value: 9999, label: "9 999 (publish-grade, slower)" },
+        ],
+        defaultValue: 999 },
+    ],
+  },
+  {
+    id: "S2_gi_star_q",
+    section: "spatial",
+    name: "Hot/Cold Spot Analysis (Getis-Ord Gi*)",
+    short: "Where are the statistically significant clusters of high or low values?",
+    requiredInputs: ["points", "responses"],
+    nMin: 30,
+    roleGate: "member",
+    mobileVisible: M,
+    computeStrategy: "python_sidecar",
+    vizComponent: "S2Placeholder",
+    defaultPack: false,
+    m7Wave1: false,
+    stub: true,
+    trustSignals: ["n_units", "weights_type", "fdr_corrected", "fdr_cutoff"],
+    pitfalls: [
+      "Without FDR correction Gi* over-flags at α·n rate — FDR is non-negotiable.",
+      "MAUP — results change with aggregation level.",
+    ],
+    sourceInspiration: "Getis-Ord 1992; PySAL esda.G_Local; esda.fdr",
+    cardOrder: 200,
+    toolbox: "mapping_clusters",
+    previewImage: {
+      src: "/analyses-previews/S2_gi_star_q.jpg",
+      alt: "Getis-Ord Gi* hot-spot / cold-spot map of estimated U.S. county unemployment, 2020.",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:USA_Contiguous_Unemployment_Rate_2020.jpg",
+      sourceTitle: "Wikimedia Commons — GeogSage",
+      license: "CC-BY-4.0",
+    },
+    questionsAnswered: [
+      "Where are the statistically significant clusters of high values?",
+      "Where are the statistically significant clusters of low values?",
+      "Which spots are noise vs real?",
+    ],
+    whatItDoes:
+      "Runs the Getis-Ord Gi* local statistic against your spatial weights matrix " +
+      "with 999 permutations. Applies a False Discovery Rate (FDR) cutoff via PySAL's " +
+      "esda.fdr so the map doesn't over-flag at the α·n rate. Each point is labeled " +
+      "hot, cold, or insignificant.",
+    inputRequirements: [
+      "1 question (numeric, Likert, or binary)",
+      "Spatial weights matrix (auto-built on first use)",
+      "FDR alpha (default 0.05)",
+    ],
+    settingsSchema: [
+      { key: "questionKey", type: "question_picker", label: "Question", defaultValue: "inherit_global" },
+      { key: "fdrAlpha", type: "slider", label: "FDR alpha", min: 0.01, max: 0.10, step: 0.01, defaultValue: 0.05 },
+      { key: "weightsType", type: "select", label: "Spatial weights",
+        options: [
+          { value: "knn8", label: "k-Nearest Neighbors (k=8) — default" },
+          { value: "dband_500m", label: "Distance band 500 m" },
+        ],
+        defaultValue: "knn8" },
+      { key: "nPermutations", type: "select", label: "Permutations",
+        options: [
+          { value: 999, label: "999 (interactive, default)" },
+          { value: 9999, label: "9 999 (publish-grade, slower)" },
+        ],
+        defaultValue: 999 },
+    ],
+  },
+  {
+    id: "S3_lisa_q",
+    section: "spatial",
+    name: "Cluster & Outlier Analysis (LISA)",
+    short: "Where do neighborhoods agree, and where is a single block an outlier?",
+    requiredInputs: ["points", "responses"],
+    nMin: 30,
+    roleGate: "member",
+    mobileVisible: M,
+    computeStrategy: "python_sidecar",
+    vizComponent: "S3Placeholder",
+    defaultPack: false,
+    m7Wave1: false,
+    stub: true,
+    trustSignals: ["n_HH", "n_LL", "n_HL", "n_LH", "fdr_cutoff"],
+    pitfalls: [
+      "Significant cells mark cluster CORES, not extents — legend must say 'cores'.",
+      "FDR cutoff required to avoid over-flagging.",
+    ],
+    sourceInspiration: "Anselin 1995; PySAL esda.Moran_Local",
+    cardOrder: 300,
+    toolbox: "mapping_clusters",
+    previewImage: {
+      src: "/analyses-previews/S3_lisa_q.jpg",
+      alt: "Anselin Local Moran cluster map of U.S. county poverty 2020, showing HH/LL/HL/LH categories.",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:USA_Contiguous_Poverty_2020_clusters.jpg",
+      sourceTitle: "Wikimedia Commons — GeogSage",
+      license: "CC-BY-SA-4.0",
+    },
+    questionsAnswered: [
+      "Where do neighbors all give the same high answer (HH cluster)?",
+      "Where do neighbors all give the same low answer (LL cluster)?",
+      "Where is a single block an outlier — high in a low neighborhood, or vice versa?",
+    ],
+    whatItDoes:
+      "Computes the Anselin Local Moran's I per point and categorizes each as HH (high-high cluster), " +
+      "LL (low-low cluster), HL (high outlier surrounded by low), LH (low outlier surrounded by high), " +
+      "or not significant. FDR-corrected via PySAL esda.fdr.",
+    inputRequirements: [
+      "1 question (numeric, Likert, or binary)",
+      "Spatial weights matrix (auto-built on first use)",
+      "FDR alpha (default 0.05)",
+    ],
+    settingsSchema: [
+      { key: "questionKey", type: "question_picker", label: "Question", defaultValue: "inherit_global" },
+      { key: "fdrAlpha", type: "slider", label: "FDR alpha", min: 0.01, max: 0.10, step: 0.01, defaultValue: 0.05 },
+      { key: "weightsType", type: "select", label: "Spatial weights",
+        options: [
+          { value: "knn8", label: "k-Nearest Neighbors (k=8) — default" },
+          { value: "dband_500m", label: "Distance band 500 m" },
+        ],
+        defaultValue: "knn8" },
+      { key: "nPermutations", type: "select", label: "Permutations",
+        options: [
+          { value: 999, label: "999 (interactive, default)" },
+          { value: 9999, label: "9 999 (publish-grade, slower)" },
+        ],
+        defaultValue: 999 },
+    ],
+  },
+  {
+    id: "S4_satscan",
+    section: "spatial",
+    name: "Spatial Scan Statistic (Kulldorff)",
+    short: "Where is the biggest geographic excess of a response, ignoring admin boundaries?",
+    requiredInputs: ["points", "responses"],
+    nMin: 100,
+    roleGate: "member",
+    mobileVisible: M,
+    computeStrategy: "python_sidecar",
+    vizComponent: "S4Placeholder",
+    defaultPack: false,
+    m7Wave1: false,
+    stub: true,
+    trustSignals: ["model_used", "max_window_pct", "n_permutations", "n_clusters"],
+    pitfalls: [
+      "Without max-window cap, the MLE circle inflates to half the study area on sparse data.",
+      "Bernoulli model needs a binary case/control; Poisson needs an exposure denominator.",
+    ],
+    sourceInspiration: "Kulldorff 1997 — A Spatial Scan Statistic; SaTScan CLI",
+    cardOrder: 400,
+    toolbox: "mapping_clusters",
+    previewImage: {
+      src: "/analyses-previews/S4_satscan.svg",
+      alt: "Schematic showing two red circular scan windows over a light-grey polygon basemap, the primary thicker than the secondary.",
+      sourceUrl: "https://www.satscan.org/papers/k-cstm1997.pdf",
+      sourceTitle: "Custom illustration — based on Kulldorff 1997",
+      license: "Custom-by-us",
+    },
+    questionsAnswered: [
+      "Where is the most concentrated cluster of 'yes' (or 'high') answers — without pre-defining zones?",
+      "Are there secondary clusters worth investigating?",
+    ],
+    whatItDoes:
+      "Runs Kulldorff's spatial scan statistic via the SaTScan CLI. Bernoulli model for binary answers; " +
+      "Poisson model when a universe denominator exists. Returns the primary cluster (circle on the map) " +
+      "with its relative risk, log-likelihood ratio, and p-value, plus secondary clusters.",
+    inputRequirements: [
+      "1 question (binary, or numeric with an answer threshold)",
+      "≥100 geocoded responses",
+      "Optional: universe for the Poisson model",
+    ],
+    settingsSchema: [
+      { key: "questionKey", type: "question_picker", label: "Question", defaultValue: "inherit_global" },
+      { key: "answerOption", type: "answer_picker", label: "Answer option (for Bernoulli)", questionKeyRef: "questionKey" },
+      { key: "model", type: "select", label: "Model",
+        options: [
+          { value: "bernoulli", label: "Bernoulli (binary case/control) — default" },
+          { value: "poisson", label: "Poisson (needs universe denominator)" },
+        ],
+        defaultValue: "bernoulli" },
+      { key: "maxWindowPct", type: "slider", label: "Max window (% of population)",
+        min: 0.10, max: 0.50, step: 0.05, defaultValue: 0.25 },
+    ],
   },
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -795,7 +1067,7 @@ export const ANALYSES_REGISTRY: CardDescriptor[] = [
 // Convenience accessors
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function getCardById(id: string): CardDescriptor | undefined {
+export function getCardById(id: string): CardDescriptor | SpatialCardCatalogEntry | undefined {
   return ANALYSES_REGISTRY.find((c) => c.id === id);
 }
 
