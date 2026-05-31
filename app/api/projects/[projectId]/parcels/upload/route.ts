@@ -21,6 +21,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 const BATCH = 200;
 const MAX_FEATURES = 100_000;
+const MAX_BYTES = 50 * 1024 * 1024; // 50 MB cap before JSON.parse
 
 type ParcelInput = {
   address: string | null;
@@ -49,6 +50,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const file = form?.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "missing file" }, { status: 400 });
+  }
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json({ error: `file too large (max ${MAX_BYTES / 1024 / 1024} MB)` }, { status: 413 });
   }
 
   let raw: unknown;
@@ -92,7 +96,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       p_rows: payload,
     });
     if (error) {
-      errors.push(error.message);
+      // Don't leak raw Postgres error messages to admin clients.
+      errors.push("batch insert failed");
       skipped += slice.length;
       continue;
     }

@@ -10,6 +10,7 @@
  * Query: ?limit=50 (default 50, max 200), ?dataType=pulse_blob (optional)
  */
 
+import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -24,6 +25,11 @@ export async function GET(
   } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as any;
+  const { data: role } = await sbAny.rpc("project_role", { p_project: projectId });
+  if (!role) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
   const url = new URL(req.url);
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
   const dataType = url.searchParams.get("dataType");
@@ -36,6 +42,6 @@ export async function GET(
     .limit(limit);
   if (dataType) q = q.eq("data_type", dataType);
   const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "list failed" }, { status: 500 });
   return NextResponse.json({ versions: data ?? [] });
 }

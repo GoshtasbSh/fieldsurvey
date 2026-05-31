@@ -17,6 +17,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as any;
+  // Explicit membership check before reading project-scoped data —
+  // consistent with mutation routes and resilient if RLS is ever relaxed.
+  const { data: role } = await sbAny.rpc("project_role", { p_project: projectId });
+  if (!role) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
   const [{ count }, { data: latest }] = await Promise.all([
     sbAny
       .from("parcels")
@@ -56,6 +61,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }
 
   const { error } = await sbAny.from("parcels").delete().eq("project_id", projectId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "delete failed" }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

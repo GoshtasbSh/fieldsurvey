@@ -62,6 +62,8 @@ async function fetchTile(z: number, x: number, y: number): Promise<Buffer> {
     },
     // Carto tiles change rarely; long cache is fine.
     cache: "force-cache",
+    // Cap each tile fetch so a slow CDN can't hang the cache worker.
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`tile ${z}/${x}/${y} → HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());

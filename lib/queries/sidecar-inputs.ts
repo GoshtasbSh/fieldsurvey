@@ -449,3 +449,161 @@ export async function buildA46Input(projectId: string, settings: Record<string, 
   if (rows.length === 0) return null;
   return { rows, group_key: groupKey, fdr_alpha: Number(settings["fdrAlpha"] ?? 0.05), min_n: Number(settings["minN"] ?? 10) };
 }
+
+// ── V2 input builders ────────────────────────────────────────────────────────
+
+/**
+ * V2 Emerging Hot Spot — fetch M1 points with timestamps and encoded value.
+ * Returns one row per matched point including the ISO-8601 created_at from
+ * the underlying survey_response.
+ */
+export async function buildV2SpaceTimeInput(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  if (!qk || qk === "inherit_global") return null;
+  const timeBucket = settings["timeBucket"] ?? "week";
+
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb as any)
+    .from("points")
+    .select("id, lat, lon, survey_responses!matched_response_id(id, raw_data, created_at)")
+    .eq("project_id", projectId)
+    .not("matched_response_id", "is", null)
+    .limit(50_000) as {
+      data: Array<{
+        id: string; lat: number | null; lon: number | null;
+        survey_responses: { id: string; raw_data: Record<string, unknown> | null; created_at: string | null } | null;
+      }> | null;
+    };
+
+  if (!data || data.length === 0) return null;
+
+  // Collect raw values to infer type
+  const rawAll: unknown[] = [];
+  for (const r of data) {
+    const v = r.survey_responses?.raw_data?.[qk];
+    if (v !== null && v !== undefined && v !== "") rawAll.push(v);
+  }
+  if (rawAll.length === 0) return null;
+
+  const { inferType } = await import("@/lib/colorize/auto-classify");
+  const profile = inferType(rawAll);
+  const { type, likertOrder, sampleValues } = profile;
+  let encodeMap: Map<string, number> | null = null;
+  if (type === "likert" && likertOrder) {
+    encodeMap = new Map(likertOrder.map((v, i) => [String(v), i]));
+  } else if (type === "categorical" || type === "boolean") {
+    const sorted = [...new Set(sampleValues)].sort();
+    encodeMap = new Map(sorted.map((v, i) => [String(v), i]));
+  }
+  const BOOL_TRUE = new Set(["true", "yes", "1", "y"]);
+
+  const rows: { id: string; lat: number; lon: number; value: number; created_at: string }[] = [];
+  for (const r of data) {
+    if (typeof r.lat !== "number" || typeof r.lon !== "number") continue;
+    const createdAt = r.survey_responses?.created_at;
+    if (!createdAt) continue;
+    const raw = r.survey_responses?.raw_data?.[qk];
+    if (raw === null || raw === undefined || raw === "") continue;
+
+    let value: number;
+    if (type === "numeric_continuous" || type === "numeric_skewed" || type === "date") {
+      value = Number(raw);
+      if (!Number.isFinite(value)) continue;
+    } else if (type === "boolean") {
+      value = BOOL_TRUE.has(String(raw).toLowerCase().trim()) ? 1 : 0;
+    } else if (encodeMap) {
+      const idx = encodeMap.get(String(raw));
+      if (idx === undefined) continue;
+      value = idx;
+    } else {
+      continue;
+    }
+    rows.push({ id: r.id, lat: r.lat, lon: r.lon, value, created_at: createdAt });
+  }
+
+  if (rows.length < 10) return null;
+  return {
+    project_id: projectId,
+    rows,
+    time_bucket: timeBucket,
+    n_permutations: Number(settings["nPermutations"] ?? 99),
+  };
+}
+
+/**
+ * V2 Spatial Regression — build multi-variate cells (y + x keys, all encoded).
+ * Returns cells with a `values` map: { [questionKey]: encodedNumber }.
+ */
+export async function buildV2SpatialRegInput(projectId: string, settings: Record<string, string>) {
+  const yKey = settings["yKey"] ?? settings["ykey"] ?? "";
+  const xKey = settings["xKey"] ?? settings["xkey"] ?? "";
+  if (!yKey || !xKey || yKey === "inherit_global" || xKey === "inherit_global") return null;
+  const allKeys = [yKey, xKey];
+
+  // Fetch spatial cells for each key independently, then join by point id
+  const [yCells, xCells] = await Promise.all([
+    buildSpatialCells(projectId, yKey),
+    buildSpatialCells(projectId, xKey),
+  ]);
+  if (yCells.length < 30 || xCells.length < 30) return null;
+
+  const xMap = new Map(xCells.map(c => [c.id, c.value]));
+  const cells: Array<{ id: string; lat: number; lon: number; values: Record<string, number | null> }> = [];
+  for (const yc of yCells) {
+    const xv = xMap.get(yc.id);
+    if (xv === undefined) continue;
+    cells.push({ id: yc.id, lat: yc.lat, lon: yc.lon, values: { [yKey]: yc.value, [xKey]: xv } });
+  }
+  if (cells.length < 30) return null;
+
+  return {
+    project_id: projectId,
+    cells,
+    y_key: yKey,
+    x_keys: [xKey],
+    weights_type: settings["weightsType"] ?? "knn8",
+    n_permutations: Number(settings["nPermutations"] ?? 499),
+  };
+}
+
+/**
+ * V2 Segregation — fetch geocoded responses with the group-label question value.
+ * Returns rows with {id, lat, lon, group_value}.
+ */
+export async function buildV2SegregationInput(projectId: string, settings: Record<string, string>) {
+  const groupKey = settings["groupKey"] ?? settings["groupkey"] ?? "";
+  if (!groupKey || groupKey === "inherit_global") return null;
+  const zoneSizeDeg = parseFloat(settings["zoneSizeDeg"] ?? "0.1");
+
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (sb as any)
+    .from("points")
+    .select("id, lat, lon, survey_responses!matched_response_id(raw_data)")
+    .eq("project_id", projectId)
+    .not("matched_response_id", "is", null)
+    .limit(50_000) as {
+      data: Array<{
+        id: string; lat: number | null; lon: number | null;
+        survey_responses: { raw_data: Record<string, unknown> | null } | null;
+      }> | null;
+    };
+
+  if (!data || data.length === 0) return null;
+
+  const rows = data
+    .filter(r => typeof r.lat === "number" && typeof r.lon === "number")
+    .map(r => ({
+      id: r.id,
+      lat: r.lat as number,
+      lon: r.lon as number,
+      group_value: r.survey_responses?.raw_data?.[groupKey] != null
+        ? String(r.survey_responses.raw_data[groupKey])
+        : null,
+    }))
+    .filter(r => r.group_value !== null && r.group_value !== "");
+
+  if (rows.length < 20) return null;
+  return { project_id: projectId, rows, zone_size_deg: zoneSizeDeg };
+}

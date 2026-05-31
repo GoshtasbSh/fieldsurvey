@@ -18,6 +18,9 @@ import { S5Result } from "./s5-result";
 import { S6Result } from "./s6-result";
 import { S7Result } from "./s7-result";
 import { S8Result } from "./s8-result";
+import { V2SpaceTimeResult } from "./v2-space-time-result";
+import { V2SpatialRegResult } from "./v2-spatial-reg-result";
+import { V2SegregationResult } from "./v2-segregation-result";
 
 type ResultPanel = ComponentType<{ data: unknown }>;
 
@@ -40,6 +43,9 @@ const RESULT_PANELS: Record<string, ResultPanel> = {
   S6_coverage_response: S6Result,
   S7_local_geary: S7Result,
   S8_bivariate: S8Result,
+  V2_emerging_hot: V2SpaceTimeResult,
+  V2_gwr: V2SpatialRegResult,
+  V2_segregation: V2SegregationResult,
 };
 
 export function getResultPanel(cardId: string): ResultPanel | null {

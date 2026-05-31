@@ -64,6 +64,10 @@ export const VIZ_REGISTRY: Record<string, CardComponent> = {
   LorenzResult:       lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.LorenzResult }))),
   RakingResult:       lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.RakingResult }))),
   SegmentDiffResult:  lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.SegmentDiffResult }))),
+  // V2 analyses — real implementations
+  SpaceTimeResult:    lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.SpaceTimeResult }))),
+  SpatialRegResult:   lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.SpatialRegResult }))),
+  SegregationResult:  lazy(() => import("@/components/analyses/cards/wave0-placeholders").then(m => ({ default: m.SegregationResult }))),
 };
 
 export function getVizComponent(name: string): CardComponent | null {

@@ -1,7 +1,14 @@
+import "server-only";
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { sendDailyDigestEmail, sendCapWarningEmail, type DigestProjectSummary } from "@/lib/email";
 import { refreshProjectCache } from "@/lib/cache/refresh";
+
+function safeEqualString(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
 
 /**
  * Cron endpoint. Schedule with Vercel Cron (or any external cron) and
@@ -17,7 +24,9 @@ import { refreshProjectCache } from "@/lib/cache/refresh";
 export async function GET(req: NextRequest) {
   const supplied = req.headers.get("x-cron-secret") ?? "";
   const expected = process.env.INTERNAL_API_SECRET ?? "";
-  if (!expected || supplied !== expected) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!expected || !safeEqualString(supplied, expected)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   const sb = createAdminSupabase();
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();

@@ -1,5 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 140" role="img" aria-label="Coming in v2">
-  <rect width="280" height="140" fill="#F4F4F5"/>
-  <text x="140" y="74" font-family="ui-sans-serif, system-ui" font-size="14" font-weight="600" fill="#71717A" text-anchor="middle">⚖️ Sampling Equity</text>
-  <text x="140" y="92" font-family="ui-monospace, monospace" font-size="9" fill="#A1A1AA" text-anchor="middle">Segregation Indices — v2</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180" role="img" aria-label="Segregation and Diversity Indices">
+  <rect width="320" height="180" fill="#1a1a2e"/>
+  <!-- Zone grid choropleth (left 180px) -->
+  <!-- Row 1 -->
+  <rect x="10" y="30" width="38" height="28" rx="1" fill="#d73027" opacity="0.85"/>
+  <rect x="52" y="30" width="38" height="28" rx="1" fill="#d73027" opacity="0.75"/>
+  <rect x="94" y="30" width="38" height="28" rx="1" fill="#f46d43" opacity="0.7"/>
+  <rect x="136" y="30" width="38" height="28" rx="1" fill="#fdae61" opacity="0.6"/>
+  <!-- Row 2 -->
+  <rect x="10" y="62" width="38" height="28" rx="1" fill="#d73027" opacity="0.9"/>
+  <rect x="52" y="62" width="38" height="28" rx="1" fill="#f46d43" opacity="0.75"/>
+  <rect x="94" y="62" width="38" height="28" rx="1" fill="#fdae61" opacity="0.55"/>
+  <rect x="136" y="62" width="38" height="28" rx="1" fill="#ffffbf" opacity="0.5"/>
+  <!-- Row 3 -->
+  <rect x="10" y="94" width="38" height="28" rx="1" fill="#fdae61" opacity="0.6"/>
+  <rect x="52" y="94" width="38" height="28" rx="1" fill="#ffffbf" opacity="0.45"/>
+  <rect x="94" y="94" width="38" height="28" rx="1" fill="#abd9e9" opacity="0.55"/>
+  <rect x="136" y="94" width="38" height="28" rx="1" fill="#4575b4" opacity="0.7"/>
+  <!-- Row 4 -->
+  <rect x="10" y="126" width="38" height="28" rx="1" fill="#ffffbf" opacity="0.4"/>
+  <rect x="52" y="126" width="38" height="28" rx="1" fill="#abd9e9" opacity="0.5"/>
+  <rect x="136" y="126" width="38" height="28" rx="1" fill="#4575b4" opacity="0.85"/>
+  <rect x="94" y="126" width="38" height="28" rx="1" fill="#4575b4" opacity="0.75"/>
+  <!-- Label for choropleth -->
+  <text x="87" y="22" text-anchor="middle" fill="#aaa" font-family="monospace" font-size="8">Majority group % per zone</text>
+  <!-- Color ramp -->
+  <defs>
+    <linearGradient id="rdbu" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4575b4"/>
+      <stop offset="50%" stop-color="#ffffbf"/>
+      <stop offset="100%" stop-color="#d73027"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="162" width="164" height="6" rx="1" fill="url(#rdbu)"/>
+  <text x="10" y="175" fill="#555" font-family="monospace" font-size="7">0%</text>
+  <text x="87" y="175" text-anchor="middle" fill="#555" font-family="monospace" font-size="7">50%</text>
+  <text x="174" y="175" text-anchor="end" fill="#555" font-family="monospace" font-size="7">100%</text>
+  <!-- Index panel (right) -->
+  <text x="200" y="22" text-anchor="middle" fill="#d0d0e8" font-family="monospace" font-size="9" font-weight="bold">Segregation Indices</text>
+  <!-- D bar -->
+  <text x="180" y="42" fill="#888" font-family="monospace" font-size="7.5">D (Dissimilarity)</text>
+  <rect x="180" y="45" width="100" height="7" rx="1.5" fill="#2a2a4a"/>
+  <rect x="180" y="45" width="62" height="7" rx="1.5" fill="#ef4444" opacity="0.8">
+    <animate attributeName="width" values="0;62;62" dur="1.5s" repeatCount="indefinite" begin="0s"/>
+  </rect>
+  <text x="284" y="52" fill="#ef4444" font-family="monospace" font-size="7.5">0.62</text>
+  <!-- P*aa bar -->
+  <text x="180" y="65" fill="#888" font-family="monospace" font-size="7.5">P*aa (Isolation)</text>
+  <rect x="180" y="68" width="100" height="7" rx="1.5" fill="#2a2a4a"/>
+  <rect x="180" y="68" width="74" height="7" rx="1.5" fill="#f97316" opacity="0.8">
+    <animate attributeName="width" values="0;74;74" dur="1.5s" repeatCount="indefinite" begin="0.2s"/>
+  </rect>
+  <text x="284" y="75" fill="#f97316" font-family="monospace" font-size="7.5">0.74</text>
+  <!-- P*ab bar -->
+  <text x="180" y="88" fill="#888" font-family="monospace" font-size="7.5">P*ab (Interaction)</text>
+  <rect x="180" y="91" width="100" height="7" rx="1.5" fill="#2a2a4a"/>
+  <rect x="180" y="91" width="26" height="7" rx="1.5" fill="#3b82f6" opacity="0.8">
+    <animate attributeName="width" values="0;26;26" dur="1.5s" repeatCount="indefinite" begin="0.4s"/>
+  </rect>
+  <text x="284" y="98" fill="#3b82f6" font-family="monospace" font-size="7.5">0.26</text>
+  <!-- H (Entropy) bar -->
+  <text x="180" y="111" fill="#888" font-family="monospace" font-size="7.5">H (Entropy)</text>
+  <rect x="180" y="114" width="100" height="7" rx="1.5" fill="#2a2a4a"/>
+  <rect x="180" y="114" width="38" height="7" rx="1.5" fill="#a855f7" opacity="0.8">
+    <animate attributeName="width" values="0;38;38" dur="1.5s" repeatCount="indefinite" begin="0.6s"/>
+  </rect>
+  <text x="284" y="121" fill="#a855f7" font-family="monospace" font-size="7.5">0.38</text>
+  <!-- Gini bar -->
+  <text x="180" y="134" fill="#888" font-family="monospace" font-size="7.5">Gini</text>
+  <rect x="180" y="137" width="100" height="7" rx="1.5" fill="#2a2a4a"/>
+  <rect x="180" y="137" width="57" height="7" rx="1.5" fill="#ec4899" opacity="0.8">
+    <animate attributeName="width" values="0;57;57" dur="1.5s" repeatCount="indefinite" begin="0.8s"/>
+  </rect>
+  <text x="284" y="144" fill="#ec4899" font-family="monospace" font-size="7.5">0.57</text>
+  <!-- Classification badge -->
+  <rect x="180" y="152" width="132" height="22" rx="3" fill="#ef4444" opacity="0.12"/>
+  <rect x="180" y="152" width="132" height="22" rx="3" stroke="#ef4444" stroke-width="0.8" fill="none" opacity="0.5"/>
+  <text x="246" y="162" text-anchor="middle" fill="#fca5a5" font-family="monospace" font-size="7.5">High Segregation</text>
+  <text x="246" y="171" text-anchor="middle" fill="#fca5a5" font-family="monospace" font-size="7">D ≥ 0.60 (Massey-Denton)</text>
 </svg>

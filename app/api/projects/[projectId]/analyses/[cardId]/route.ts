@@ -22,7 +22,10 @@ import {
   buildS8Input,
 } from "@/lib/queries/sidecar-inputs";
 import { getMultiselectUpset, getWeightedVsUnweighted, getChoroplethAgg, getWhosMissing, getLorenzCurve } from "@/lib/queries/medium-analyses";
-import { buildA6Input, buildA35Input, buildA43Input, buildA46Input } from "@/lib/queries/sidecar-inputs";
+import {
+  buildA6Input, buildA35Input, buildA43Input, buildA46Input,
+  buildV2SpaceTimeInput, buildV2SpatialRegInput, buildV2SegregationInput,
+} from "@/lib/queries/sidecar-inputs";
 import { getCoverageResponse } from "@/lib/queries/coverage-response";
 import { getColumnValuesById } from "@/lib/queries/columns";
 import { defaultSpecFor, resolveBreaks } from "@/lib/colorize/auto-classify";
@@ -144,6 +147,21 @@ const SIDECAR_DISPATCH: Record<string, (projectId: string, settings: Record<stri
     const body = await buildA46Input(projectId, settings);
     if (!body) return { reason: "wave-pending", message: "No grouping question selected." };
     return callSidecar(projectId, "A46_segment_diff", body);
+  },
+  V2_emerging_hot: async (projectId, settings) => {
+    const body = await buildV2SpaceTimeInput(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "Select a question and ensure responses have timestamps." };
+    return callSidecar(projectId, "V2_emerging_hot", body);
+  },
+  V2_gwr: async (projectId, settings) => {
+    const body = await buildV2SpatialRegInput(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "Select a dependent (Y) and an independent (X) question (≥30 matched responses needed)." };
+    return callSidecar(projectId, "V2_gwr", body);
+  },
+  V2_segregation: async (projectId, settings) => {
+    const body = await buildV2SegregationInput(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "Select a group question and ensure ≥20 geocoded responses." };
+    return callSidecar(projectId, "V2_segregation", body);
   },
 };
 

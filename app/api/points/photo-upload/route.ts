@@ -1,9 +1,19 @@
+import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ALLOWED_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+};
+
 /**
  * Upload a photo blob to the `point-photos` bucket.
- * Path: {project_id}/{client_point_id}/{uuid}-{filename}
+ * Path: {project_id}/{client_point_id}/{photo_id}.{ext}
  * RLS on storage.objects enforces project membership.
  *
  * Returns { path } for the caller to attach to a point row later.
@@ -25,17 +35,22 @@ export async function POST(req: NextRequest) {
   if (!(file instanceof Blob) || !projectId || !clientPointId || !photoId) {
     return NextResponse.json({ error: "missing fields" }, { status: 400 });
   }
+  if (!UUID_RE.test(projectId)) return NextResponse.json({ error: "bad project_id" }, { status: 400 });
+  if (!UUID_RE.test(clientPointId)) return NextResponse.json({ error: "bad client_point_id" }, { status: 400 });
   if (!/^[0-9a-f-]{8,60}$/i.test(photoId)) return NextResponse.json({ error: "bad photo_id" }, { status: 400 });
   if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "file too large" }, { status: 413 });
 
-  const ext = (file as File).name?.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  // file.type is caller-controlled; whitelist before passing to storage.
+  const mime = (file.type || "").toLowerCase();
+  const ext = ALLOWED_MIME[mime];
+  if (!ext) return NextResponse.json({ error: "unsupported file type" }, { status: 415 });
   const path = `${projectId}/${clientPointId}/${photoId}.${ext}`;
 
   const { error } = await sb.storage.from("point-photos").upload(path, file, {
-    contentType: file.type || "image/jpeg",
+    contentType: mime,
     upsert: true, // idempotent retry — same path overwrites
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "upload failed" }, { status: 500 });
 
   return NextResponse.json({ path });
 }

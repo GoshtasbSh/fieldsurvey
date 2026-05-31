@@ -9,7 +9,7 @@ vi.mock("next/image", () => ({
 }));
 
 describe("AddAnalysisModal", () => {
-  it("renders the 5 v1 toolbox names when open", () => {
+  it("renders core v1 toolbox names when open", () => {
     render(<AddAnalysisModal open onOpenChange={() => {}} onAdd={() => {}} />);
     expect(screen.getByText(/Symbology & Visualization/)).toBeInTheDocument();
     expect(screen.getByText(/Analyzing Patterns/)).toBeInTheDocument();
@@ -18,11 +18,12 @@ describe("AddAnalysisModal", () => {
     expect(screen.getByText(/Survey Coverage & Equity/)).toBeInTheDocument();
   });
 
-  it("renders 3 v2 placeholder toolboxes as greyed", () => {
+  it("renders formerly-V2 toolboxes as regular v1 toolboxes (all promoted)", () => {
     render(<AddAnalysisModal open onOpenChange={() => {}} onAdd={() => {}} />);
-    const v2 = screen.getByText(/Space-Time Pattern Mining/);
-    expect(v2).toBeInTheDocument();
-    expect(v2.closest('[data-v2="true"]')).not.toBeNull();
+    // All three former-V2 toolboxes are now in the main toolbox list
+    expect(screen.getByText(/Space-Time Pattern Mining/)).toBeInTheDocument();
+    expect(screen.getByText(/Spatial Regression/)).toBeInTheDocument();
+    expect(screen.getByText(/Sampling Equity/)).toBeInTheDocument();
   });
 
   it("clicking a v1 toolbox shows its cards", async () => {

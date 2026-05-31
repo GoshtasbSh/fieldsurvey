@@ -33,6 +33,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
   } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as any;
+  const { data: role } = await sbAny.rpc("project_role", { p_project: projectId });
+  if (!role) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
   const boundaries = await listProjectBoundaries(projectId);
   return NextResponse.json({ boundaries });
 }
@@ -75,7 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     p_geojson: JSON.stringify(multi),
   });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "insert failed" }, { status: 500 });
   const row = Array.isArray(data) ? data[0] : data;
   return NextResponse.json({ boundary: row });
 }

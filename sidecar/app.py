@@ -5,6 +5,7 @@ from sidecar.routers import finish, velocity, kde, gi_star
 from sidecar.routers import s1_autocorr, s2_gi_star_q, s3_lisa_q, s4_satscan
 from sidecar.routers import s5_distance_decay, s7_local_geary, s8_bivariate
 from sidecar.routers import a6_ngrams, a35_straight_line, a43_raking, a46_segment_diff
+from sidecar.routers import v2_space_time, v2_spatial_reg, v2_segregation
 
 app = FastAPI(title="FieldSurvey sidecar")
 
@@ -45,6 +46,9 @@ app.include_router(a6_ngrams.router, prefix="/sidecar/compute/A6_text_ngrams", t
 app.include_router(a35_straight_line.router, prefix="/sidecar/compute/A35_straight_line", tags=["A35"], dependencies=[Depends(verify_secret)])
 app.include_router(a43_raking.router, prefix="/sidecar/compute/A43_raking_diag", tags=["A43"], dependencies=[Depends(verify_secret)])
 app.include_router(a46_segment_diff.router, prefix="/sidecar/compute/A46_segment_diff", tags=["A46"], dependencies=[Depends(verify_secret)])
+app.include_router(v2_space_time.router, prefix="/sidecar/compute/V2_emerging_hot", tags=["V2"], dependencies=[Depends(verify_secret)])
+app.include_router(v2_spatial_reg.router, prefix="/sidecar/compute/V2_gwr", tags=["V2"], dependencies=[Depends(verify_secret)])
+app.include_router(v2_segregation.router, prefix="/sidecar/compute/V2_segregation", tags=["V2"], dependencies=[Depends(verify_secret)])
 
 
 @app.get("/sidecar/healthz")
@@ -54,4 +58,4 @@ def healthz():
 
 @app.get("/sidecar/version")
 def version():
-    return {"version": "1.3.0"}
+    return {"version": "1.4.0"}

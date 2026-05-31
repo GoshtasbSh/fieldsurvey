@@ -8,6 +8,7 @@
  * Read = any project member (matches analytics permission, locked Q7).
  */
 
+import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -23,12 +24,17 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (sb.from("analysis_versions") as any)
+  const sbAny = sb as any;
+  const { data: role } = await sbAny.rpc("project_role", { p_project: projectId });
+  if (!role) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  const { data, error } = await sbAny
+    .from("analysis_versions")
     .select("id, data_type, snapshot_at, trigger, delta_summary, is_daily_rollup, payload")
     .eq("project_id", projectId)
     .eq("id", versionId)
     .maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "fetch failed" }, { status: 500 });
   if (!data) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ version: data });
 }

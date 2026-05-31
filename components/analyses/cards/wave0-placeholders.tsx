@@ -31,3 +31,8 @@ export const WhosMissingResult  = makePlaceholder("A41_whos_missing",        "Wh
 export const LorenzResult       = makePlaceholder("A42_lorenz",              "Coverage Equity (Lorenz / Gini)");
 export const RakingResult       = makePlaceholder("A43_raking_diag",         "Raking Weights Diagnostic");
 export const SegmentDiffResult  = makePlaceholder("A46_segment_diff",        "Auto-detected Segment Differences");
+
+// V2 analyses — catalog-card placeholders (settings drawer uses real result panels)
+export const SpaceTimeResult   = makePlaceholder("V2_emerging_hot", "Emerging Hot Spot Analysis");
+export const SpatialRegResult  = makePlaceholder("V2_gwr",          "Spatial Regression Diagnostics");
+export const SegregationResult = makePlaceholder("V2_segregation",  "Segregation & Diversity Indices");

@@ -3,18 +3,17 @@ import { describe, it, expect } from "vitest";
 import { TOOLBOXES, v1Toolboxes, v2Toolboxes } from "@/lib/analyses/toolboxes";
 
 describe("toolboxes", () => {
-  it("ships 7 v1 toolboxes in spec order", () => {
+  it("ships 10 v1 toolboxes in spec order", () => {
     expect(v1Toolboxes().map(t => t.slug)).toEqual([
       "symbology", "analyzing_patterns", "mapping_clusters",
       "spatial_relationships", "coverage_equity",
       "survey_response", "quality_bias",
+      "space_time", "spatial_regression", "sampling_equity",
     ]);
   });
 
-  it("ships 3 v2 placeholder toolboxes", () => {
-    expect(v2Toolboxes().map(t => t.slug)).toEqual([
-      "space_time", "spatial_regression", "sampling_equity",
-    ]);
+  it("ships 0 v2 placeholder toolboxes (all promoted to v1)", () => {
+    expect(v2Toolboxes()).toHaveLength(0);
   });
 
   it("every toolbox has an icon + non-empty description", () => {

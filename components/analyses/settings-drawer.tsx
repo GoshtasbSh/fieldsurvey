@@ -138,7 +138,9 @@ function ResultPanel({
       </div>
       {isWavePending ? (
         <p className="text-[11.5px] text-[var(--shell-text-muted)]">
-          Compute backend ships in a later wave — result preview not available yet.
+          {(data as Record<string, unknown>).message
+            ? String((data as Record<string, unknown>).message)
+            : "Compute backend ships in a later wave — result preview not available yet."}
         </p>
       ) : SpecificPanel ? (
         <SpecificPanel data={data} />
