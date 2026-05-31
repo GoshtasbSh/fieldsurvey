@@ -23,6 +23,7 @@ import type { CapStatus } from "@/lib/queries/caps";
 import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
 import { useColorizer } from "@/lib/colorize/use-colorizer";
 import { ColorizerControl } from "@/components/map/colorizer-control";
+import { usePinnedLayers } from "@/hooks/use-pinned-layers";
 
 const MaplibreMap = dynamic(
   () => import("@/components/map/maplibre-map").then((m) => m.MaplibreMap),
@@ -67,6 +68,18 @@ type Props = {
 export function MapShell(props: Props) {
   const router = useRouter();
   const left = useLeftRailState();
+
+  const {
+    layers: pinnedLayers,
+    loading: pinnedLayersLoading,
+    pin: pinAnalysisLayer,
+    unpin: unpinAnalysisLayer,
+    toggleVisibility: togglePinnedVisibility,
+    rename: renamePinnedLayer,
+  } = usePinnedLayers(props.projectId);
+
+  const [pinnedSettingsTarget, setPinnedSettingsTarget] = useState<{ cardId: string; pinnedAt: string } | null>(null);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [placeCoords, setPlaceCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -252,6 +265,12 @@ export function MapShell(props: Props) {
             }))}
             activeViewId={activeViewId}
             onSwitchView={handleSwitchView}
+            pinnedLayers={pinnedLayers}
+            pinnedLayersLoading={pinnedLayersLoading}
+            onTogglePinnedVisibility={togglePinnedVisibility}
+            onUnpinLayer={unpinAnalysisLayer}
+            onOpenPinnedSettings={(cardId, pinnedAt) => setPinnedSettingsTarget({ cardId, pinnedAt })}
+            onRenamePinnedLayer={renamePinnedLayer}
           />
         </div>
 
@@ -367,6 +386,15 @@ export function MapShell(props: Props) {
             userRole={role}
             savedViewNames={savedViewNames}
             activeViewCards={activeViewCards}
+            onPin={(cardId, cardName, settings, result) => {
+              void pinAnalysisLayer({
+                cardId,
+                layerName: cardName,
+                settings,
+                visible: true,
+                cachedResult: result,
+              });
+            }}
           />
         </div>
       </div>

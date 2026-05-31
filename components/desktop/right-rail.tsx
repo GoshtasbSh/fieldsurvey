@@ -65,6 +65,8 @@ type Props = {
   savedViewNames?: string[];
   /** M7: cards enabled in the active saved view (controls which appear in Analyze). */
   activeViewCards?: string[];
+  /** M7.2: called when user pins an analysis result from the SettingsDrawer. */
+  onPin?: (cardId: string, cardName: string, settings: Record<string, unknown>, result: unknown) => void;
 };
 
 export function DesktopRightRail({
@@ -75,6 +77,7 @@ export function DesktopRightRail({
   userRole = null,
   savedViewNames = ["Default", "Coverage", "QC", "Health-equity", "Velocity"],
   activeViewCards,
+  onPin,
 }: Props) {
   const [tab, setTab] = useState<RightRailTab>("pulse");
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -173,7 +176,7 @@ export function DesktopRightRail({
           </Scroll>
         )}
         {tab === "analyze" && (
-          <AnalyzeTabContainer projectId={projectId} />
+          <AnalyzeTabContainer projectId={projectId} onPin={onPin ?? (() => {})} />
         )}
         {tab === "team" && (
           currentUserId
@@ -773,7 +776,13 @@ function Placeholder({ label }: { label: string }) {
 // Legacy AnalyzeTab cards return in Wave 1 as part of saved views.
 // ──────────────────────────────────────────────────────────────────────────────
 
-function AnalyzeTabContainer({ projectId }: { projectId: string }) {
+function AnalyzeTabContainer({
+  projectId,
+  onPin,
+}: {
+  projectId: string;
+  onPin: (cardId: string, cardName: string, settings: Record<string, unknown>, result: unknown) => void;
+}) {
   const { items, activeQuestion, add, remove, updateSettings } = useAddedAnalyses(projectId);
   const [modalOpen, setModalOpen] = useState(false);
   const [settingsFor, setSettingsFor] = useState<AnalysisListItem | null>(null);
@@ -815,7 +824,11 @@ function AnalyzeTabContainer({ projectId }: { projectId: string }) {
             void updateSettings(settingsFor.cardId, settingsFor.addedAt, { ...settingsFor.settings, ...patch });
           }}
           onClose={() => setSettingsFor(null)}
-          onPin={() => { /* Wave-1: wire up pinnedLayers state */ }}
+          onPin={(result) => {
+            if (settingsFor && settingsCard) {
+              onPin(settingsFor.cardId, settingsCard.name, settingsFor.settings, result);
+            }
+          }}
         />
       )}
     </div>
