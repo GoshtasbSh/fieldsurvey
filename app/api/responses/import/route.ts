@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { z } from "zod";
 
+export const maxDuration = 300;
+
 const ImportBody = z.object({
   project_id: z.string().uuid(),
   filename: z.string().min(1).max(200),
@@ -11,13 +13,14 @@ const ImportBody = z.object({
   source: z.enum(["qualtrics_csv", "google_forms_csv", "manual"]).default("qualtrics_csv"),
 });
 
-/**
- * Bulk-insert imported survey responses for a project.
- * Records an audit row in survey_imports.
- * Does NOT trust the rows' own lat/lon — geocoding happens server-side via
- * the Python matcher when the user clicks "Run matching" (or auto-triggered
- * by this route at the end).
- */
+type MatcherSummary = {
+  geocoded: number;
+  matched_now: number;
+  m1_count: number;
+  f1_count: number;
+  r1_count: number;
+};
+
 export async function POST(req: NextRequest) {
   const sb = await createServerSupabase();
   const { data: { user } } = await sb.auth.getUser();
@@ -32,7 +35,15 @@ export async function POST(req: NextRequest) {
   const { data: role } = await sbAny.rpc("project_role", { p_project: body.project_id });
   if (role !== "owner" && role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  // Audit row
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) {
+    return NextResponse.json({
+      error:
+        "Matcher is not configured: INTERNAL_API_SECRET is missing in this environment. " +
+        "Rows would be inserted but never geocoded, so the import is refused.",
+    }, { status: 500 });
+  }
+
   const { data: imp } = await sbAny
     .from("survey_imports")
     .insert({
@@ -47,10 +58,6 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
 
-  // Insert responses in chunks. If an external_id column was specified
-  // but a row has an empty value, surface the error instead of silently
-  // falling back to null (which would bypass the partial unique index
-  // and create duplicates on re-import).
   let blankExternalIds = 0;
   const rowsToInsert = body.rows.map((r) => {
     let externalId: string | null = null;
@@ -69,6 +76,14 @@ export async function POST(req: NextRequest) {
     };
   });
   if (body.external_id_column && blankExternalIds > 0) {
+    await sbAny
+      .from("survey_imports")
+      .update({
+        status: "failed",
+        error_message: `${blankExternalIds} rows have an empty value in the "${body.external_id_column}" column`,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", imp?.id);
     return NextResponse.json({
       error: `${blankExternalIds} rows have an empty value in the "${body.external_id_column}" column. Pick a different column or fix the CSV.`,
     }, { status: 400 });
@@ -78,30 +93,67 @@ export async function POST(req: NextRequest) {
   const chunk = 500;
   for (let i = 0; i < rowsToInsert.length; i += chunk) {
     const slice = rowsToInsert.slice(i, i + chunk);
-    const { error } = await sbAny.from("survey_responses").upsert(slice, { onConflict: "project_id,external_id", ignoreDuplicates: true });
+    const { error } = await sbAny
+      .from("survey_responses")
+      .upsert(slice, { onConflict: "project_id,external_id", ignoreDuplicates: true });
     if (error) {
-      await sbAny.from("survey_imports").update({ status: "failed", error_message: error.message, completed_at: new Date().toISOString() }).eq("id", imp?.id);
+      await sbAny.from("survey_imports").update({
+        status: "failed",
+        error_message: error.message,
+        completed_at: new Date().toISOString(),
+      }).eq("id", imp?.id);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     inserted += slice.length;
   }
 
-  // Persist the address-column choice for next time
   await sbAny.from("project_settings").update({
     response_address_column: body.address_column,
     external_id_column: body.external_id_column ?? null,
   }).eq("project_id", body.project_id);
 
-  // Trigger the matcher (best-effort, async) with the shared internal secret
-  const secret = process.env.INTERNAL_API_SECRET;
-  if (secret) {
-    try {
-      const pyUrl = new URL("/api/py/match_responses", req.url);
-      pyUrl.searchParams.set("project_id", body.project_id);
-      void fetch(pyUrl, { method: "POST", headers: { "X-Internal-Secret": secret } });
-    } catch { /* ignore */ }
+  // Drive the matcher synchronously: the user is waiting on the wizard's
+  // running state, and the rows on the map only appear after geocoding lands.
+  // Previously this was a `void fetch(...)` fire-and-forget, which the
+  // serverless runtime canceled on response — so the matcher never ran and
+  // 100% of imported responses stayed ungeocoded.
+  const pyUrl = new URL("/api/py/match_responses", req.url);
+  pyUrl.searchParams.set("project_id", body.project_id);
+
+  let matcher: MatcherSummary | null = null;
+  let matcherError: string | null = null;
+  try {
+    const r = await fetch(pyUrl, {
+      method: "POST",
+      headers: { "X-Internal-Secret": secret },
+    });
+    const text = await r.text();
+    if (!r.ok) {
+      matcherError = `matcher returned ${r.status}: ${text.slice(0, 500)}`;
+    } else {
+      try {
+        matcher = JSON.parse(text) as MatcherSummary;
+      } catch {
+        matcherError = `matcher returned non-JSON: ${text.slice(0, 200)}`;
+      }
+    }
+  } catch (e) {
+    matcherError = e instanceof Error ? e.message : String(e);
   }
 
-  await sbAny.from("survey_imports").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", imp?.id);
-  return NextResponse.json({ import_id: imp?.id, inserted });
+  await sbAny.from("survey_imports").update({
+    status: matcherError ? "failed" : "completed",
+    error_message: matcherError,
+    matched_count: matcher?.m1_count ?? 0,
+    field_only_count: matcher?.f1_count ?? 0,
+    response_only_count: matcher?.r1_count ?? 0,
+    completed_at: new Date().toISOString(),
+  }).eq("id", imp?.id);
+
+  return NextResponse.json({
+    import_id: imp?.id,
+    inserted,
+    matcher,
+    matcher_error: matcherError,
+  });
 }

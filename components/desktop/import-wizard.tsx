@@ -24,7 +24,12 @@ export function ImportWizard({ projectId }: { projectId: string }) {
   const [externalIdColumn, setExternalIdColumn] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ inserted: number } | null>(null);
+  const [rerunning, setRerunning] = useState(false);
+  const [result, setResult] = useState<{
+    inserted: number;
+    matcher: { geocoded: number; matched_now: number; m1_count: number; f1_count: number; r1_count: number } | null;
+    matcher_error: string | null;
+  } | null>(null);
 
   async function onFile(f: File) {
     setError(null);
@@ -58,15 +63,48 @@ export function ImportWizard({ projectId }: { projectId: string }) {
           rows,
         }),
       });
-      const j = (await r.json()) as { inserted?: number; error?: string };
+      const j = (await r.json()) as {
+        inserted?: number;
+        error?: string;
+        matcher?: { geocoded: number; matched_now: number; m1_count: number; f1_count: number; r1_count: number } | null;
+        matcher_error?: string | null;
+      };
       if (!r.ok) throw new Error(j.error ?? `import failed (${r.status})`);
-      setResult({ inserted: j.inserted ?? rows.length });
+      setResult({
+        inserted: j.inserted ?? rows.length,
+        matcher: j.matcher ?? null,
+        matcher_error: j.matcher_error ?? null,
+      });
       setStep("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStep("configure");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onRerunMatch() {
+    setRerunning(true);
+    try {
+      const r = await fetch(`/api/match?project_id=${encodeURIComponent(projectId)}`, { method: "POST" });
+      const j = (await r.json()) as { error?: string; geocoded?: number; matched_now?: number; m1_count?: number; f1_count?: number; r1_count?: number };
+      if (!r.ok) throw new Error(j.error ?? `match failed (${r.status})`);
+      setResult((prev) => prev ? {
+        ...prev,
+        matcher: {
+          geocoded: j.geocoded ?? 0,
+          matched_now: j.matched_now ?? 0,
+          m1_count: j.m1_count ?? 0,
+          f1_count: j.f1_count ?? 0,
+          r1_count: j.r1_count ?? 0,
+        },
+        matcher_error: null,
+      } : prev);
+    } catch (e) {
+      setResult((prev) => prev ? { ...prev, matcher_error: e instanceof Error ? e.message : String(e) } : prev);
+    } finally {
+      setRerunning(false);
     }
   }
 
@@ -151,8 +189,30 @@ export function ImportWizard({ projectId }: { projectId: string }) {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle2 className="h-10 w-10 text-[oklch(76%_0.16_158)]" />
           <div className="font-display text-[16px] font-extrabold">Import complete</div>
-          <div className="text-[12px] text-[var(--shell-text-2)]">{result.inserted} responses imported. Matching is running server-side; counts will update shortly.</div>
-          <div className="mt-3 flex gap-2">
+          <div className="text-[12px] text-[var(--shell-text-2)]">{result.inserted} responses imported.</div>
+          {result.matcher && (
+            <div className="text-[12px] text-[var(--shell-text-2)]">
+              {result.matcher.geocoded} geocoded this run · {result.matcher.matched_now} newly matched to field points
+              <div className="mt-1 font-mono text-[11px] text-[var(--shell-text-muted)]">
+                M1 {result.matcher.m1_count} · F1 {result.matcher.f1_count} · R1 {result.matcher.r1_count}
+              </div>
+            </div>
+          )}
+          {result.matcher_error && (
+            <div className="rounded-lg border border-[oklch(68%_0.21_25/0.4)] bg-[oklch(68%_0.21_25/0.08)] px-3 py-2 text-[11px] text-[oklch(68%_0.21_25)]">
+              Matcher reported an issue: {result.matcher_error}
+              <div className="mt-1 text-[var(--shell-text-muted)]">Click &ldquo;Re-run matching&rdquo; below to retry; the matcher is idempotent.</div>
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={onRerunMatch}
+              disabled={rerunning}
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-text-2)] hover:bg-[var(--shell-3)] disabled:opacity-50 transition"
+            >
+              {rerunning && <Loader2 className="h-4 w-4 animate-spin" />}
+              Re-run matching
+            </button>
             <button onClick={() => router.push(`/p/${projectId}/map`)} className="rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)]">View map</button>
             <button onClick={() => { setStep("upload"); setRows([]); setResult(null); }} className="rounded-lg border border-[var(--shell-border)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-text-2)]">Import more</button>
           </div>
