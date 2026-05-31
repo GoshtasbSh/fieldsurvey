@@ -275,3 +275,104 @@ export async function buildA8GiStarInput(
   }));
   return { cells, k: 5 };
 }
+
+// ── S-series spatial analysis builders ──────────────────────────────────────
+
+/** S1: Global Moran's I + Geary's C */
+export async function buildS1Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  if (!qk) return null;
+  const cells = await buildSpatialCells(projectId, qk);
+  return {
+    cells,
+    weights_type: settings["weightsType"] ?? "knn8",
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+  };
+}
+
+/** S2: Gi* on question column */
+export async function buildS2Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  if (!qk) return null;
+  const cells = await buildSpatialCells(projectId, qk);
+  return {
+    cells,
+    weights_type: settings["weightsType"] ?? "knn8",
+    fdr_alpha: Number(settings["fdrAlpha"] ?? 0.05),
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+  };
+}
+
+/** S3: LISA Local Moran */
+export async function buildS3Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  if (!qk) return null;
+  const cells = await buildSpatialCells(projectId, qk);
+  return {
+    cells,
+    weights_type: settings["weightsType"] ?? "knn8",
+    fdr_alpha: Number(settings["fdrAlpha"] ?? 0.05),
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+  };
+}
+
+/** S4: Bernoulli scan — value is 0/1 (answer matches answerOption) */
+export async function buildS4Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  const answerOption = settings["answerOption"] ?? "";
+  if (!qk) return null;
+  const cells = await buildSpatialCellsBinary(projectId, qk, answerOption);
+  return {
+    cells,
+    max_window_pct: Number(settings["maxWindowPct"] ?? 0.25),
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+  };
+}
+
+/** S5: Distance-decay vs POI */
+export async function buildS5Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  const poiRaw = settings["poi"];
+  if (!qk || !poiRaw) return null;
+  let poi: { lat: number; lon: number } | null = null;
+  try { poi = JSON.parse(poiRaw); } catch { return null; }
+  if (!poi) return null;
+  const cells = await buildSpatialCells(projectId, qk);
+  return {
+    cells,
+    poi_lat: poi.lat,
+    poi_lon: poi.lon,
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+  };
+}
+
+/** S7: Local Geary */
+export async function buildS7Input(projectId: string, settings: Record<string, string>) {
+  const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+  if (!qk) return null;
+  const cells = await buildSpatialCells(projectId, qk);
+  return {
+    cells,
+    weights_type: settings["weightsType"] ?? "knn8",
+    fdr_alpha: Number(settings["fdrAlpha"] ?? 0.05),
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+    winsorize: settings["winsorize"] !== "false",
+  };
+}
+
+/** S8: Bivariate Lee's L */
+export async function buildS8Input(projectId: string, settings: Record<string, string>) {
+  const qkx = settings["questionKeyX"] ?? "";
+  const qky = settings["questionKeyY"] ?? "";
+  if (!qkx || !qky) return null;
+  const [cells_x, cells_y] = await Promise.all([
+    buildSpatialCells(projectId, qkx),
+    buildSpatialCells(projectId, qky),
+  ]);
+  return {
+    cells_x,
+    cells_y,
+    fdr_alpha: Number(settings["fdrAlpha"] ?? 0.05),
+    n_permutations: Number(settings["nPermutations"] ?? 999),
+  };
+}

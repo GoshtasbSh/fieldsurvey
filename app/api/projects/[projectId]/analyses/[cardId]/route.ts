@@ -13,7 +13,18 @@ import {
   buildA25VelocityInput,
   buildA11KdeInput,
   buildA8GiStarInput,
+  buildS1Input,
+  buildS2Input,
+  buildS3Input,
+  buildS4Input,
+  buildS5Input,
+  buildS7Input,
+  buildS8Input,
 } from "@/lib/queries/sidecar-inputs";
+import { getCoverageResponse } from "@/lib/queries/coverage-response";
+import { getColumnValuesById } from "@/lib/queries/columns";
+import { defaultSpecFor, resolveBreaks } from "@/lib/colorize/auto-classify";
+import { continuousRampStops, categoricalColors } from "@/lib/colorize/palettes";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +45,25 @@ const POSTGRES_DISPATCH: Record<string, (projectId: string, settings: Record<str
   A40_sample_vs_acs: (projectId, _settings) => getDemographicsSchema(projectId),
   A51_topk: (projectId, _settings) => getTopKBlocks(projectId),
   A52_f1_queue: (projectId, _settings) => getF1Queue(projectId),
+  S6_coverage_response: async (projectId, settings) => getCoverageResponse(projectId, settings),
+  A0_colorizer: async (projectId, settings) => {
+    const qk = settings["questionKey"] ?? settings["questionkey"] ?? "";
+    if (!qk) return { error: "missing_question_key" };
+    const { profile, valuesByResponseId } = await getColumnValuesById(projectId, qk);
+    if (!profile) return { error: "column_not_found" };
+    const spec = defaultSpecFor(profile);
+    const numericValues: number[] = [];
+    for (const v of Object.values(valuesByResponseId)) {
+      const n = Number(v);
+      if (Number.isFinite(n)) numericValues.push(n);
+    }
+    const breaks = resolveBreaks(numericValues, spec.classification, spec.classCount);
+    const isNumeric = spec.inferredType === "numeric_continuous" || spec.inferredType === "numeric_skewed" || spec.inferredType === "likert" || spec.inferredType === "date";
+    const legendColors = isNumeric
+      ? continuousRampStops(spec.ramp, spec.classCount, spec.reversed)
+      : categoricalColors(spec.ramp, profile.distinct || 1);
+    return { spec, profile, breaks, legendColors, n_responses: Object.keys(valuesByResponseId).length };
+  },
 };
 
 const SIDECAR_DISPATCH: Record<string, (projectId: string, settings: Record<string, string>) => Promise<unknown>> = {
@@ -52,6 +82,41 @@ const SIDECAR_DISPATCH: Record<string, (projectId: string, settings: Record<stri
   A8_gi_star: async (projectId, _settings) => {
     const body = await buildA8GiStarInput(projectId);
     return callSidecar(projectId, "A8_gi_star", body);
+  },
+  S1_autocorr: async (projectId, settings) => {
+    const body = await buildS1Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No question selected." };
+    return callSidecar(projectId, "S1_autocorr", body);
+  },
+  S2_gi_star_q: async (projectId, settings) => {
+    const body = await buildS2Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No question selected." };
+    return callSidecar(projectId, "S2_gi_star_q", body);
+  },
+  S3_lisa_q: async (projectId, settings) => {
+    const body = await buildS3Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No question selected." };
+    return callSidecar(projectId, "S3_lisa_q", body);
+  },
+  S4_satscan: async (projectId, settings) => {
+    const body = await buildS4Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No question or answer selected." };
+    return callSidecar(projectId, "S4_satscan", body);
+  },
+  S5_distance_decay: async (projectId, settings) => {
+    const body = await buildS5Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No question or POI selected." };
+    return callSidecar(projectId, "S5_distance_decay", body);
+  },
+  S7_local_geary: async (projectId, settings) => {
+    const body = await buildS7Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "No question selected." };
+    return callSidecar(projectId, "S7_local_geary", body);
+  },
+  S8_bivariate: async (projectId, settings) => {
+    const body = await buildS8Input(projectId, settings);
+    if (!body) return { reason: "wave-pending", message: "Two questions required." };
+    return callSidecar(projectId, "S8_bivariate", body);
   },
 };
 
