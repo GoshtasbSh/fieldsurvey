@@ -28,8 +28,9 @@ function useAapor(projectId: string | undefined): AaporResult | null {
           { signal: ac.signal },
         );
         if (!res.ok) return;
-        const json = (await res.json()) as AaporResult;
-        if (!cancelled) setR(json);
+        // Dispatcher returns { data: AaporResult, computedAt }. Unwrap.
+        const env = (await res.json()) as { data?: AaporResult | null };
+        if (!cancelled) setR(env?.data ?? null);
       } catch {
         // swallow — network failure or dispatcher not wired yet
       }
@@ -46,13 +47,23 @@ function fmt(p: number | null): string {
   return p == null ? "—" : `${(p * 100).toFixed(1)}%`;
 }
 
-function sumCounts(c: AaporResult["counts"]): number {
+function sumCounts(c: AaporResult["counts"] | undefined): number {
+  if (!c) return 0;
   return c.I + c.P + c.R + c.NC + c.O + c.UH + c.UO;
 }
 
 export function AaporRatesPanel({ projectId }: { projectId?: string }) {
   const r = useAapor(projectId);
   if (r === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="AAPOR response rates"
+        cardId="A16_rr"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
+  if (!r.counts || !r.rates) {
     return (
       <AwaitingDataPanel
         cardName="AAPOR response rates"
@@ -92,6 +103,15 @@ export function AaporCoopRefPanel({ projectId }: { projectId?: string }) {
       />
     );
   }
+  if (!r.counts || !r.rates) {
+    return (
+      <AwaitingDataPanel
+        cardName="Cooperation + refusal"
+        cardId="A17_coop_ref"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
   const n = sumCounts(r.counts);
   if (n < 50) return <NMinPlaceholder cardName="COOP1 + REF1" n={n} nMin={50} />;
   return (
@@ -112,6 +132,15 @@ export function AaporCoopRefPanel({ projectId }: { projectId?: string }) {
 export function AaporContactTile({ projectId }: { projectId?: string }) {
   const r = useAapor(projectId);
   if (r === null) {
+    return (
+      <AwaitingDataPanel
+        cardName="Contact rate"
+        cardId="A18_con"
+        reason="needs-aapor-mapping"
+      />
+    );
+  }
+  if (!r.counts || !r.rates) {
     return (
       <AwaitingDataPanel
         cardName="Contact rate"
