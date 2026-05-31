@@ -7,6 +7,7 @@ import { readCachedBlobs } from "@/lib/cache/read";
 import { getCanvassCompletion } from "@/lib/queries/universe";
 import { listProjectBoundaries, boundariesAsFeatureCollection } from "@/lib/queries/parcels";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { listSavedViews, getActiveView, type SavedView } from "@/lib/queries/saved-views";
 import { MapShell } from "@/components/desktop/map-shell";
 import { RealtimeWatcher } from "@/components/realtime-watcher";
 import type {
@@ -87,7 +88,7 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
     getMatchStatusCounts(projectId),
     getMatchStatusFeatures(projectId),
     getDailyActivity(projectId, 14),
-    getHourlyDistribution(projectId),
+    getHourlyDistribution(projectId, "America/New_York"),
     getDayOfWeekDistribution(projectId),
     getSurveyorLeaderboard(projectId),
     getCoverageMetrics(projectId),
@@ -102,6 +103,14 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
   const boundaries = boundaryRows.length > 0
     ? boundariesAsFeatureCollection(boundaryRows)
     : null;
+
+  // M7 — Saved Views + viewer's currently-active view. Role-filter happens
+  // server-side (RLS gates admin-only views from non-admins).
+  const viewerRole = (currentUser?.role ?? "member") as SavedView["role_gate"];
+  const [savedViews, activeView] = await Promise.all([
+    listSavedViews(projectId, viewerRole),
+    getActiveView(projectId),
+  ]);
 
   // canvass_blob → prefer cached payload when fresh, else compute from
   // survey_universe directly. Disabled rows render no UI (right-rail checks
@@ -186,6 +195,15 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
         cachedAt={cachedAt}
         canvass={canvass}
         boundaries={boundaries}
+        savedViews={savedViews.map((v) => ({
+          id: v.id,
+          name: v.name,
+          cards: v.cards,
+          description: v.description,
+          role_gate: v.role_gate,
+          is_default: v.is_default,
+        }))}
+        initialActiveViewId={activeView.view_id}
       />
       <RealtimeWatcher projectId={projectId} />
     </>

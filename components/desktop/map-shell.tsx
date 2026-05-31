@@ -21,6 +21,8 @@ import type { StatusColorMap, MapHandle, BasemapKey } from "@/components/map/map
 import type { ChatMessage } from "@/lib/queries/chat";
 import type { CapStatus } from "@/lib/queries/caps";
 import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
+import { useColorizer } from "@/lib/colorize/use-colorizer";
+import { ColorizerControl } from "@/components/map/colorizer-control";
 
 const MaplibreMap = dynamic(
   () => import("@/components/map/maplibre-map").then((m) => m.MaplibreMap),
@@ -56,6 +58,10 @@ type Props = {
   canvass?: CanvassBlob | null;
   /** Project boundaries as a single FeatureCollection (M6). */
   boundaries?: GeoJSON.FeatureCollection | null;
+  /** M7: Saved Views available to this viewer (server-fetched, role-filtered). */
+  savedViews?: Array<{ id: string; name: string; cards: string[]; description: string | null; role_gate: string; is_default: boolean }>;
+  /** M7: viewer's currently active view id (from user_view_state or null = default). */
+  initialActiveViewId?: string | null;
 };
 
 export function MapShell(props: Props) {
@@ -154,6 +160,36 @@ export function MapShell(props: Props) {
     });
   }, [props.features, left.activeMatch, left.activeStatusIds, left.visibleStatusIds, props.statuses, dateThreshold]);
 
+  // A0 question colorizer — repaints the map by any survey response column.
+  const colorizer = useColorizer(props.projectId, filtered);
+
+  // M7 — Saved Views switcher. Source of truth is `activeViewId`; we look up
+  // the cards list from `props.savedViews` so switching is instant client-side.
+  const [activeViewId, setActiveViewId] = useState<string | null>(() => {
+    if (props.initialActiveViewId) return props.initialActiveViewId;
+    return props.savedViews?.find((v) => v.is_default)?.id ?? null;
+  });
+  const activeViewCards = useMemo(() => {
+    const v = props.savedViews?.find((vv) => vv.id === activeViewId);
+    return v?.cards ?? [];
+  }, [props.savedViews, activeViewId]);
+  async function handleSwitchView(viewId: string) {
+    setActiveViewId(viewId);
+    try {
+      await fetch(`/api/projects/${props.projectId}/saved-views/switch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ viewId }),
+      });
+    } catch {
+      // non-blocking — switcher is optimistic, will resync on next page load
+    }
+  }
+  const savedViewNames = useMemo(
+    () => (props.savedViews ?? []).map((v) => v.name),
+    [props.savedViews],
+  );
+
   const activeStatusChips = useMemo(
     () =>
       props.statuses
@@ -211,6 +247,11 @@ export function MapShell(props: Props) {
             setSymbology={setSymbology}
             canEditSymbology={canEditSymbology}
             onCollapse={() => setLeftOpen(false)}
+            savedViews={(props.savedViews ?? []).map((v) => ({
+              id: v.id, name: v.name, description: v.description, role_gate: v.role_gate,
+            }))}
+            activeViewId={activeViewId}
+            onSwitchView={handleSwitchView}
           />
         </div>
 
@@ -230,7 +271,18 @@ export function MapShell(props: Props) {
             onPlace={handleMapPlace}
             symbology={symbology}
             boundaries={props.boundaries ?? null}
+            featureColors={colorizer.featureColors}
           />
+
+          {/* A0 colorizer — pick a survey response column to repaint the map */}
+          <div className="absolute left-3 top-3 z-30">
+            <ColorizerControl
+              profiles={colorizer.profiles}
+              selectedValues={colorizer.selectedNumericValues}
+              spec={colorizer.spec}
+              onChange={colorizer.setSpec}
+            />
+          </div>
 
           <CommandCapsule
             onAdd={handleStartPlace}
@@ -312,6 +364,9 @@ export function MapShell(props: Props) {
             canWriteChat={canEditPoints}
             canvass={props.canvass ?? null}
             onCollapse={() => setRightOpen(false)}
+            userRole={role}
+            savedViewNames={savedViewNames}
+            activeViewCards={activeViewCards}
           />
         </div>
       </div>
