@@ -33,7 +33,7 @@ export const TOOLBOXES: Toolbox[] = [
     slug: "mapping_clusters",
     label: "Mapping Clusters",
     icon: "🔥",
-    description: "Local statistics — where are the clusters, outliers, and hot/cold spots?",
+    description: "Local statistics — pinpoint clusters, spatial outliers, and concentration zones.",
     isV2: false,
     sortOrder: 30,
   },
