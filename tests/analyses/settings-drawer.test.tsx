@@ -20,10 +20,11 @@ describe("SettingsDrawer", () => {
         onRecompute={() => {}}
       />
     );
-    expect(screen.getByText(/Question/i)).toBeInTheDocument();
-    expect(screen.getByText(/FDR alpha/i)).toBeInTheDocument();
-    expect(screen.getByText(/Spatial weights/i)).toBeInTheDocument();
-    expect(screen.getByText(/Permutations/i)).toBeInTheDocument();
+    // Use getAllByText for labels that may also appear in the method description
+    expect(screen.getAllByText(/Question/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/FDR alpha/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Spatial weights/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Permutations/i).length).toBeGreaterThan(0);
   });
 
   it("emits onChange when the slider changes", async () => {

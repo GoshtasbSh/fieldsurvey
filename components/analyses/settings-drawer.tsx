@@ -114,14 +114,7 @@ export function SettingsDrawer(p: Props) {
               <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-[var(--shell-text-muted)] mb-1">
                 Method
               </div>
-              <button
-                type="button"
-                title={p.card.whatItDoes}
-                aria-label={p.card.whatItDoes}
-                className="text-[11px] text-[var(--shell-text-muted)] underline decoration-dotted cursor-help text-left"
-              >
-                What does this analysis do?
-              </button>
+              <p className="text-[12px] leading-snug">{p.card.whatItDoes}</p>
               {p.card.sourceInspiration && (
                 <p className="text-[11px] text-[var(--shell-text-muted)] mt-1">
                   {p.card.sourceInspiration}
