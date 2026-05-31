@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 140" role="img" aria-label="Hex mosaic showing teal-magenta diverging palette for Local Geary heterogeneity">
+  <rect width="280" height="140" fill="#FAFAFA"/>
+  <!-- Hex grid (5 rows × 9 cols), classes: teal / pale / magenta -->
+  <g stroke="#FFFFFF" stroke-width="0.8">
+    <!-- Row 1 -->
+    <polygon points="20,14 32,7 44,14 44,28 32,35 20,28" fill="#5EEAD4"/>
+    <polygon points="48,14 60,7 72,14 72,28 60,35 48,28" fill="#5EEAD4"/>
+    <polygon points="76,14 88,7 100,14 100,28 88,35 76,28" fill="#99F6E4"/>
+    <polygon points="104,14 116,7 128,14 128,28 116,35 104,28" fill="#F1F5F9"/>
+    <polygon points="132,14 144,7 156,14 156,28 144,35 132,28" fill="#F1F5F9"/>
+    <polygon points="160,14 172,7 184,14 184,28 172,35 160,28" fill="#F1F5F9"/>
+    <polygon points="188,14 200,7 212,14 212,28 200,35 188,28" fill="#FBCFE8"/>
+    <polygon points="216,14 228,7 240,14 240,28 228,35 216,28" fill="#F472B6"/>
+    <polygon points="244,14 256,7 268,14 268,28 256,35 244,28" fill="#F472B6"/>
+    <!-- Row 2 (offset) -->
+    <polygon points="34,42 46,35 58,42 58,56 46,63 34,56" fill="#5EEAD4"/>
+    <polygon points="62,42 74,35 86,42 86,56 74,63 62,56" fill="#99F6E4"/>
+    <polygon points="90,42 102,35 114,42 114,56 102,63 90,56" fill="#F1F5F9"/>
+    <polygon points="118,42 130,35 142,42 142,56 130,63 118,56" fill="#F1F5F9"/>
+    <polygon points="146,42 158,35 170,42 170,56 158,63 146,56" fill="#F1F5F9"/>
+    <polygon points="174,42 186,35 198,42 198,56 186,63 174,56" fill="#FBCFE8"/>
+    <polygon points="202,42 214,35 226,42 226,56 214,63 202,56" fill="#F472B6"/>
+    <polygon points="230,42 242,35 254,42 254,56 242,63 230,56" fill="#F472B6"/>
+    <!-- Row 3 -->
+    <polygon points="20,70 32,63 44,70 44,84 32,91 20,84" fill="#99F6E4"/>
+    <polygon points="48,70 60,63 72,70 72,84 60,91 48,84" fill="#99F6E4"/>
+    <polygon points="76,70 88,63 100,70 100,84 88,91 76,84" fill="#F1F5F9"/>
+    <polygon points="104,70 116,63 128,70 128,84 116,91 104,84" fill="#F1F5F9"/>
+    <polygon points="132,70 144,63 156,70 156,84 144,91 132,84" fill="#FBCFE8"/>
+    <polygon points="160,70 172,63 184,70 184,84 172,91 160,84" fill="#FBCFE8"/>
+    <polygon points="188,70 200,63 212,70 212,84 200,91 188,84" fill="#F472B6"/>
+    <polygon points="216,70 228,63 240,70 240,84 228,91 216,84" fill="#F472B6"/>
+    <polygon points="244,70 256,63 268,70 268,84 256,91 244,84" fill="#F472B6"/>
+    <!-- Row 4 (offset) -->
+    <polygon points="34,98 46,91 58,98 58,112 46,119 34,112" fill="#99F6E4"/>
+    <polygon points="62,98 74,91 86,98 86,112 74,119 62,112" fill="#F1F5F9"/>
+    <polygon points="90,98 102,91 114,98 114,112 102,119 90,112" fill="#F1F5F9"/>
+    <polygon points="118,98 130,91 142,98 142,112 130,119 118,112" fill="#F1F5F9"/>
+    <polygon points="146,98 158,91 170,98 170,112 158,119 146,112" fill="#FBCFE8"/>
+    <polygon points="174,98 186,91 198,98 198,112 186,119 174,112" fill="#FBCFE8"/>
+    <polygon points="202,98 214,91 226,98 226,112 214,119 202,112" fill="#FBCFE8"/>
+    <polygon points="230,98 242,91 254,98 254,112 242,119 230,112" fill="#F472B6"/>
+  </g>
+  <text x="20" y="132" font-family="ui-sans-serif, system-ui" font-size="8" fill="#52525B">Similar to neighbors</text>
+  <text x="268" y="132" font-family="ui-sans-serif, system-ui" font-size="8" fill="#52525B" text-anchor="end">Differs from neighbors</text>
+</svg>

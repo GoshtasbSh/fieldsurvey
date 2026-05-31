@@ -79,16 +79,34 @@ const LOCAL_SVGS: LocalSvg[] = [
   { cardId: "V2_segregation", filename: "V2_segregation.svg" },
 ];
 
-async function downloadOne(img: RemoteImage): Promise<void> {
-  const res = await fetch(img.url, {
-    headers: { "User-Agent": "FieldSurvey/0.1 (analysis-preview builder)" },
-  });
-  if (!res.ok) throw new Error(`Download failed for ${img.url}: HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  const dest = join(OUT_DIR, img.filename);
-  await mkdir(dirname(dest), { recursive: true });
-  await writeFile(dest, buf);
-  console.log(`✓ ${img.filename} (${(buf.length / 1024).toFixed(1)} KB)`);
+async function downloadOne(img: RemoteImage, retries = 4): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(img.url, {
+        headers: { "User-Agent": "FieldSurvey/0.1 (analysis-preview builder)" },
+      });
+      if (!res.ok) {
+        if (res.status === 429 && i < retries - 1) {
+          const delay = (i + 1) * 30000;
+          console.log(`Rate limited (HTTP 429), retrying after ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw new Error(`Download failed for ${img.url}: HTTP ${res.status}`);
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      const dest = join(OUT_DIR, img.filename);
+      await mkdir(dirname(dest), { recursive: true });
+      await writeFile(dest, buf);
+      console.log(`✓ ${img.filename} (${(buf.length / 1024).toFixed(1)} KB)`);
+      return;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      const delay = (i + 1) * 30000;
+      console.log(`Download failed, retrying after ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
 }
 
 async function copyLocalSvg(filename: string): Promise<void> {
@@ -101,7 +119,10 @@ async function copyLocalSvg(filename: string): Promise<void> {
 
 async function main() {
   await mkdir(OUT_DIR, { recursive: true });
-  for (const img of REMOTE_IMAGES) await downloadOne(img);
+  for (const img of REMOTE_IMAGES) {
+    await downloadOne(img);
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+  }
   for (const svg of LOCAL_SVGS) await copyLocalSvg(svg.filename);
 
   const credits = {

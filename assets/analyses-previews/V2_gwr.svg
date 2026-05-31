@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 140" role="img" aria-label="Coming in v2">
+  <rect width="280" height="140" fill="#F4F4F5"/>
+  <text x="140" y="74" font-family="ui-sans-serif, system-ui" font-size="14" font-weight="600" fill="#71717A" text-anchor="middle">📈 Spatial Regression</text>
+  <text x="140" y="92" font-family="ui-monospace, monospace" font-size="9" fill="#A1A1AA" text-anchor="middle">GWR / MGWR — v2</text>
+</svg>

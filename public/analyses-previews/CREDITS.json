@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-05-31T04:51:49.088Z",
+  "images": [
+    {
+      "cardId": "A0_colorizer",
+      "file": "A0_colorizer.png",
+      "sourceTitle": "Wikimedia Commons — Bplewe",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:U.S._Presidential_election_margin,_2004-2016.png",
+      "license": "CC-BY-SA-4.0",
+      "alt": "U.S. counties colored on a blue–red ramp by 2004–2016 presidential vote margin."
+    },
+    {
+      "cardId": "S1_autocorr",
+      "file": "S1_autocorr.png",
+      "sourceTitle": "Wikimedia Commons — Lgalvis74",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Moran_ScatterPlot_Columbus_Crime.PNG",
+      "license": "Public Domain",
+      "alt": "Moran's I scatterplot of crime rates by neighborhood, Columbus, OH."
+    },
+    {
+      "cardId": "S2_gi_star_q",
+      "file": "S2_gi_star_q.jpg",
+      "sourceTitle": "Wikimedia Commons — GeogSage",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:USA_Contiguous_Unemployment_Rate_2020.jpg",
+      "license": "CC-BY-4.0",
+      "alt": "Getis-Ord Gi* hot/cold spot map of U.S. county unemployment, 2020."
+    },
+    {
+      "cardId": "S3_lisa_q",
+      "file": "S3_lisa_q.jpg",
+      "sourceTitle": "Wikimedia Commons — GeogSage",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:USA_Contiguous_Poverty_2020_clusters.jpg",
+      "license": "CC-BY-SA-4.0",
+      "alt": "Anselin Local Moran cluster map of U.S. county poverty 2020."
+    },
+    {
+      "cardId": "S6_coverage_response",
+      "file": "S6_coverage_response.png",
+      "sourceTitle": "Wikimedia Commons — Bplewe",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Black_Hispanic_Bivariate_Map.png",
+      "license": "CC-BY-SA-4.0",
+      "alt": "Bivariate choropleth of U.S. counties."
+    },
+    {
+      "cardId": "S4_satscan",
+      "file": "S4_satscan.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for S4_satscan"
+    },
+    {
+      "cardId": "S5_distance_decay",
+      "file": "S5_distance_decay.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for S5_distance_decay"
+    },
+    {
+      "cardId": "S7_local_geary",
+      "file": "S7_local_geary.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for S7_local_geary"
+    },
+    {
+      "cardId": "S8_bivariate",
+      "file": "S8_bivariate.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for S8_bivariate"
+    },
+    {
+      "cardId": "V2_emerging_hot",
+      "file": "V2_emerging_hot.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for V2_emerging_hot"
+    },
+    {
+      "cardId": "V2_gwr",
+      "file": "V2_gwr.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for V2_gwr"
+    },
+    {
+      "cardId": "V2_segregation",
+      "file": "V2_segregation.svg",
+      "sourceTitle": "Custom illustration",
+      "sourceUrl": "",
+      "license": "Custom-by-us",
+      "alt": "Custom SVG preview for V2_segregation"
+    }
+  ]
+}
