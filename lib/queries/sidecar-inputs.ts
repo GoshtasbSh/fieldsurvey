@@ -1,4 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
+import { inferType } from "@/lib/colorize/auto-classify";
 
 /**
  * Server-side helpers that assemble the per-card request body for the Python
@@ -9,6 +10,115 @@ import { createServerSupabase } from "@/lib/supabase/server";
  * supabase client. Heavy aggregations are kept to small daily-bucketing
  * loops in JS; the heavy stats lives in the sidecar.
  */
+
+export type SpatialCell = { id: string; value: number; lat: number; lon: number };
+
+/**
+ * Fetch all M1-matched (field+response) records for a project question column.
+ * Returns cells with encoded numeric value. Encoding:
+ *   numeric  → as-is
+ *   boolean  → 0 / 1
+ *   likert   → ordinal rank (0-based, ascending)
+ *   categorical → sorted-distinct index (0-based)
+ *   missing  → row excluded
+ */
+export async function buildSpatialCells(
+  projectId: string,
+  questionKey: string,
+  limit = 50_000,
+): Promise<SpatialCell[]> {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await ((sb as any)
+    .from("points")
+    .select("id, lat, lon, survey_responses!matched_response_id(id, raw_data)")
+    .eq("project_id", projectId)
+    .not("matched_response_id", "is", null)
+    .limit(limit)
+  ) as { data: Array<{
+    id: string; lat: number | null; lon: number | null;
+    survey_responses: { id: string; raw_data: Record<string, unknown> | null } | null;
+  }> | null };
+
+  if (!data) return [];
+
+  // Collect raw values to infer type once
+  const rawAll: unknown[] = [];
+  for (const r of data) {
+    const v = r.survey_responses?.raw_data?.[questionKey];
+    if (v !== null && v !== undefined && v !== "") rawAll.push(v);
+  }
+  if (rawAll.length === 0) return [];
+
+  const profile = inferType(rawAll);
+  const { type, likertOrder, sampleValues } = profile;
+
+  // Build encoding map once
+  let encodeMap: Map<string, number> | null = null;
+  if (type === "likert" && likertOrder) {
+    encodeMap = new Map(likertOrder.map((v, i) => [String(v), i]));
+  } else if (type === "categorical" || type === "boolean") {
+    const sorted = [...new Set(sampleValues)].sort();
+    encodeMap = new Map(sorted.map((v, i) => [String(v), i]));
+  }
+
+  const BOOL_TRUE = new Set(["true", "yes", "1", "y"]);
+
+  const cells: SpatialCell[] = [];
+  for (const r of data) {
+    if (typeof r.lat !== "number" || typeof r.lon !== "number") continue;
+    const raw = r.survey_responses?.raw_data?.[questionKey];
+    if (raw === null || raw === undefined || raw === "") continue;
+
+    let value: number;
+    if (type === "numeric_continuous" || type === "numeric_skewed" || type === "date") {
+      value = Number(raw);
+      if (!Number.isFinite(value)) continue;
+    } else if (type === "boolean") {
+      value = BOOL_TRUE.has(String(raw).toLowerCase().trim()) ? 1 : 0;
+    } else if (encodeMap) {
+      const idx = encodeMap.get(String(raw));
+      if (idx === undefined) continue;
+      value = idx;
+    } else {
+      continue;
+    }
+
+    cells.push({ id: r.id, value, lat: r.lat, lon: r.lon });
+  }
+  return cells;
+}
+
+/** Like buildSpatialCells but encodes 1 if raw === caseValue, else 0. */
+export async function buildSpatialCellsBinary(
+  projectId: string,
+  questionKey: string,
+  caseValue: string,
+  limit = 50_000,
+): Promise<SpatialCell[]> {
+  const sb = await createServerSupabase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await ((sb as any)
+    .from("points")
+    .select("id, lat, lon, survey_responses!matched_response_id(raw_data)")
+    .eq("project_id", projectId)
+    .not("matched_response_id", "is", null)
+    .limit(limit)
+  ) as { data: Array<{
+    id: string; lat: number | null; lon: number | null;
+    survey_responses: { raw_data: Record<string, unknown> | null } | null;
+  }> | null };
+
+  if (!data) return [];
+  return data
+    .filter((r) => typeof r.lat === "number" && typeof r.lon === "number")
+    .map((r) => ({
+      id: r.id,
+      value: String(r.survey_responses?.raw_data?.[questionKey] ?? "") === caseValue ? 1 : 0,
+      lat: r.lat as number,
+      lon: r.lon as number,
+    }));
+}
 
 type CollectedRow = { collected_at: string; lat: number | null; lon: number | null };
 
