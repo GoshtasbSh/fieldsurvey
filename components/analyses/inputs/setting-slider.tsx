@@ -16,6 +16,7 @@ export function SettingSlider({ label, min, max, step, value, onChange }: Props)
         <input
           type="range" min={min} max={max} step={step} value={value}
           onChange={(e) => onChange(Number(e.target.value))}
+          onInput={(e) => onChange(Number((e.target as HTMLInputElement).value))}
           className="flex-1 accent-[var(--accent-1,#0EA5E9)]"
           aria-label={label}
         />

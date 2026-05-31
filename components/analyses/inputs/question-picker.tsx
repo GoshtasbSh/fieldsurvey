@@ -24,7 +24,7 @@ export function QuestionPicker({ label, projectId, value, globalActiveQuestion, 
             checked={value === "inherit_global"}
             onChange={() => onChange("inherit_global")}
           />
-          Inherit global active question
+          Follow global active
           {globalActiveQuestion && (
             <span className="font-mono text-[10.5px] text-[var(--shell-text-muted)]">
               ({globalActiveQuestion})
