@@ -41,14 +41,23 @@ const RULES: Array<[needle: string, status: CanonicalStatus]> = [
   ["inaccessible", "Inaccessible"],
   ["gated", "Inaccessible"],
   ["no access", "Inaccessible"],
+  ["no trespassing", "Inaccessible"], // posted signs are an access barrier
   ["locked", "Inaccessible"],
   ["fence", "Inaccessible"],
   ["dog", "Inaccessible"],
+  ["private property", "Inaccessible"],
+  ["private road", "Inaccessible"],
+  ["side road", "Inaccessible"], // surveyors marked side-road houses as not visited
+  ["didn't visit", "Inaccessible"],
+  ["did not visit", "Inaccessible"],
   // No-Answer signals must also beat Left-Info: dropping a flier when
   // nobody answered still means "no answer".
   ["no answer", "No Answer"],
   ["no ans", "No Answer"],
   ["no one home", "No Answer"],
+  ["no one ans", "No Answer"], // "No one answered"
+  ["no one", "No Answer"],
+  ["no response", "No Answer"],
   ["not home", "No Answer"],
   ["no time", "No Answer"],
   ["away", "No Answer"],
