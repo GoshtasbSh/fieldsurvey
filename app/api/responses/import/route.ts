@@ -33,6 +33,7 @@ const ImportBody = z.object({
 
 type MatcherSummary = {
   geocoded: number;
+  snapped_to_parcel: number;
   matched_now: number;
   m1_count: number;
   f1_count: number;

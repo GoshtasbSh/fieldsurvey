@@ -9,6 +9,7 @@ type Row = Record<string, string | number | boolean | null>;
 
 type MatcherResult = {
   geocoded: number;
+  snapped_to_parcel: number;
   matched_now: number;
   m1_count: number;
   f1_count: number;
@@ -243,6 +244,7 @@ export function ImportWizard({
         ...prev,
         matcher: {
           geocoded: j.geocoded ?? 0,
+          snapped_to_parcel: j.snapped_to_parcel ?? 0,
           matched_now: j.matched_now ?? 0,
           m1_count: j.m1_count ?? 0,
           f1_count: j.f1_count ?? 0,
@@ -414,7 +416,11 @@ export function ImportWizard({
           </div>
           {result.matcher && (
             <div className="text-[12px] text-[var(--shell-text-2)]">
-              {result.matcher.geocoded} geocoded this run · {result.matcher.matched_now} newly matched to field points
+              {result.matcher.geocoded} geocoded this run
+              {result.matcher.snapped_to_parcel > 0 && (
+                <> · <b className="text-[var(--shell-text)]">{result.matcher.snapped_to_parcel}</b> snapped to a parcel (50 m)</>
+              )}
+              {" "}· {result.matcher.matched_now} newly matched to field points
               <div className="mt-1 font-mono text-[11px] text-[var(--shell-text-muted)]">
                 M1 {result.matcher.m1_count} · F1 {result.matcher.f1_count} · R1 {result.matcher.r1_count}
               </div>

@@ -52,6 +52,49 @@ def _sb(path: str, method: str = "GET", body=None, params=None):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _sb_rpc(name: str, body):
+    """Call a Supabase RPC (Postgres function). Returns the response JSON.
+    Used for the parcel-snap RPC because PostgREST can't compose
+    spatial functions from query params alone."""
+    url = f"{SUPABASE_URL}/rest/v1/rpc/{name}"
+    headers = {
+        "apikey": SERVICE_ROLE,
+        "Authorization": f"Bearer {SERVICE_ROLE}",
+        "Content-Type": "application/json",
+    }
+    req = urllib.request.Request(
+        url, method="POST", headers=headers,
+        data=json.dumps(body).encode("utf-8"),
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def parcel_snap(project_id: str, lat: float, lon: float, radius_m: float = 50.0):
+    """Snap a geocoded coordinate to the nearest parcel centroid within
+    radius_m. Returns {parcel_id, centroid_lat, centroid_lon, distance_m}
+    or None when no parcel is in range (or no parcels uploaded yet).
+
+    Mirrors Keystone's STRtree-based snap (api/_processing.py:600). The
+    50 m default matches Keystone's tuned threshold for suburban-density
+    parcels."""
+    try:
+        result = _sb_rpc("nearest_parcel_within", {
+            "p_project_id": project_id,
+            "p_lat": lat,
+            "p_lon": lon,
+            "p_radius_m": radius_m,
+        })
+    except Exception:
+        return None
+    if not result:
+        return None
+    row = result[0] if isinstance(result, list) else result
+    if not row or row.get("parcel_id") is None:
+        return None
+    return row
+
+
 def census_geocode(address: str, suffix: str = ""):
     # Build the full one-line address the Census geocoder needs.
     # Most field-collected CSVs only have the street (e.g. "6116 Harvard Avenue")
@@ -138,20 +181,34 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
     total_geo = len(to_geo)
     _write_progress(import_id, "geocoding", 0, total_geo)
     geocoded = 0
+    snapped = 0
     for idx, r in enumerate(to_geo):
         addr = r.get("address_used")
         if addr:
             g = census_geocode(addr, suffix)
             if g and g.get("lat") is not None:
+                # Phase 2: snap to nearest parcel centroid within 50 m so the
+                # marker lands on the house lot, not the road centerline.
+                lat, lon = g["lat"], g["lon"]
+                source = "census"
+                parcel_id = None
+                snap = parcel_snap(project_id, lat, lon, 50.0)
+                if snap:
+                    lat = snap.get("centroid_lat", lat)
+                    lon = snap.get("centroid_lon", lon)
+                    parcel_id = snap.get("parcel_id")
+                    source = "census+parcel"
+                    snapped += 1
                 _sb(
                     "/survey_responses",
                     method="PATCH",
                     params={"id": f"eq.{r['id']}"},
                     body={
-                        "geocoded_lat": g["lat"],
-                        "geocoded_lon": g["lon"],
-                        "geocode_source": "census",
+                        "geocoded_lat": lat,
+                        "geocoded_lon": lon,
+                        "geocode_source": source,
                         "address_used": g.get("matched_address") or addr,
+                        "parcel_id": parcel_id,
                     },
                 )
                 geocoded += 1
@@ -219,6 +276,7 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
     summary = counts[0] if counts else {"m1_count": 0, "f1_count": 0, "r1_count": 0}
     return {
         "geocoded": geocoded,
+        "snapped_to_parcel": snapped,
         "matched_now": matched_now,
         **summary,
     }
