@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Upload, Loader2, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-type Step = "choose" | "upload" | "configure" | "preview" | "running" | "done";
-type Kind = "survey_responses" | "field_canvass";
+type Step = "choose" | "upload" | "configure" | "preview" | "running" | "done" | "gis_upload";
+type Kind = "survey_responses" | "field_canvass" | "gis_data";
 type Row = Record<string, string | number | boolean | null>;
 
 type MatcherResult = {
@@ -40,6 +40,8 @@ export function ImportWizard({
   defaultStatusColumn = "",
   existingResponseRows = 0,
   existingFieldCanvassPoints = 0,
+  existingParcels = 0,
+  existingBoundaries = 0,
 }: {
   projectId: string;
   defaultAddressSuffix?: string;
@@ -50,6 +52,9 @@ export function ImportWizard({
    * "Replace existing N rows" copy. */
   existingResponseRows?: number;
   existingFieldCanvassPoints?: number;
+  /** GIS data already stored. Drives the GIS chooser card. */
+  existingParcels?: number;
+  existingBoundaries?: number;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("choose");
@@ -292,9 +297,21 @@ export function ImportWizard({
     <div className="mt-8 rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)] p-6">
       {step === "choose" && (
         <KindChooser
-          onPick={(k) => { setKind(k); setStep("upload"); }}
+          onPick={(k) => { setKind(k); setStep(k === "gis_data" ? "gis_upload" : "upload"); }}
           existingResponseRows={existingResponseRows}
           existingFieldCanvassPoints={existingFieldCanvassPoints}
+          existingParcels={existingParcels}
+          existingBoundaries={existingBoundaries}
+        />
+      )}
+
+      {step === "gis_upload" && (
+        <GisUpload
+          projectId={projectId}
+          onBack={() => setStep("choose")}
+          onDone={() => router.push(`/p/${projectId}/map`)}
+          initialParcels={existingParcels}
+          initialBoundaries={existingBoundaries}
         />
       )}
 
@@ -570,27 +587,31 @@ function KindChooser({
   onPick,
   existingResponseRows,
   existingFieldCanvassPoints,
+  existingParcels,
+  existingBoundaries,
 }: {
   onPick: (k: Kind) => void;
   existingResponseRows: number;
   existingFieldCanvassPoints: number;
+  existingParcels: number;
+  existingBoundaries: number;
 }) {
   return (
     <div className="space-y-4">
       <div className="text-center">
-        <div className="font-display text-[18px] font-bold text-[var(--shell-text)]">What kind of CSV are you importing?</div>
+        <div className="font-display text-[18px] font-bold text-[var(--shell-text)]">What kind of data are you importing?</div>
         <p className="mt-1.5 text-[12px] text-[var(--shell-text-muted)]">
-          Pick the flow that matches your file. Both go through the same geocode + 50&nbsp;m parcel-snap pipeline, but they land in different tables and drive the map differently.
+          The CSV flows share the geocode + parcel-snap pipeline. GIS data feeds the snap (without parcels, points land on Census&apos;s road centerline).
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <button
           onClick={() => onPick("field_canvass")}
           className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5 text-left transition hover:border-[oklch(78%_0.155_234/0.5)] hover:bg-[var(--shell-3)]"
         >
-          <div className="font-display text-[14px] font-bold text-[var(--shell-text)]">Field canvassing log</div>
-          <div className="text-[11.5px] leading-relaxed text-[var(--shell-text-muted)]">
-            One row per door visited. Has an Address and an outcome / status column (&ldquo;completed survey&rdquo;, &ldquo;Gated&rdquo;, &ldquo;Left flier&rdquo;…). Creates field points.
+          <div className="font-display text-[13.5px] font-bold text-[var(--shell-text)]">Field canvassing log</div>
+          <div className="text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+            One row per door visited. Has an Address and an outcome / status column. Creates field points.
           </div>
           <div className="mt-1 font-mono text-[10.5px] text-[var(--shell-text-2)]">
             {existingFieldCanvassPoints === 0
@@ -602,15 +623,173 @@ function KindChooser({
           onClick={() => onPick("survey_responses")}
           className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5 text-left transition hover:border-[oklch(78%_0.155_234/0.5)] hover:bg-[var(--shell-3)]"
         >
-          <div className="font-display text-[14px] font-bold text-[var(--shell-text)]">Survey responses</div>
-          <div className="text-[11.5px] leading-relaxed text-[var(--shell-text-muted)]">
-            One row per completed survey (Qualtrics, Google Forms, etc.). Has an Address column and any number of question columns. Creates survey responses that auto-match to nearby field points.
+          <div className="font-display text-[13.5px] font-bold text-[var(--shell-text)]">Survey responses</div>
+          <div className="text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+            One row per completed survey (Qualtrics, Google Forms, etc.). Has an Address and any number of question columns. Creates survey responses that auto-match to field points.
           </div>
           <div className="mt-1 font-mono text-[10.5px] text-[var(--shell-text-2)]">
             {existingResponseRows === 0
               ? "No responses yet"
               : `${existingResponseRows} response${existingResponseRows === 1 ? "" : "s"} stored`}
           </div>
+        </button>
+        <button
+          onClick={() => onPick("gis_data")}
+          className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5 text-left transition hover:border-[oklch(78%_0.155_234/0.5)] hover:bg-[var(--shell-3)]"
+        >
+          <div className="font-display text-[13.5px] font-bold text-[var(--shell-text)]">GIS data</div>
+          <div className="text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+            Parcel polygons and project boundary as GeoJSON. Parcels make every geocoded point land on the lot centroid instead of the road. Boundary clips analysis to your study area.
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-[var(--shell-text-2)]">
+            {existingParcels === 0 ? "No parcels yet" : `${existingParcels.toLocaleString()} parcels`}
+            {" · "}
+            {existingBoundaries === 0 ? "no boundary" : `${existingBoundaries} boundar${existingBoundaries === 1 ? "y" : "ies"}`}
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GisUpload({
+  projectId,
+  onBack,
+  onDone,
+  initialParcels,
+  initialBoundaries,
+}: {
+  projectId: string;
+  onBack: () => void;
+  onDone: () => void;
+  initialParcels: number;
+  initialBoundaries: number;
+}) {
+  const [parcels, setParcels] = useState(initialParcels);
+  const [boundaries, setBoundaries] = useState(initialBoundaries);
+  const [busy, setBusy] = useState<"parcels" | "boundary" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function uploadParcels(file: File) {
+    setBusy("parcels"); setMessage(null); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(`/api/projects/${projectId}/parcels/upload`, { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      const parts: string[] = [];
+      if (j.inserted) parts.push(`${j.inserted.toLocaleString()} parcels imported`);
+      if (j.skipped) parts.push(`${j.skipped.toLocaleString()} skipped`);
+      setMessage(parts.join(" · ") || "Nothing imported.");
+      setParcels(parcels + (j.inserted ?? 0));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function uploadBoundary(file: File) {
+    setBusy("boundary"); setMessage(null); setError(null);
+    try {
+      const raw = JSON.parse(await file.text());
+      const r = await fetch(`/api/projects/${projectId}/boundaries`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name.replace(/\.(geojson|json)$/i, ""), geojson: raw }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      setMessage("Boundary uploaded.");
+      setBoundaries(boundaries + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] uppercase tracking-[0.1em] text-[var(--shell-text-muted)]">GIS data</div>
+        <button onClick={onBack} className="text-[11px] text-[oklch(78%_0.155_234)] hover:underline">
+          ← Pick a different flow
+        </button>
+      </div>
+
+      {/* Parcels */}
+      <div className="rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-display text-[14px] font-bold text-[var(--shell-text)]">Parcel polygons</div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--shell-text-muted)]">
+              GeoJSON FeatureCollection of Polygon / MultiPolygon parcels. Optional properties: <span className="font-mono">parcel_apn</span>, <span className="font-mono">address</span>, <span className="font-mono">county</span>, <span className="font-mono">external_id</span>. Centroids are computed server-side.
+              The matcher snaps geocoded points to the parcel centroid via point-in-polygon test, falling back to nearest within 150&nbsp;m.
+            </p>
+          </div>
+          <div className="rounded-md border border-[var(--shell-border)] bg-[var(--shell-base)] px-2.5 py-1 text-right font-mono text-[10.5px] text-[var(--shell-text-2)]">
+            {parcels.toLocaleString()} stored
+          </div>
+        </div>
+        <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--shell-border)] bg-[var(--shell-1)] py-4 text-[12px] text-[var(--shell-text-2)] hover:border-[oklch(78%_0.155_234/0.5)]">
+          {busy === "parcels" && <Loader2 className="h-4 w-4 animate-spin" />}
+          {busy === "parcels" ? "Uploading…" : "Drop a .geojson file or click to choose"}
+          <input
+            type="file"
+            accept=".geojson,.json,application/geo+json,application/json"
+            disabled={busy !== null}
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadParcels(f); e.currentTarget.value = ""; }}
+          />
+        </label>
+      </div>
+
+      {/* Project boundary */}
+      <div className="rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-display text-[14px] font-bold text-[var(--shell-text)]">Project boundary</div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--shell-text-muted)]">
+              GeoJSON Polygon / MultiPolygon. Drawn on the map as an outline. Used to bound the study area and (later) clip analyses to within it.
+            </p>
+          </div>
+          <div className="rounded-md border border-[var(--shell-border)] bg-[var(--shell-base)] px-2.5 py-1 text-right font-mono text-[10.5px] text-[var(--shell-text-2)]">
+            {boundaries} stored
+          </div>
+        </div>
+        <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--shell-border)] bg-[var(--shell-1)] py-4 text-[12px] text-[var(--shell-text-2)] hover:border-[oklch(78%_0.155_234/0.5)]">
+          {busy === "boundary" && <Loader2 className="h-4 w-4 animate-spin" />}
+          {busy === "boundary" ? "Uploading…" : "Drop a .geojson file or click to choose"}
+          <input
+            type="file"
+            accept=".geojson,.json,application/geo+json,application/json"
+            disabled={busy !== null}
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadBoundary(f); e.currentTarget.value = ""; }}
+          />
+        </label>
+      </div>
+
+      {message && (
+        <div className="rounded-lg border border-[oklch(76%_0.16_158/0.4)] bg-[oklch(76%_0.16_158/0.08)] px-3 py-2 text-[12px] text-[oklch(76%_0.16_158)]">
+          {message}
+        </div>
+      )}
+      {error && (
+        <div className="rounded-lg border border-[oklch(68%_0.21_25/0.4)] bg-[oklch(68%_0.21_25/0.08)] px-3 py-2 text-[12px] text-[oklch(68%_0.21_25)]">
+          {error}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={onDone}
+          className="rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)]"
+        >
+          Done — view map
         </button>
       </div>
     </div>

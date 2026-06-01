@@ -21,7 +21,12 @@ export default async function ImportPage({ params }: { params: Promise<{ project
   // How many rows are already stored for this project, per flow. Drives the
   // "Replace existing N rows" copy in the wizard and the count badge on
   // the kind-chooser screen.
-  const [{ count: existingResponseRows }, { count: existingFieldCanvassPoints }] = await Promise.all([
+  const [
+    { count: existingResponseRows },
+    { count: existingFieldCanvassPoints },
+    { count: existingParcels },
+    { count: existingBoundaries },
+  ] = await Promise.all([
     sbAny
       .from("survey_responses")
       .select("id", { count: "exact", head: true })
@@ -31,6 +36,14 @@ export default async function ImportPage({ params }: { params: Promise<{ project
       .select("id", { count: "exact", head: true })
       .eq("project_id", projectId)
       .eq("source", "csv_import"),
+    sbAny
+      .from("parcels")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId),
+    sbAny
+      .from("project_boundaries")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId),
   ]);
 
   return (
@@ -53,6 +66,8 @@ export default async function ImportPage({ params }: { params: Promise<{ project
           defaultStatusColumn={settings?.response_status_column ?? ""}
           existingResponseRows={existingResponseRows ?? 0}
           existingFieldCanvassPoints={existingFieldCanvassPoints ?? 0}
+          existingParcels={existingParcels ?? 0}
+          existingBoundaries={existingBoundaries ?? 0}
         />
       </div>
     </main>
