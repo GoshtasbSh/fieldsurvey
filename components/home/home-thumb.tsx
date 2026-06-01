@@ -24,7 +24,7 @@ type Props = {
   thumbUrl?: string | null;
 };
 
-export function HomeThumb({ lat, lon, zoom = 13, basemap = "dark", thumbUrl }: Props) {
+export function HomeThumb({ lat, lon, zoom = 13, basemap = "satellite", thumbUrl }: Props) {
   const [staticErrored, setStaticErrored] = useState(false);
 
   // Static path: render `<img>` straight from the public bucket.

@@ -406,7 +406,7 @@ export async function refreshProjectCache(
   try {
     const { data: proj } = await sbAny
       .from("projects")
-      .select("center_lat, center_lon, default_zoom, thumb_updated_at")
+      .select("center_lat, center_lon, default_zoom, thumb_updated_at, thumb_path")
       .eq("id", projectId)
       .maybeSingle() as {
         data: {
@@ -414,10 +414,15 @@ export async function refreshProjectCache(
           center_lon: number;
           default_zoom: number | null;
           thumb_updated_at: string | null;
+          thumb_path: string | null;
         } | null;
       };
     if (proj) {
+      // Force a regen if the stored path is from the pre-satellite generator
+      // (anything not ending in -v2.png), regardless of age.
+      const fromOldGenerator = !(proj.thumb_path ?? "").endsWith("-v2.png");
       const stale =
+        fromOldGenerator ||
         !proj.thumb_updated_at ||
         Date.now() - new Date(proj.thumb_updated_at).getTime() > 7 * 24 * 3600 * 1000;
       if (stale) {
@@ -425,9 +430,9 @@ export async function refreshProjectCache(
         const thumb = await generateProjectThumb({
           centerLat: proj.center_lat,
           centerLon: proj.center_lon,
-          zoom: Math.min(13, Math.max(10, proj.default_zoom ?? 11)),
+          zoom: Math.min(13, Math.max(10, proj.default_zoom ?? 12)),
         });
-        const path = `${projectId}.png`;
+        const path = `${projectId}-v2.png`;
         const { error: upErr } = await sbAny.storage
           .from("project-thumbs")
           .upload(path, thumb.png, {

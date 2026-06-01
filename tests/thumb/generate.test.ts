@@ -35,10 +35,10 @@ describe("thumb generator", () => {
     });
 
     expect(seen).toHaveLength(4);
-    // Every URL should be a Carto Dark Matter @2x tile at z=11.
+    // Every URL should be an ESRI World Imagery tile at z=11.
     for (const u of seen) {
       expect(u).toMatch(
-        /^https:\/\/[abcd]\.basemaps\.cartocdn\.com\/dark_nolabels\/11\/\d+\/\d+@2x\.png$/,
+        /^https:\/\/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Imagery\/MapServer\/tile\/11\/\d+\/\d+$/,
       );
     }
     expect(out.width).toBe(480);
@@ -50,7 +50,8 @@ describe("thumb generator", () => {
   it("wraps tile X at the antimeridian", async () => {
     const xValues: number[] = [];
     global.fetch = vi.fn(async (url: string | URL | Request) => {
-      const m = String(url).match(/\/11\/(\d+)\/(\d+)@2x/);
+      // ESRI URL order is /z/y/x — the second number is x.
+      const m = String(url).match(/\/tile\/11\/\d+\/(\d+)$/);
       if (m) xValues.push(parseInt(m[1], 10));
       const onePx = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",

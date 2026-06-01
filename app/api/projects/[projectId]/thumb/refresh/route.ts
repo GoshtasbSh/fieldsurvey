@@ -50,7 +50,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ pr
   const admin = createAdminSupabase();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const adminAny = admin as any;
-  const path = `${projectId}.png`;
+  // -v2 suffix busts any previously cached dark-tile PNGs at {projectId}.png.
+  const path = `${projectId}-v2.png`;
   const { error: uploadErr } = await adminAny.storage
     .from(BUCKET)
     .upload(path, result.png, {
