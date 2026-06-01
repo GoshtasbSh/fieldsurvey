@@ -5,6 +5,7 @@ import maplibregl, { type Map, type GeoJSONSource, type StyleSpecification } fro
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MATCH_RING } from "@/lib/match/status";
 import type { MatchStatusRow } from "@/lib/match/status";
+import { categorizeStatus, colorForStatusLabel } from "@/lib/match/status-categorize";
 
 export type StatusColorMap = Record<string, string>;
 export type LayerVisibility = {
@@ -606,47 +607,6 @@ function applyLayerVisibility(map: Map, layers: LayerVisibility) {
   setVis("ms-boundary-line", layers.boundary !== false);
 }
 
-// Stable palette for R1 status_labels that don't match any project status.
-// Keeps "Gated, inaccessible" and "completed survey" visually distinct even
-// when the project hasn't defined either as a typed status.
-const R1_PALETTE = [
-  "#a855f7", // purple (the legacy R1 fallback — first slot is the default)
-  "#ef4444", // red
-  "#f59e0b", // amber
-  "#10b981", // emerald
-  "#06b6d4", // cyan
-  "#3b82f6", // blue
-  "#ec4899", // pink
-  "#84cc16", // lime
-  "#f97316", // orange
-  "#6366f1", // indigo
-];
-
-function hashColor(label: string): string {
-  let h = 0;
-  for (let i = 0; i < label.length; i++) h = ((h << 5) - h + label.charCodeAt(i)) | 0;
-  return R1_PALETTE[Math.abs(h) % R1_PALETTE.length];
-}
-
-function r1ColorFor(
-  label: string | null | undefined,
-  responseStatuses: Array<{ label: string; color: string }> | null,
-): string {
-  const t = (label ?? "").trim();
-  if (!t) return R1_PALETTE[0];
-  if (responseStatuses && responseStatuses.length) {
-    const lo = t.toLowerCase();
-    // Substring match against project_statuses labels (case-insensitive).
-    // Lets "completed survey" and "completed_survey" both resolve to the
-    // project's "Completed" status color.
-    for (const s of responseStatuses) {
-      const sl = s.label.toLowerCase();
-      if (lo.includes(sl) || sl.includes(lo)) return s.color;
-    }
-  }
-  return hashColor(t.toLowerCase());
-}
-
 function toGeoJSON(
   features: MatchStatusRow[],
   statusColors: StatusColorMap,
@@ -660,10 +620,19 @@ function toGeoJSON(
       .map((f) => {
         const id = f.point_id ?? f.response_id;
         const override = featureColors?.[id ?? ""];
+        // R1 rows carry raw_data-derived free-form status text. Categorize
+        // it into one of Keystone's 8 canonical buckets (Completed, No
+        // Answer, Inaccessible, Not Interested, Left Info, Vacant, Follow
+        // Up, Other) + Unknown — see lib/match/status-categorize.ts —
+        // then color from the project's palette if defined, else fall
+        // back to Keystone's canonical colors.
+        const category = f.match_status === "R1"
+          ? categorizeStatus(f.status_label)
+          : null;
         const fallback = f.status_id
           ? statusColors[f.status_id]
           : f.match_status === "R1"
-            ? r1ColorFor(f.status_label, responseStatuses)
+            ? colorForStatusLabel(f.status_label, responseStatuses)
             : "#a855f7";
         return {
           type: "Feature",
@@ -673,6 +642,7 @@ function toGeoJSON(
             match_status: f.match_status,
             status_id: f.status_id ?? null,
             status_label: f.status_label ?? null,
+            status_category: category,
             color: override ?? fallback,
           },
         };
