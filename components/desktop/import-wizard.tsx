@@ -12,6 +12,10 @@ type MatcherResult = {
   geocoded: number;
   snapped_to_parcel: number;
   matched_now: number;
+  matched_tier1_exact?: number;
+  matched_tier2_fuzzy?: number;
+  matched_tier3_parcel?: number;
+  matched_tier4_proximity?: number;
   m1_count: number;
   f1_count: number;
   r1_count: number;
@@ -267,6 +271,10 @@ export function ImportWizard({
           geocoded: j.geocoded ?? 0,
           snapped_to_parcel: j.snapped_to_parcel ?? 0,
           matched_now: j.matched_now ?? 0,
+          matched_tier1_exact: (j as Partial<MatcherResult>).matched_tier1_exact,
+          matched_tier2_fuzzy: (j as Partial<MatcherResult>).matched_tier2_fuzzy,
+          matched_tier3_parcel: (j as Partial<MatcherResult>).matched_tier3_parcel,
+          matched_tier4_proximity: (j as Partial<MatcherResult>).matched_tier4_proximity,
           m1_count: j.m1_count ?? 0,
           f1_count: j.f1_count ?? 0,
           r1_count: j.r1_count ?? 0,
@@ -466,6 +474,14 @@ export function ImportWizard({
                 <> · <b className="text-[var(--shell-text)]">{result.matcher.snapped_to_parcel}</b> snapped to a parcel (50 m)</>
               )}
               {" "}· {result.matcher.matched_now} newly matched to field points
+              {(result.matcher.matched_now > 0) && (
+                <div className="mt-1 font-mono text-[11px] text-[var(--shell-text-muted)]">
+                  exact {result.matcher.matched_tier1_exact ?? 0}
+                  {" · "}fuzzy {result.matcher.matched_tier2_fuzzy ?? 0}
+                  {" · "}parcel {result.matcher.matched_tier3_parcel ?? 0}
+                  {" · "}proximity {result.matcher.matched_tier4_proximity ?? 0}
+                </div>
+              )}
               <div className="mt-1 font-mono text-[11px] text-[var(--shell-text-muted)]">
                 M1 {result.matcher.m1_count} · F1 {result.matcher.f1_count} · R1 {result.matcher.r1_count}
               </div>

@@ -1,32 +1,48 @@
 """
 FieldSurvey response matcher — Python serverless function.
 
-Algorithm (memorized in project_fieldsurvey_matching_algorithm.md):
-  1. For each survey_response row missing geocoded coords:
-       - Read the address from `address_used` (column chosen by import wizard).
-         NEVER use the response's own lat/lon — surveys are filled anywhere.
-       - Geocode via U.S. Census Bureau geocoder (free, no key).
-       - Persist geocoded_lat / geocoded_lon / address_used / geocode_source.
-  2. For each ungeoded response with geocoded coords, find a `points` row in
-     the same project within `project_settings.match_radius_m` (default 30m,
-     Keystone parity). If found:
-       - Set survey_responses.point_id, match_distance_m, matched_at.
-       - Set points.matched_response_id.
-  3. Return a summary: { matched, field_only, response_only, ambiguous }.
+Phase 3 — Keystone 3-tier matcher.
 
-  match_status is NEVER stored. It is derived by v_match_status (migration
-  002) on every read. Re-running this matcher is idempotent.
+The original implementation linked responses to points with a single
+haversine pass within 30 m. Real Keystone data showed that broke down in
+two common cases: (a) the same address geocoded slightly differently
+between the canvass log and the response, putting them 35-40 m apart;
+(b) Census returned the road centerline for one side and a snapped
+parcel centroid for the other, drifting them >30 m even though they
+were the same house. The 3-tier matcher mirrors
+KeyStone_project/api/_processing.py:_match_iaq_to_contacts (line 1025).
 
-Invoked via POST /api/py/match-responses?project_id=...
-Auth: SUPABASE_SERVICE_ROLE_KEY in env. Caller MUST be project owner/admin
-(checked at the Next.js shim that calls into this function).
+  Tier 1 — exact normalized address ⇄ exact normalized address.
+  Tier 2 — same house number + difflib street similarity ≥ 0.70.
+  Tier 3 — same parcel_id (both sides snapped to the same parcel).
+  Tier 4 — haversine ≤ project_settings.match_radius_m fallback.
+
+Bipartite: each point matches at most one response. Responses pass
+through tiers in order; later tiers only see what earlier tiers couldn't
+match. Per-tier counts surface in the wizard's done state.
+
+Invoked via POST /api/py/match_responses?project_id=...
+  &address_suffix=...  (optional, overrides project_settings)
+  &import_id=...       (optional, enables progress writes)
+  &kind=...            ('survey_responses' default, or 'field_canvass'
+                       to ALSO geocode points written by /api/points/import)
+
+Auth: SUPABASE_SERVICE_ROLE_KEY in env. Caller MUST present the matching
+X-Internal-Secret header — the /api/match and /api/responses/import
+shims set this; direct calls without the header are rejected.
+
+match_status is NEVER stored. It is derived by v_match_status (migration
+002) on every read. Re-running this matcher is idempotent — every step
+filters on null/unmatched rows.
 """
 from http.server import BaseHTTPRequestHandler
 import json
 import math
 import os
+import re
 import urllib.parse
 import urllib.request
+from difflib import SequenceMatcher
 
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -134,6 +150,67 @@ def haversine_m(lat1, lon1, lat2, lon2):
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return 2 * R * math.asin(math.sqrt(a))
+
+
+# Phase 3 — Keystone address parser/normalizer.
+# Mirrors KeyStone_project/api/_processing.py _parse_addr_parts and the
+# normalization passes used inside _match_iaq_to_contacts.
+
+_STREET_SUFFIXES = {
+    "st", "street", "ave", "avenue", "rd", "road", "dr", "drive", "ln",
+    "lane", "blvd", "boulevard", "hwy", "highway", "ct", "court", "pl",
+    "place", "ter", "terrace", "way", "trl", "trail", "pkwy", "parkway",
+    "cir", "circle", "sq", "square", "pt", "point", "loop",
+    # Cardinal directions live in street_core and don't help dedup
+    "n", "s", "e", "w", "ne", "nw", "se", "sw", "north", "south", "east", "west",
+}
+
+_PUNCT_RE = re.compile(r"[.,;:'\"()\[\]/]")
+_UNIT_RE = re.compile(r"\b(apt|apartment|unit|suite|ste|#|lot)\s*\S+\b")
+_WS_RE = re.compile(r"\s+")
+_HOUSE_NUM_RE = re.compile(r"^\s*(\d+\S*)\s+(.+)$")
+
+
+def _normalize_address(addr: str) -> str:
+    """Lowercase, strip punctuation/unit suffix/street suffix, collapse
+    whitespace. Two addresses that resolve to the same physical lot
+    should produce identical strings out of this function."""
+    if not addr:
+        return ""
+    s = addr.strip().lower()
+    s = _PUNCT_RE.sub(" ", s)
+    s = _UNIT_RE.sub(" ", s)
+    s = _WS_RE.sub(" ", s).strip()
+    parts = [p for p in s.split(" ") if p and p not in _STREET_SUFFIXES]
+    return " ".join(parts)
+
+
+def _parse_addr_parts(addr: str):
+    """Return (house_num, street_core). house_num is "" if not found.
+    street_core is the normalized form (suitable for fuzzy comparison)."""
+    if not addr:
+        return ("", "")
+    m = _HOUSE_NUM_RE.match(addr.strip())
+    if not m:
+        return ("", _normalize_address(addr))
+    house = m.group(1)
+    street_core = _normalize_address(m.group(2))
+    return (house, street_core)
+
+
+def _fuzzy_ratio(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+def _link_response_to_point(response_id: str, point_id: str, distance_m):
+    body = {"point_id": point_id, "matched_at": "now()"}
+    if distance_m is not None:
+        body["match_distance_m"] = distance_m
+    _sb("/survey_responses", method="PATCH",
+        params={"id": f"eq.{response_id}"}, body=body)
+    _sb("/points", method="PATCH",
+        params={"id": f"eq.{point_id}"},
+        body={"matched_response_id": response_id})
 
 
 def _write_progress(import_id: str, step: str, done: int, total: int):
@@ -276,7 +353,7 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
         if total_geo > 0 and ((idx + 1) % 10 == 0 or idx + 1 == total_geo):
             _write_progress(import_id, "geocoding", idx + 1, total_geo)
 
-    # 2. Match unmatched responses to points within radius
+    # Phase 3 — 3-tier bipartite matcher.
     _write_progress(import_id, "matching", 0, 0)
     unmatched = _sb(
         "/survey_responses",
@@ -284,48 +361,132 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
             "project_id": f"eq.{project_id}",
             "point_id": "is.null",
             "geocoded_lat": "not.is.null",
-            "select": "id,geocoded_lat,geocoded_lon",
+            "select": "id,geocoded_lat,geocoded_lon,address_used,parcel_id",
         },
     )
-    # Fetch ALL points for the project (small projects only; paginate for big ones)
     points = _sb(
         "/points",
         params={
             "project_id": f"eq.{project_id}",
             "matched_response_id": "is.null",
-            "select": "id,lat,lon",
+            "lat": "not.is.null",
+            "select": "id,lat,lon,address,parcel_id",
             "limit": "10000",
         },
     )
 
     total_match = len(unmatched)
     _write_progress(import_id, "matching", 0, total_match)
-    matched_now = 0
-    for idx, r in enumerate(unmatched):
-        best_id, best_d = None, None
+    used = set()  # point ids already consumed (bipartite invariant)
+    matched_by_tier = {1: 0, 2: 0, 3: 0, 4: 0}
+    progress_done = 0
+
+    def _commit(response, point, tier):
+        d = None
+        if point.get("lat") is not None and point.get("lon") is not None:
+            d = haversine_m(
+                response["geocoded_lat"], response["geocoded_lon"],
+                point["lat"], point["lon"],
+            )
+        _link_response_to_point(response["id"], point["id"], d)
+        used.add(point["id"])
+        matched_by_tier[tier] += 1
+
+    # ── Tier 1 — exact normalized address ────────────────────────────────
+    addr_to_points = {}
+    for p in points:
+        key = _normalize_address(p.get("address") or "")
+        if key:
+            addr_to_points.setdefault(key, []).append(p)
+    remaining = []
+    for r in unmatched:
+        key = _normalize_address(r.get("address_used") or "")
+        chosen = None
+        if key:
+            for p in addr_to_points.get(key, []):
+                if p["id"] not in used:
+                    chosen = p
+                    break
+        if chosen:
+            _commit(r, chosen, 1)
+        else:
+            remaining.append(r)
+        progress_done += 1
+        if total_match > 0 and (progress_done % 10 == 0 or progress_done == total_match):
+            _write_progress(import_id, "matching", progress_done, total_match * 4)
+
+    # ── Tier 2 — same house number + fuzzy street ≥ 0.70 ─────────────────
+    house_to_points = {}
+    for p in points:
+        if p["id"] in used:
+            continue
+        h, street = _parse_addr_parts(p.get("address") or "")
+        if h:
+            house_to_points.setdefault(h, []).append((p, street))
+    tier2_remaining = []
+    for r in remaining:
+        h, street_r = _parse_addr_parts(r.get("address_used") or "")
+        chosen = None
+        chosen_score = 0.0
+        if h:
+            for (p, street_p) in house_to_points.get(h, []):
+                if p["id"] in used:
+                    continue
+                score = _fuzzy_ratio(street_r, street_p)
+                if score >= 0.70 and score > chosen_score:
+                    chosen = p
+                    chosen_score = score
+        if chosen:
+            _commit(r, chosen, 2)
+        else:
+            tier2_remaining.append(r)
+        progress_done += 1
+        if total_match > 0 and (progress_done % 10 == 0 or progress_done == total_match * 2):
+            _write_progress(import_id, "matching", progress_done, total_match * 4)
+
+    # ── Tier 3 — same parcel_id (both sides snapped to the same parcel) ──
+    parcel_to_points = {}
+    for p in points:
+        if p["id"] in used:
+            continue
+        if p.get("parcel_id"):
+            parcel_to_points.setdefault(p["parcel_id"], []).append(p)
+    tier3_remaining = []
+    for r in tier2_remaining:
+        chosen = None
+        rpid = r.get("parcel_id")
+        if rpid:
+            for p in parcel_to_points.get(rpid, []):
+                if p["id"] not in used:
+                    chosen = p
+                    break
+        if chosen:
+            _commit(r, chosen, 3)
+        else:
+            tier3_remaining.append(r)
+        progress_done += 1
+        if total_match > 0 and (progress_done % 10 == 0 or progress_done == total_match * 3):
+            _write_progress(import_id, "matching", progress_done, total_match * 4)
+
+    # ── Tier 4 — haversine ≤ project radius fallback ─────────────────────
+    for r in tier3_remaining:
         rlat, rlon = r["geocoded_lat"], r["geocoded_lon"]
+        best, best_d = None, None
         for p in points:
+            if p["id"] in used:
+                continue
+            if p.get("lat") is None or p.get("lon") is None:
+                continue
             d = haversine_m(rlat, rlon, p["lat"], p["lon"])
             if d <= radius_m and (best_d is None or d < best_d):
-                best_id, best_d = p["id"], d
-        if best_id:
-            _sb(
-                "/survey_responses",
-                method="PATCH",
-                params={"id": f"eq.{r['id']}"},
-                body={"point_id": best_id, "match_distance_m": best_d, "matched_at": "now()"},
-            )
-            _sb(
-                "/points",
-                method="PATCH",
-                params={"id": f"eq.{best_id}"},
-                body={"matched_response_id": r["id"]},
-            )
-            matched_now += 1
-            # take that point out of the candidate pool
-            points = [p for p in points if p["id"] != best_id]
-        if total_match > 0 and ((idx + 1) % 10 == 0 or idx + 1 == total_match):
-            _write_progress(import_id, "matching", idx + 1, total_match)
+                best, best_d = p, d
+        if best:
+            _commit(r, best, 4)
+        progress_done += 1
+        if total_match > 0 and (progress_done % 10 == 0 or progress_done == total_match * 4):
+            _write_progress(import_id, "matching", progress_done, total_match * 4)
+
+    matched_now = sum(matched_by_tier.values())
 
     # 3. Re-pull counts from the view for the summary
     counts = _sb(
@@ -342,6 +503,11 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
         "responses_snapped": snapped,
         "points_geocoded": points_geocoded,
         "points_snapped": points_snapped,
+        # Phase 3 per-tier match counts.
+        "matched_tier1_exact": matched_by_tier[1],
+        "matched_tier2_fuzzy": matched_by_tier[2],
+        "matched_tier3_parcel": matched_by_tier[3],
+        "matched_tier4_proximity": matched_by_tier[4],
         **summary,
     }
 
