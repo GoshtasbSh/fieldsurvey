@@ -86,14 +86,35 @@ def _sb_rpc(name: str, body):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def parcel_snap(project_id: str, lat: float, lon: float, radius_m: float = 50.0):
-    """Snap a geocoded coordinate to the nearest parcel centroid within
-    radius_m. Returns {parcel_id, centroid_lat, centroid_lon, distance_m}
-    or None when no parcel is in range (or no parcels uploaded yet).
+def parcel_snap(project_id: str, lat: float, lon: float, radius_m: float = 150.0):
+    """Snap a geocoded coordinate to a parcel centroid with two-stage logic:
 
-    Mirrors Keystone's STRtree-based snap (api/_processing.py:600). The
-    50 m default matches Keystone's tuned threshold for suburban-density
-    parcels."""
+      1. Point-in-polygon — if the coord is INSIDE any parcel polygon
+         for the project, that's the correct lot regardless of distance.
+         Catches the common Census-puts-it-on-the-road case where the
+         road is inside a flag-lot parcel.
+
+      2. Nearest within radius_m (default 150 m, widened from Keystone's
+         50 m because rural parcels in mixed-density datasets can sit
+         100+ m from the road Census returned).
+
+    Returns {parcel_id, centroid_lat, centroid_lon, distance_m} or None
+    when no parcel matches (or no parcels are uploaded yet)."""
+    # Stage 1: definitive containment
+    try:
+        contained = _sb_rpc("parcel_containing", {
+            "p_project_id": project_id,
+            "p_lat": lat,
+            "p_lon": lon,
+        })
+    except Exception:
+        contained = None
+    if contained:
+        row = contained[0] if isinstance(contained, list) else contained
+        if row and row.get("parcel_id") is not None:
+            return row
+
+    # Stage 2: nearest within radius
     try:
         result = _sb_rpc("nearest_parcel_within", {
             "p_project_id": project_id,
@@ -261,7 +282,7 @@ def _geocode_points(project_id: str, suffix: str, import_id: str):
                 lat, lon = g["lat"], g["lon"]
                 source = "census"
                 parcel_id = None
-                snap = parcel_snap(project_id, lat, lon, 50.0)
+                snap = parcel_snap(project_id, lat, lon)
                 if snap:
                     lat = snap.get("centroid_lat", lat)
                     lon = snap.get("centroid_lon", lon)
@@ -328,7 +349,7 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
                 lat, lon = g["lat"], g["lon"]
                 source = "census"
                 parcel_id = None
-                snap = parcel_snap(project_id, lat, lon, 50.0)
+                snap = parcel_snap(project_id, lat, lon)
                 if snap:
                     lat = snap.get("centroid_lat", lat)
                     lon = snap.get("centroid_lon", lon)
