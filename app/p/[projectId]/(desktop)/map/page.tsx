@@ -154,7 +154,13 @@ export default async function DesktopMapPage({ params }: { params: Promise<{ pro
   const pulse = preferFresh<PulseBlobPayload>(cacheBlobs.pulse_blob);
   const analyze = preferFresh<AnalyzeBlobPayload>(cacheBlobs.analyze_blob);
 
-  const rawPointsTotal = (matchCounts.total_with_status ?? 0) + (matchCounts.r1_count ?? 0);
+  // POINTS card = field points only (M1 matched + F1 field-only). The
+  // previous expression `total_with_status + r1_count` double-counted: the
+  // view's total_with_status already includes M1 + F1 + R1, so adding r1
+  // again produced 2*R1 + M1 + F1 (= 613 for the user with 1 F1 + 306 R1).
+  // The Match Status card separately shows R1, so we don't want it folded
+  // into POINTS.
+  const rawPointsTotal = (matchCounts.m1_count ?? 0) + (matchCounts.f1_count ?? 0);
   const today = new Date().toISOString().slice(0, 10);
   const rawTodayDelta = daily.find((d) => d.day === today)?.total ?? 0;
 

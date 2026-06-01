@@ -17,6 +17,7 @@ import { DesktopAddModal } from "@/components/desktop/add-modal";
 import { CapBanner } from "@/components/desktop/cap-banner";
 import { registerSyncTriggers } from "@/lib/offline/sync";
 import type { MatchStatusCounts, MatchStatusRow } from "@/lib/match/status";
+import { categorizeStatus } from "@/lib/match/status-categorize";
 import type { StatusColorMap, MapHandle, BasemapKey } from "@/components/map/maplibre-map";
 import type { ChatMessage } from "@/lib/queries/chat";
 import type { CapStatus } from "@/lib/queries/caps";
@@ -159,6 +160,17 @@ export function MapShell(props: Props) {
     return null;
   }, [left.dateRange]);
 
+  // label → status_id lookup so R1 features (which only carry a free-form
+  // status_label, no status_id) can be filtered by the same eye-toggle as
+  // field points. props.statuses already includes the synthetic canonical
+  // buckets ("Left Info", "Vacant", "Unknown") that getStatusBreakdown
+  // appends when the project hasn't typed them explicitly.
+  const statusIdByLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of props.statuses) m.set(s.label.toLowerCase(), s.id);
+    return m;
+  }, [props.statuses]);
+
   const filtered = useMemo(() => {
     const visibleStatus =
       left.visibleStatusIds.size === 0
@@ -166,12 +178,20 @@ export function MapShell(props: Props) {
         : left.visibleStatusIds;
     return props.features.filter((f) => {
       if (left.activeMatch && f.match_status !== left.activeMatch) return false;
-      if (f.status_id && !visibleStatus.has(f.status_id)) return false;
-      if (f.status_id && left.activeStatusIds.size > 0 && !left.activeStatusIds.has(f.status_id)) return false;
+      // Resolve effective status_id: field points carry it directly; R1
+      // responses categorize their free-form status_label → canonical label
+      // → id via statusIdByLabel.
+      let effectiveStatusId = f.status_id;
+      if (!effectiveStatusId && f.match_status === "R1") {
+        const canonical = categorizeStatus(f.status_label);
+        effectiveStatusId = statusIdByLabel.get(canonical.toLowerCase()) ?? null;
+      }
+      if (effectiveStatusId && !visibleStatus.has(effectiveStatusId)) return false;
+      if (effectiveStatusId && left.activeStatusIds.size > 0 && !left.activeStatusIds.has(effectiveStatusId)) return false;
       if (dateThreshold && (!f.collected_at || f.collected_at < dateThreshold)) return false;
       return true;
     });
-  }, [props.features, left.activeMatch, left.activeStatusIds, left.visibleStatusIds, props.statuses, dateThreshold]);
+  }, [props.features, left.activeMatch, left.activeStatusIds, left.visibleStatusIds, props.statuses, dateThreshold, statusIdByLabel]);
 
   // A0 question colorizer — repaints the map by any survey response column.
   const colorizer = useColorizer(props.projectId, filtered);
