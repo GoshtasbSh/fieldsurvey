@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Upload, Loader2, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-type Step = "upload" | "configure" | "preview" | "running" | "done";
+type Step = "choose" | "upload" | "configure" | "preview" | "running" | "done";
+type Kind = "survey_responses" | "field_canvass";
 type Row = Record<string, string | number | boolean | null>;
 
 type MatcherResult = {
@@ -33,19 +34,24 @@ export function ImportWizard({
   defaultAddressColumn = "",
   defaultExternalIdColumn = "",
   defaultStatusColumn = "",
-  existingBySource = {},
+  existingResponseRows = 0,
+  existingFieldCanvassPoints = 0,
 }: {
   projectId: string;
   defaultAddressSuffix?: string;
   defaultAddressColumn?: string;
   defaultExternalIdColumn?: string;
   defaultStatusColumn?: string;
-  /** Existing row counts per source ("qualtrics_csv" → 317). Drives the
-   * "Replace existing N rows" copy in the wizard. */
-  existingBySource?: Record<string, number>;
+  /** Existing rows already stored for each flow. Drives the
+   * "Replace existing N rows" copy. */
+  existingResponseRows?: number;
+  existingFieldCanvassPoints?: number;
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("upload");
+  const [step, setStep] = useState<Step>("choose");
+  // Which CSV flow the user picked on the chooser screen. Drives endpoint
+  // URL, required-field validation, and copy throughout the wizard.
+  const [kind, setKind] = useState<Kind>("survey_responses");
   const [filename, setFilename] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
@@ -55,15 +61,14 @@ export function ImportWizard({
   // Project-level suffix. Pre-filled with the project's last-used value. The
   // user sees it and only edits if it's wrong — no rewriting required.
   const [addressSuffix, setAddressSuffix] = useState<string>(defaultAddressSuffix);
-  // Replace mode: wipe existing rows of the same source before inserting.
-  // Default true — re-importing an updated canvassing log should replace,
-  // not coexist. Content-hash dedup alone can't notice deleted/edited rows.
+  // Replace mode: wipe existing rows for the chosen kind before inserting.
+  // Default true — re-importing an updated canvass log or survey CSV should
+  // replace, not coexist. Content-hash dedup alone can't notice deleted/
+  // edited rows.
   const [replaceExisting, setReplaceExisting] = useState(true);
-  // Source kind for the import. Today only qualtrics_csv is wired; the
-  // server defaults to this too. Reserved for the future dual-upload
-  // ("field canvass" CSV vs "survey response" CSV) split.
-  const source = "qualtrics_csv";
-  const existingCount = existingBySource[source] ?? 0;
+  const existingCount = kind === "field_canvass" ? existingFieldCanvassPoints : existingResponseRows;
+  const endpoint = kind === "field_canvass" ? "/api/points/import" : "/api/responses/import";
+  const kindLabel = kind === "field_canvass" ? "canvass point" : "response";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rerunning, setRerunning] = useState(false);
@@ -135,12 +140,16 @@ export function ImportWizard({
 
   async function onCommit() {
     if (!addressColumn) { setError("Pick the address column."); return; }
+    if (kind === "field_canvass" && !statusColumn) {
+      setError("Field-canvass imports need a status column so every house gets a status_id. Pick the column that records the canvassing outcome.");
+      return;
+    }
     const suffix = addressSuffix.trim();
     if (!suffix) { setError("Confirm the city, state, ZIP to append (or edit if the suggestion is wrong)."); return; }
     // Confirm before destructive replace.
     if (replaceExisting && existingCount > 0) {
       const ok = window.confirm(
-        `This will delete the ${existingCount} existing ${source.replace("_", " ")} row${existingCount === 1 ? "" : "s"} stored for this project, then import the ${rows.length} rows from this CSV.\n\nContinue?`,
+        `This will delete the ${existingCount} existing ${kindLabel}${existingCount === 1 ? "" : "s"} stored for this project, then import the ${rows.length} from this CSV.\n\nContinue?`,
       );
       if (!ok) return;
     }
@@ -154,19 +163,31 @@ export function ImportWizard({
       // progress, so the bar can update during Census calls.
       pollLatestImportUntilStarted();
 
-      const r = await fetch("/api/responses/import", {
+      const payload = kind === "field_canvass"
+        ? {
+            project_id: projectId,
+            filename,
+            address_column: addressColumn,
+            status_column: statusColumn,
+            external_id_column: externalIdColumn || null,
+            geocode_address_suffix: suffix,
+            replace_existing: replaceExisting,
+            rows,
+          }
+        : {
+            project_id: projectId,
+            filename,
+            address_column: addressColumn,
+            external_id_column: externalIdColumn || null,
+            response_status_column: statusColumn || null,
+            geocode_address_suffix: suffix,
+            replace_existing: replaceExisting,
+            rows,
+          };
+      const r = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          project_id: projectId,
-          filename,
-          address_column: addressColumn,
-          external_id_column: externalIdColumn || null,
-          response_status_column: statusColumn || null,
-          geocode_address_suffix: suffix,
-          replace_existing: replaceExisting,
-          rows,
-        }),
+        body: JSON.stringify(payload),
       });
       const j = (await r.json()) as {
         import_id?: string;
@@ -261,12 +282,32 @@ export function ImportWizard({
 
   return (
     <div className="mt-8 rounded-2xl border border-[var(--shell-border)] bg-[var(--shell-1)] p-6">
-      {step === "upload" && (
-        <DropZone
-          onFile={onFile}
-          accept=".csv,text/csv"
-          label="Drop a Qualtrics, Google Forms, or canvassing-log CSV — or click to choose"
+      {step === "choose" && (
+        <KindChooser
+          onPick={(k) => { setKind(k); setStep("upload"); }}
+          existingResponseRows={existingResponseRows}
+          existingFieldCanvassPoints={existingFieldCanvassPoints}
         />
+      )}
+
+      {step === "upload" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[0.1em] text-[var(--shell-text-muted)]">
+              {kind === "field_canvass" ? "Field canvassing log" : "Survey responses"}
+            </div>
+            <button onClick={() => setStep("choose")} className="text-[11px] text-[oklch(78%_0.155_234)] hover:underline">
+              ← Pick a different flow
+            </button>
+          </div>
+          <DropZone
+            onFile={onFile}
+            accept=".csv,text/csv"
+            label={kind === "field_canvass"
+              ? "Drop the canvassing-log CSV (one row per door visited) — or click to choose"
+              : "Drop a Qualtrics, Google Forms, or other survey-response CSV — or click to choose"}
+          />
+        </div>
       )}
 
       {(step === "configure" || step === "preview") && (
@@ -315,7 +356,11 @@ export function ImportWizard({
 
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">
-              Which column is the canvassing status / outcome? <span className="text-[var(--shell-text-muted)] normal-case font-normal tracking-normal">(optional, but recommended)</span>
+              Which column is the canvassing status / outcome? {kind === "field_canvass" ? (
+                <span className="text-[oklch(68%_0.21_25)]">required</span>
+              ) : (
+                <span className="text-[var(--shell-text-muted)] normal-case font-normal tracking-normal">(optional, but recommended)</span>
+              )}
             </label>
             <select
               value={statusColumn}
@@ -361,9 +406,9 @@ export function ImportWizard({
                 </div>
                 <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
                   {existingCount > 0 ? (
-                    <>This project already has <b className="text-[var(--shell-text-2)]">{existingCount}</b> {source.replace("_", " ")} row{existingCount === 1 ? "" : "s"}. With this on, we delete them before importing the {rows.length} from this CSV — so edits / deletions in the new file actually take effect. Uncheck only if you want to merge into the previous imports.</>
+                    <>This project already has <b className="text-[var(--shell-text-2)]">{existingCount}</b> {kindLabel}{existingCount === 1 ? "" : "s"}. With this on, we delete them before importing the {rows.length} from this CSV — so edits / deletions in the new file actually take effect. Uncheck only if you want to merge into the previous imports.</>
                   ) : (
-                    <>No previous rows yet. This toggle takes effect on future imports — keep it on if you want each new CSV to fully replace the prior one.</>
+                    <>No previous {kindLabel}s yet. This toggle takes effect on future imports — keep it on if you want each new CSV to fully replace the prior one.</>
                   )}
                 </div>
               </div>
@@ -383,11 +428,11 @@ export function ImportWizard({
             </button>
             <button
               onClick={onCommit}
-              disabled={busy || !addressColumn || !addressSuffix.trim()}
+              disabled={busy || !addressColumn || !addressSuffix.trim() || (kind === "field_canvass" && !statusColumn)}
               className="ml-auto inline-flex items-center gap-2 rounded-lg bg-[oklch(78%_0.155_234)] px-4 py-2 font-display text-[12px] font-bold text-[var(--shell-base)] shadow-[0_4px_14px_oklch(78%_0.155_234/0.4)] disabled:opacity-50 transition"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              Commit {rows.length} rows → run matching
+              Commit {rows.length} rows → {kind === "field_canvass" ? "geocode + snap" : "run matching"}
             </button>
           </div>
         </div>
@@ -503,6 +548,57 @@ function labelForStep(step: string): string {
     case "done":      return "Finishing…";
     default:          return "Preparing…";
   }
+}
+
+function KindChooser({
+  onPick,
+  existingResponseRows,
+  existingFieldCanvassPoints,
+}: {
+  onPick: (k: Kind) => void;
+  existingResponseRows: number;
+  existingFieldCanvassPoints: number;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="text-center">
+        <div className="font-display text-[18px] font-bold text-[var(--shell-text)]">What kind of CSV are you importing?</div>
+        <p className="mt-1.5 text-[12px] text-[var(--shell-text-muted)]">
+          Pick the flow that matches your file. Both go through the same geocode + 50&nbsp;m parcel-snap pipeline, but they land in different tables and drive the map differently.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <button
+          onClick={() => onPick("field_canvass")}
+          className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5 text-left transition hover:border-[oklch(78%_0.155_234/0.5)] hover:bg-[var(--shell-3)]"
+        >
+          <div className="font-display text-[14px] font-bold text-[var(--shell-text)]">Field canvassing log</div>
+          <div className="text-[11.5px] leading-relaxed text-[var(--shell-text-muted)]">
+            One row per door visited. Has an Address and an outcome / status column (&ldquo;completed survey&rdquo;, &ldquo;Gated&rdquo;, &ldquo;Left flier&rdquo;…). Creates field points.
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-[var(--shell-text-2)]">
+            {existingFieldCanvassPoints === 0
+              ? "No canvass points yet"
+              : `${existingFieldCanvassPoints} canvass point${existingFieldCanvassPoints === 1 ? "" : "s"} stored`}
+          </div>
+        </button>
+        <button
+          onClick={() => onPick("survey_responses")}
+          className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--shell-border)] bg-[var(--shell-2)] p-5 text-left transition hover:border-[oklch(78%_0.155_234/0.5)] hover:bg-[var(--shell-3)]"
+        >
+          <div className="font-display text-[14px] font-bold text-[var(--shell-text)]">Survey responses</div>
+          <div className="text-[11.5px] leading-relaxed text-[var(--shell-text-muted)]">
+            One row per completed survey (Qualtrics, Google Forms, etc.). Has an Address column and any number of question columns. Creates survey responses that auto-match to nearby field points.
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-[var(--shell-text-2)]">
+            {existingResponseRows === 0
+              ? "No responses yet"
+              : `${existingResponseRows} response${existingResponseRows === 1 ? "" : "s"} stored`}
+          </div>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function DropZone({ onFile, accept, label }: { onFile: (f: File) => void; accept: string; label: string }) {

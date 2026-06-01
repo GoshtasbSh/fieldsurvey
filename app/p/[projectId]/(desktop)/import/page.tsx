@@ -18,17 +18,20 @@ export default async function ImportPage({ params }: { params: Promise<{ project
     .eq("project_id", projectId)
     .maybeSingle();
 
-  // How many rows are already stored for this project, broken down by source.
-  // The wizard shows the count for the picked source so the user knows what
-  // "Replace existing" is about to wipe.
-  const { data: existingBreakdown } = await sbAny
-    .from("survey_responses")
-    .select("source")
-    .eq("project_id", projectId) as { data: Array<{ source: string }> | null };
-  const existingBySource: Record<string, number> = {};
-  for (const row of existingBreakdown ?? []) {
-    existingBySource[row.source] = (existingBySource[row.source] ?? 0) + 1;
-  }
+  // How many rows are already stored for this project, per flow. Drives the
+  // "Replace existing N rows" copy in the wizard and the count badge on
+  // the kind-chooser screen.
+  const [{ count: existingResponseRows }, { count: existingFieldCanvassPoints }] = await Promise.all([
+    sbAny
+      .from("survey_responses")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId),
+    sbAny
+      .from("points")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId)
+      .eq("source", "csv_import"),
+  ]);
 
   return (
     // The desktop route group wraps every page in `h-screen overflow-hidden`
@@ -38,9 +41,9 @@ export default async function ImportPage({ params }: { params: Promise<{ project
     <main className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl px-6 py-10">
         <a href={`/p/${projectId}/map`} className="text-[12px] text-[oklch(58%_0.014_250)] hover:text-[oklch(78%_0.155_234)]">← Back to map</a>
-        <h1 className="mt-3 font-display text-2xl font-extrabold">Import survey responses</h1>
+        <h1 className="mt-3 font-display text-2xl font-extrabold">Import CSV</h1>
         <p className="mt-1 text-sm text-[oklch(58%_0.014_250)]">
-          Drop a Qualtrics or Google Forms CSV. We&apos;ll ask you which column holds the respondent&apos;s home address, then re-geocode every row server-side via the U.S. Census geocoder — never trusting the response&apos;s own lat/lon.
+          Pick the kind of CSV — canvassing log or survey responses — and we&apos;ll re-geocode every row via the U.S. Census, snap to the nearest parcel within 50&nbsp;m, then match responses to field points.
         </p>
         <ImportWizard
           projectId={projectId}
@@ -48,7 +51,8 @@ export default async function ImportPage({ params }: { params: Promise<{ project
           defaultAddressColumn={settings?.response_address_column ?? ""}
           defaultExternalIdColumn={settings?.external_id_column ?? ""}
           defaultStatusColumn={settings?.response_status_column ?? ""}
-          existingBySource={existingBySource}
+          existingResponseRows={existingResponseRows ?? 0}
+          existingFieldCanvassPoints={existingFieldCanvassPoints ?? 0}
         />
       </div>
     </main>

@@ -159,7 +159,58 @@ def _write_progress(import_id: str, step: str, done: int, total: int):
         pass
 
 
-def run_match(project_id: str, address_suffix_override: str = "", import_id: str = ""):
+def _geocode_points(project_id: str, suffix: str, import_id: str):
+    """Phase 4: geocode CSV-imported points the same way we geocode survey
+    responses — Census one-line + 50 m parcel snap. Mobile-collected points
+    already have GPS coords and aren't touched."""
+    to_geo = _sb(
+        "/points",
+        params={
+            "project_id": f"eq.{project_id}",
+            "source": "eq.csv_import",
+            "lat": "is.null",
+            "select": "id,address",
+        },
+    )
+    total = len(to_geo)
+    _write_progress(import_id, "geocoding", 0, total)
+    geocoded = 0
+    snapped = 0
+    for idx, p in enumerate(to_geo):
+        addr = p.get("address")
+        if addr:
+            g = census_geocode(addr, suffix)
+            if g and g.get("lat") is not None:
+                lat, lon = g["lat"], g["lon"]
+                source = "census"
+                parcel_id = None
+                snap = parcel_snap(project_id, lat, lon, 50.0)
+                if snap:
+                    lat = snap.get("centroid_lat", lat)
+                    lon = snap.get("centroid_lon", lon)
+                    parcel_id = snap.get("parcel_id")
+                    source = "census+parcel"
+                    snapped += 1
+                _sb(
+                    "/points",
+                    method="PATCH",
+                    params={"id": f"eq.{p['id']}"},
+                    body={
+                        "lat": lat,
+                        "lon": lon,
+                        "geocoded_at": "now()",
+                        "geocode_source": source,
+                        "address": g.get("matched_address") or addr,
+                        "parcel_id": parcel_id,
+                    },
+                )
+                geocoded += 1
+        if total > 0 and ((idx + 1) % 10 == 0 or idx + 1 == total):
+            _write_progress(import_id, "geocoding", idx + 1, total)
+    return geocoded, snapped
+
+
+def run_match(project_id: str, address_suffix_override: str = "", import_id: str = "", kind: str = "survey_responses"):
     # Project settings → radius + address suffix
     settings = _sb(
         "/project_settings",
@@ -168,6 +219,14 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
     s0 = settings[0] if settings else {}
     radius_m = s0.get("match_radius_m") or 30
     suffix = (address_suffix_override or "").strip() or (s0.get("geocode_address_suffix") or "").strip()
+
+    # Phase 4: when this run was triggered by a field-canvass CSV import,
+    # geocode the new CSV-imported points before the response/point matcher
+    # runs so the new points have coords to match against.
+    points_geocoded = 0
+    points_snapped = 0
+    if kind == "field_canvass":
+        points_geocoded, points_snapped = _geocode_points(project_id, suffix, import_id)
 
     # 1. Geocode responses missing coords
     to_geo = _sb(
@@ -275,9 +334,14 @@ def run_match(project_id: str, address_suffix_override: str = "", import_id: str
     )
     summary = counts[0] if counts else {"m1_count": 0, "f1_count": 0, "r1_count": 0}
     return {
-        "geocoded": geocoded,
-        "snapped_to_parcel": snapped,
+        "geocoded": geocoded + points_geocoded,
+        "snapped_to_parcel": snapped + points_snapped,
         "matched_now": matched_now,
+        # Per-stream counts for the wizard's done state.
+        "responses_geocoded": geocoded,
+        "responses_snapped": snapped,
+        "points_geocoded": points_geocoded,
+        "points_snapped": points_snapped,
         **summary,
     }
 
@@ -298,12 +362,13 @@ class handler(BaseHTTPRequestHandler):
             project_id = (q.get("project_id") or [""])[0]
             suffix_override = (q.get("address_suffix") or [""])[0]
             import_id = (q.get("import_id") or [""])[0]
+            kind = (q.get("kind") or ["survey_responses"])[0]
             if not project_id:
                 self.send_response(400)
                 self.end_headers()
                 self.wfile.write(b'{"error":"project_id required"}')
                 return
-            result = run_match(project_id, suffix_override, import_id)
+            result = run_match(project_id, suffix_override, import_id, kind)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
