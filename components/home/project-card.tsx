@@ -58,7 +58,7 @@ export function ProjectCard({ card }: { card: HomeCard }) {
           <HomeThumb
             lat={card.center_lat}
             lon={card.center_lon}
-            zoom={card.default_zoom ?? 13}
+            zoom={Math.min(12, Math.max(9, (card.default_zoom ?? 12) - 2))}
             thumbUrl={thumbPublicUrl(card.thumb_path)}
           />
         </div>

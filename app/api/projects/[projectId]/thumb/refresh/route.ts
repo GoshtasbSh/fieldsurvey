@@ -41,17 +41,20 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ pr
     .maybeSingle() as { data: { center_lat: number; center_lon: number; default_zoom: number | null } | null };
   if (!project) return NextResponse.json({ error: "project not found" }, { status: 404 });
 
+  // Pull back from the map's working zoom so the city/town name fits in the
+  // thumbnail and the card is identifiable at a glance.
+  const targetZoom = Math.min(12, Math.max(9, (project.default_zoom ?? 12) - 2));
   const result = await generateProjectThumb({
     centerLat: project.center_lat,
     centerLon: project.center_lon,
-    zoom: Math.min(13, Math.max(10, project.default_zoom ?? 11)),
+    zoom: targetZoom,
   });
 
   const admin = createAdminSupabase();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const adminAny = admin as any;
-  // -v2 suffix busts any previously cached dark-tile PNGs at {projectId}.png.
-  const path = `${projectId}-v2.png`;
+  // -v3 = satellite + labels. Earlier -v2 was unlabeled satellite.
+  const path = `${projectId}-v3.png`;
   const { error: uploadErr } = await adminAny.storage
     .from(BUCKET)
     .upload(path, result.png, {

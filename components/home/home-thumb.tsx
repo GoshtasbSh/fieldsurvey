@@ -96,11 +96,22 @@ function LeafletThumb({
         tap: false,
       });
       mapRef.current = m;
-      const tileUrl =
-        basemap === "satellite"
-          ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-          : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-      L.tileLayer(tileUrl, { maxZoom: 19, subdomains: "abcd" }).addTo(m);
+      if (basemap === "satellite") {
+        L.tileLayer(
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          { maxZoom: 19 },
+        ).addTo(m);
+        // Reference labels overlay so city/town names are readable.
+        L.tileLayer(
+          "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+          { maxZoom: 19, opacity: 0.95 },
+        ).addTo(m);
+      } else {
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          maxZoom: 19,
+          subdomains: "abcd",
+        }).addTo(m);
+      }
       if (ref.current) ref.current.style.pointerEvents = "none";
     })();
     return () => {

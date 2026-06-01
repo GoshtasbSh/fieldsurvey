@@ -10,7 +10,7 @@ describe("thumb generator", () => {
     vi.resetModules();
   });
 
-  it("requests four tiles around the center", async () => {
+  it("requests four imagery tiles and four labels tiles around the center", async () => {
     const seen: string[] = [];
     global.fetch = vi.fn(async (url: string | URL | Request) => {
       seen.push(String(url));
@@ -34,11 +34,18 @@ describe("thumb generator", () => {
       height: 280,
     });
 
-    expect(seen).toHaveLength(4);
-    // Every URL should be an ESRI World Imagery tile at z=11.
-    for (const u of seen) {
+    const imagery = seen.filter((u) => u.includes("/World_Imagery/"));
+    const labels = seen.filter((u) => u.includes("/World_Boundaries_and_Places/"));
+    expect(imagery).toHaveLength(4);
+    expect(labels).toHaveLength(4);
+    for (const u of imagery) {
       expect(u).toMatch(
         /^https:\/\/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Imagery\/MapServer\/tile\/11\/\d+\/\d+$/,
+      );
+    }
+    for (const u of labels) {
+      expect(u).toMatch(
+        /^https:\/\/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/Reference\/World_Boundaries_and_Places\/MapServer\/tile\/11\/\d+\/\d+$/,
       );
     }
     expect(out.width).toBe(480);

@@ -418,21 +418,24 @@ export async function refreshProjectCache(
         } | null;
       };
     if (proj) {
-      // Force a regen if the stored path is from the pre-satellite generator
-      // (anything not ending in -v2.png), regardless of age.
-      const fromOldGenerator = !(proj.thumb_path ?? "").endsWith("-v2.png");
+      // Force a regen if the stored path is from an older generator (only
+      // -v3.png is the current hybrid-satellite-with-labels output).
+      const fromOldGenerator = !(proj.thumb_path ?? "").endsWith("-v3.png");
       const stale =
         fromOldGenerator ||
         !proj.thumb_updated_at ||
         Date.now() - new Date(proj.thumb_updated_at).getTime() > 7 * 24 * 3600 * 1000;
       if (stale) {
         const { generateProjectThumb } = await import("@/lib/thumb/generate");
+        // Pull back from the map's working zoom so the city/town name fits in
+        // the frame and the card is identifiable at a glance.
+        const targetZoom = Math.min(12, Math.max(9, (proj.default_zoom ?? 12) - 2));
         const thumb = await generateProjectThumb({
           centerLat: proj.center_lat,
           centerLon: proj.center_lon,
-          zoom: Math.min(13, Math.max(10, proj.default_zoom ?? 12)),
+          zoom: targetZoom,
         });
-        const path = `${projectId}-v2.png`;
+        const path = `${projectId}-v3.png`;
         const { error: upErr } = await sbAny.storage
           .from("project-thumbs")
           .upload(path, thumb.png, {

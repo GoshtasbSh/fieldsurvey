@@ -2,20 +2,20 @@
  * Server-side /home thumbnail generator.
  *
  * Stitches a 2×2 mosaic of ESRI World Imagery satellite tiles around a
- * project's center point, then composites a soft vignette and a bottom
- * gradient over the crop so the card text floats nicely above it. The
- * result is uploaded to the `project-thumbs` Supabase Storage bucket by
- * the caller; this module only produces the bytes.
+ * project's center point, composites ESRI's reference labels overlay on
+ * top so the city/town name is always visible, then drops in a soft
+ * vignette + bottom fade. Result is uploaded to the `project-thumbs`
+ * Supabase Storage bucket by the caller; this module only produces the
+ * bytes.
  *
- * Why satellite instead of dark raster:
- *   - Photorealistic aerial views give every project card immediate
- *     visual identity — you can see the actual terrain, water, parcels,
- *     forest, urban grain. The previous dark base looked near-black and
- *     made every card feel identical.
- *   - ESRI World Imagery is keyless, globally consistent, and licensed
- *     for low-volume use (we stamp attribution in the card footer).
- *   - The vignette + bottom fade pulls the eye to the centre while
- *     guaranteeing legible contrast for any glyphs we layer on top.
+ * Why satellite + labels:
+ *   - Labels are the only thing that lets you distinguish "Keystone
+ *     Heights" from "Gainesville" at a glance — bare satellite at this
+ *     scale shows generic suburbia in both.
+ *   - ESRI's Reference/World_Boundaries_and_Places layer is a
+ *     transparent raster designed exactly for this hybrid use, with
+ *     halo'd text that stays legible on any base.
+ *   - Both layers are keyless and licensed for low-volume use.
  */
 
 import "server-only";
@@ -49,39 +49,42 @@ function lonLatToTile(lon: number, lat: number, z: number): { x: number; y: numb
   return { x, y };
 }
 
-function tileUrl(z: number, x: number, y: number): string {
-  // ESRI World Imagery — no API key, 256×256, global coverage.
+function imageryUrl(z: number, x: number, y: number): string {
   return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
 }
 
-async function fetchTile(z: number, x: number, y: number): Promise<Buffer> {
-  const url = tileUrl(z, x, y);
+function labelsUrl(z: number, x: number, y: number): string {
+  // Transparent PNG with city/town/road labels, halo'd for legibility.
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`;
+}
+
+async function fetchTile(url: string): Promise<Buffer> {
   const res = await fetch(url, {
     headers: {
       "User-Agent": "FieldSurvey/1.0 (+thumb-generator)",
-      Accept: "image/jpeg,image/png,image/*;q=0.8",
+      Accept: "image/png,image/jpeg,image/*;q=0.8",
     },
     cache: "force-cache",
     signal: AbortSignal.timeout(8000),
   });
-  if (!res.ok) throw new Error(`tile ${z}/${x}/${y} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`tile ${url} → HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
 
 /**
- * SVG overlay: subtle radial vignette + bottom-edge fade-to-black so the
- * card never feels flat and any future glyph/badge stays readable.
+ * SVG overlay: subtle radial vignette + bottom-edge fade so the card
+ * never feels flat and overlaid glyphs stay readable.
  */
 function overlaySvg(width: number, height: number): Buffer {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
     <defs>
       <radialGradient id="v" cx="50%" cy="50%" r="75%">
         <stop offset="55%" stop-color="black" stop-opacity="0"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0.45"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0.40"/>
       </radialGradient>
       <linearGradient id="b" x1="0" y1="0" x2="0" y2="1">
         <stop offset="65%" stop-color="black" stop-opacity="0"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0.55"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0.50"/>
       </linearGradient>
     </defs>
     <rect width="100%" height="100%" fill="url(#v)"/>
@@ -91,15 +94,14 @@ function overlaySvg(width: number, height: number): Buffer {
 }
 
 /**
- * Build a 2×2 raster mosaic of satellite tiles surrounding
+ * Build a 2×2 mosaic of satellite tiles with a labels overlay around
  * (centerLat, centerLon) at zoom `z`, crop to width × height centred on
- * the point, then composite a vignette + bottom fade.
+ * the point, then composite the vignette + bottom fade.
  *
- * Tiles fetch in parallel — at 4 requests this is bounded and keeps
- * worst-case latency near a single tile RTT.
+ * Tile fetches (8 total: 4 imagery + 4 labels) run in parallel.
  */
 export async function generateProjectThumb(opts: ThumbOptions): Promise<ThumbResult> {
-  const zoom = opts.zoom ?? 12;
+  const zoom = opts.zoom ?? 11;
   const width = opts.width ?? 480;
   const height = opts.height ?? 280;
 
@@ -117,12 +119,27 @@ export async function generateProjectThumb(opts: ThumbOptions): Promise<ThumbRes
     }
   }
 
-  const tiles = await Promise.all(
-    coords.map(async (c) => ({ dx: c.dx, dy: c.dy, buf: await fetchTile(zoom, c.tx, c.ty) })),
+  const fetched = await Promise.all(
+    coords.map(async (c) => {
+      const [imagery, labels] = await Promise.all([
+        fetchTile(imageryUrl(zoom, c.tx, c.ty)),
+        // Labels are best-effort — never block the thumb if ESRI's reference
+        // layer hiccups.
+        fetchTile(labelsUrl(zoom, c.tx, c.ty)).catch(() => null),
+      ]);
+      return { dx: c.dx, dy: c.dy, imagery, labels };
+    }),
   );
 
-  // 2×2 mosaic (512×512 for standard 256px tiles).
+  // 2×2 mosaic (512×512 for standard 256px tiles). Composite imagery first,
+  // then labels on top so place names stay readable.
   const mosaicSize = TILE_SIZE * 2;
+  const composites: Array<{ input: Buffer; top: number; left: number }> = [];
+  for (const t of fetched) composites.push({ input: t.imagery, top: t.dy, left: t.dx });
+  for (const t of fetched) {
+    if (t.labels) composites.push({ input: t.labels, top: t.dy, left: t.dx });
+  }
+
   const mosaic = await sharp({
     create: {
       width: mosaicSize,
@@ -131,7 +148,7 @@ export async function generateProjectThumb(opts: ThumbOptions): Promise<ThumbRes
       background: { r: 12, g: 16, b: 24 },
     },
   })
-    .composite(tiles.map((t) => ({ input: t.buf, top: t.dy, left: t.dx })))
+    .composite(composites)
     .png()
     .toBuffer();
 
