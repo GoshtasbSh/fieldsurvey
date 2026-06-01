@@ -419,8 +419,8 @@ export async function refreshProjectCache(
       };
     if (proj) {
       // Force a regen if the stored path is from an older generator (only
-      // -v3.png is the current hybrid-satellite-with-labels output).
-      const fromOldGenerator = !(proj.thumb_path ?? "").endsWith("-v3.png");
+      // -v4.png is the current hybrid-satellite-with-labels output).
+      const fromOldGenerator = !(proj.thumb_path ?? "").endsWith("-v4.png");
       const stale =
         fromOldGenerator ||
         !proj.thumb_updated_at ||
@@ -435,7 +435,7 @@ export async function refreshProjectCache(
           centerLon: proj.center_lon,
           zoom: targetZoom,
         });
-        const path = `${projectId}-v3.png`;
+        const path = `${projectId}-v4.png`;
         const { error: upErr } = await sbAny.storage
           .from("project-thumbs")
           .upload(path, thumb.png, {

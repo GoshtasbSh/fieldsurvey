@@ -1,21 +1,21 @@
 /**
  * Server-side /home thumbnail generator.
  *
- * Stitches a 2×2 mosaic of ESRI World Imagery satellite tiles around a
- * project's center point, composites ESRI's reference labels overlay on
- * top so the city/town name is always visible, then drops in a soft
- * vignette + bottom fade. Result is uploaded to the `project-thumbs`
- * Supabase Storage bucket by the caller; this module only produces the
- * bytes.
+ * Produces a clean satellite PNG — no labels, no vignette, no text. All
+ * overlays (city name, gradient, project pin, coordinate readout) are
+ * composed in CSS by the card so we get crisp text at any DPI and can
+ * iterate the design without regenerating PNGs.
  *
- * Why satellite + labels:
- *   - Labels are the only thing that lets you distinguish "Keystone
- *     Heights" from "Gainesville" at a glance — bare satellite at this
- *     scale shows generic suburbia in both.
- *   - ESRI's Reference/World_Boundaries_and_Places layer is a
- *     transparent raster designed exactly for this hybrid use, with
- *     halo'd text that stays legible on any base.
- *   - Both layers are keyless and licensed for low-volume use.
+ * Pipeline:
+ *   1. Fetch a 2×2 mosaic of ESRI World Imagery tiles around the centre.
+ *   2. Mosaic, crop to the requested viewport, apply a gentle tonal lift
+ *      (slight saturation + contrast) so the imagery feels curated
+ *      rather than raw.
+ *   3. Emit as PNG. Caller uploads to `project-thumbs`.
+ *
+ * Why ESRI World Imagery:
+ *   - Keyless, photorealistic, globally consistent, generously licensed
+ *     for low volume.
  */
 
 import "server-only";
@@ -53,11 +53,6 @@ function imageryUrl(z: number, x: number, y: number): string {
   return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
 }
 
-function labelsUrl(z: number, x: number, y: number): string {
-  // Transparent PNG with city/town/road labels, halo'd for legibility.
-  return `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`;
-}
-
 async function fetchTile(url: string): Promise<Buffer> {
   const res = await fetch(url, {
     headers: {
@@ -71,35 +66,6 @@ async function fetchTile(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-/**
- * SVG overlay: subtle radial vignette + bottom-edge fade so the card
- * never feels flat and overlaid glyphs stay readable.
- */
-function overlaySvg(width: number, height: number): Buffer {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-    <defs>
-      <radialGradient id="v" cx="50%" cy="50%" r="75%">
-        <stop offset="55%" stop-color="black" stop-opacity="0"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0.40"/>
-      </radialGradient>
-      <linearGradient id="b" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="65%" stop-color="black" stop-opacity="0"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0.50"/>
-      </linearGradient>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#v)"/>
-    <rect width="100%" height="100%" fill="url(#b)"/>
-  </svg>`;
-  return Buffer.from(svg);
-}
-
-/**
- * Build a 2×2 mosaic of satellite tiles with a labels overlay around
- * (centerLat, centerLon) at zoom `z`, crop to width × height centred on
- * the point, then composite the vignette + bottom fade.
- *
- * Tile fetches (8 total: 4 imagery + 4 labels) run in parallel.
- */
 export async function generateProjectThumb(opts: ThumbOptions): Promise<ThumbResult> {
   const zoom = opts.zoom ?? 11;
   const width = opts.width ?? 480;
@@ -119,27 +85,15 @@ export async function generateProjectThumb(opts: ThumbOptions): Promise<ThumbRes
     }
   }
 
-  const fetched = await Promise.all(
-    coords.map(async (c) => {
-      const [imagery, labels] = await Promise.all([
-        fetchTile(imageryUrl(zoom, c.tx, c.ty)),
-        // Labels are best-effort — never block the thumb if ESRI's reference
-        // layer hiccups.
-        fetchTile(labelsUrl(zoom, c.tx, c.ty)).catch(() => null),
-      ]);
-      return { dx: c.dx, dy: c.dy, imagery, labels };
-    }),
+  const tiles = await Promise.all(
+    coords.map(async (c) => ({
+      dx: c.dx,
+      dy: c.dy,
+      buf: await fetchTile(imageryUrl(zoom, c.tx, c.ty)),
+    })),
   );
 
-  // 2×2 mosaic (512×512 for standard 256px tiles). Composite imagery first,
-  // then labels on top so place names stay readable.
   const mosaicSize = TILE_SIZE * 2;
-  const composites: Array<{ input: Buffer; top: number; left: number }> = [];
-  for (const t of fetched) composites.push({ input: t.imagery, top: t.dy, left: t.dx });
-  for (const t of fetched) {
-    if (t.labels) composites.push({ input: t.labels, top: t.dy, left: t.dx });
-  }
-
   const mosaic = await sharp({
     create: {
       width: mosaicSize,
@@ -148,23 +102,20 @@ export async function generateProjectThumb(opts: ThumbOptions): Promise<ThumbRes
       background: { r: 12, g: 16, b: 24 },
     },
   })
-    .composite(composites)
+    .composite(tiles.map((t) => ({ input: t.buf, top: t.dy, left: t.dx })))
     .png()
     .toBuffer();
 
-  // Center pixel within the mosaic.
   const cx = Math.round((fx - x0) * TILE_SIZE);
   const cy = Math.round((fy - y0) * TILE_SIZE);
-
-  // Crop a width×height window centred on the point, clamped to mosaic bounds.
   const left = Math.max(0, Math.min(mosaicSize - width, cx - Math.floor(width / 2)));
   const top = Math.max(0, Math.min(mosaicSize - height, cy - Math.floor(height / 2)));
 
-  const cropped = await sharp(mosaic).extract({ left, top, width, height }).png().toBuffer();
-
-  // Composite vignette + bottom fade for depth and legibility.
-  const png = await sharp(cropped)
-    .composite([{ input: overlaySvg(width, height), top: 0, left: 0 }])
+  // Gentle tonal lift — keeps the imagery photoreal but feels intentional.
+  const png = await sharp(mosaic)
+    .extract({ left, top, width, height })
+    .modulate({ saturation: 1.08, brightness: 1.02 })
+    .linear(1.05, -6) // small contrast bump, slight black-point pull
     .png({ compressionLevel: 9 })
     .toBuffer();
 

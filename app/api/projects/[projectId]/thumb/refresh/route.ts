@@ -53,8 +53,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ pr
   const admin = createAdminSupabase();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const adminAny = admin as any;
-  // -v3 = satellite + labels. Earlier -v2 was unlabeled satellite.
-  const path = `${projectId}-v3.png`;
+  // -v4 = clean satellite + tonal lift (overlays composed in CSS by the card).
+  const path = `${projectId}-v4.png`;
   const { error: uploadErr } = await adminAny.storage
     .from(BUCKET)
     .upload(path, result.png, {

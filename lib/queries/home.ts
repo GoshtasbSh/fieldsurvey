@@ -7,6 +7,7 @@
  */
 
 import { createServerSupabase } from "@/lib/supabase/server";
+import { reverseGeocode, formatLabel } from "@/lib/geocode/reverse";
 
 export type HomeCard = {
   id: string;
@@ -27,6 +28,8 @@ export type HomeCard = {
   status: "active" | "setup_incomplete" | "archived";
   /** Server-rendered static thumb (M8). When null, /home falls back to live Leaflet. */
   thumb_path: string | null;
+  /** Reverse-geocoded "City, ST" for the card's typographic overlay; null when the geocode lookup yielded nothing. */
+  location_label: string | null;
 };
 
 type ProjectRow = {
@@ -109,7 +112,18 @@ export async function listHomeCards(): Promise<{
     ((profileRes.data ?? []) as ProfileRow[]).map((p) => [p.id, p]),
   );
 
-  // 3. Aggregate per project
+  // 3. Reverse-geocode each project's centre in parallel. Results are cached
+  // for 30 days at the fetch layer, so this is a no-op on warm reloads.
+  const labels = await Promise.all(
+    rows.map((r) =>
+      reverseGeocode(r.center_lat, r.center_lon).then(formatLabel),
+    ),
+  );
+  const labelById = new Map<string, string | null>(
+    rows.map((r, i) => [r.id, labels[i] ?? null]),
+  );
+
+  // 4. Aggregate per project
   const cards: HomeCard[] = rows.map((r) => {
     const myPoints = points.filter((p) => p.project_id === r.id);
     const myResponses = responses.filter((x) => x.project_id === r.id);
@@ -150,6 +164,7 @@ export async function listHomeCards(): Promise<{
       last_actor_name: lastActorName,
       status,
       thumb_path: r.thumb_path,
+      location_label: labelById.get(r.id) ?? null,
     };
   });
 
