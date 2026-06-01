@@ -20,6 +20,13 @@ const ImportBody = z.object({
   // pre-fills with the project's last-used value but the user always
   // confirms — never silent.
   geocode_address_suffix: z.string().min(2).max(120),
+  // If true, delete all existing rows for this project with the same source
+  // before inserting. Use case: re-importing an updated canvassing log
+  // should replace the previous version, not coexist with it. Defaults to
+  // true because content-hash dedup only catches re-uploads of the exact
+  // same file — it can't tell when a row has been edited or removed in the
+  // new CSV.
+  replace_existing: z.boolean().default(true),
   rows: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))).min(1).max(20000),
   source: z.enum(["qualtrics_csv", "google_forms_csv", "manual"]).default("qualtrics_csv"),
 });
@@ -144,6 +151,36 @@ export async function POST(req: NextRequest) {
     ? "project_id,external_id"
     : "project_id,content_hash";
 
+  // Replace mode: wipe existing rows with the same source so an updated
+  // canvassing log fully overwrites the prior version. Field points whose
+  // matched_response_id pointed at any wiped row get NULLed by the FK
+  // (ON DELETE SET NULL on points.matched_response_id) — they'll re-match
+  // when the matcher runs against the new responses.
+  let deleted = 0;
+  if (body.replace_existing) {
+    const { count } = await sbAny
+      .from("survey_responses")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", body.project_id)
+      .eq("source", body.source);
+    deleted = count ?? 0;
+    if (deleted > 0) {
+      const { error: delErr } = await sbAny
+        .from("survey_responses")
+        .delete()
+        .eq("project_id", body.project_id)
+        .eq("source", body.source);
+      if (delErr) {
+        await sbAny.from("survey_imports").update({
+          status: "failed",
+          error_message: `replace-mode delete failed: ${delErr.message}`,
+          completed_at: new Date().toISOString(),
+        }).eq("id", imp?.id);
+        return NextResponse.json({ error: `replace-mode delete failed: ${delErr.message}` }, { status: 500 });
+      }
+    }
+  }
+
   let attempted = 0;
   const chunk = 500;
   for (let i = 0; i < rowsToInsert.length; i += chunk) {
@@ -223,6 +260,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     import_id: imp?.id,
     attempted,
+    deleted_before_import: deleted,
     present_after_import: present,
     matcher,
     matcher_error: matcherError,

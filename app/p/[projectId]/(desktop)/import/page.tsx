@@ -18,6 +18,18 @@ export default async function ImportPage({ params }: { params: Promise<{ project
     .eq("project_id", projectId)
     .maybeSingle();
 
+  // How many rows are already stored for this project, broken down by source.
+  // The wizard shows the count for the picked source so the user knows what
+  // "Replace existing" is about to wipe.
+  const { data: existingBreakdown } = await sbAny
+    .from("survey_responses")
+    .select("source")
+    .eq("project_id", projectId) as { data: Array<{ source: string }> | null };
+  const existingBySource: Record<string, number> = {};
+  for (const row of existingBreakdown ?? []) {
+    existingBySource[row.source] = (existingBySource[row.source] ?? 0) + 1;
+  }
+
   return (
     // The desktop route group wraps every page in `h-screen overflow-hidden`
     // for the map shell. Content pages like /import must opt back into normal
@@ -36,6 +48,7 @@ export default async function ImportPage({ params }: { params: Promise<{ project
           defaultAddressColumn={settings?.response_address_column ?? ""}
           defaultExternalIdColumn={settings?.external_id_column ?? ""}
           defaultStatusColumn={settings?.response_status_column ?? ""}
+          existingBySource={existingBySource}
         />
       </div>
     </main>

@@ -32,12 +32,16 @@ export function ImportWizard({
   defaultAddressColumn = "",
   defaultExternalIdColumn = "",
   defaultStatusColumn = "",
+  existingBySource = {},
 }: {
   projectId: string;
   defaultAddressSuffix?: string;
   defaultAddressColumn?: string;
   defaultExternalIdColumn?: string;
   defaultStatusColumn?: string;
+  /** Existing row counts per source ("qualtrics_csv" → 317). Drives the
+   * "Replace existing N rows" copy in the wizard. */
+  existingBySource?: Record<string, number>;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
@@ -50,6 +54,15 @@ export function ImportWizard({
   // Project-level suffix. Pre-filled with the project's last-used value. The
   // user sees it and only edits if it's wrong — no rewriting required.
   const [addressSuffix, setAddressSuffix] = useState<string>(defaultAddressSuffix);
+  // Replace mode: wipe existing rows of the same source before inserting.
+  // Default true — re-importing an updated canvassing log should replace,
+  // not coexist. Content-hash dedup alone can't notice deleted/edited rows.
+  const [replaceExisting, setReplaceExisting] = useState(true);
+  // Source kind for the import. Today only qualtrics_csv is wired; the
+  // server defaults to this too. Reserved for the future dual-upload
+  // ("field canvass" CSV vs "survey response" CSV) split.
+  const source = "qualtrics_csv";
+  const existingCount = existingBySource[source] ?? 0;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rerunning, setRerunning] = useState(false);
@@ -57,6 +70,7 @@ export function ImportWizard({
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
   const [result, setResult] = useState<{
     attempted: number;
+    deleted_before_import: number;
     present_after_import: number;
     matcher: MatcherResult | null;
     matcher_error: string | null;
@@ -122,6 +136,13 @@ export function ImportWizard({
     if (!addressColumn) { setError("Pick the address column."); return; }
     const suffix = addressSuffix.trim();
     if (!suffix) { setError("Confirm the city, state, ZIP to append (or edit if the suggestion is wrong)."); return; }
+    // Confirm before destructive replace.
+    if (replaceExisting && existingCount > 0) {
+      const ok = window.confirm(
+        `This will delete the ${existingCount} existing ${source.replace("_", " ")} row${existingCount === 1 ? "" : "s"} stored for this project, then import the ${rows.length} rows from this CSV.\n\nContinue?`,
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     setProgress(null);
     setActiveImportId(null);
@@ -142,6 +163,7 @@ export function ImportWizard({
           external_id_column: externalIdColumn || null,
           response_status_column: statusColumn || null,
           geocode_address_suffix: suffix,
+          replace_existing: replaceExisting,
           rows,
         }),
       });
@@ -157,6 +179,7 @@ export function ImportWizard({
       if (j.import_id) setActiveImportId(j.import_id);
       setResult({
         attempted: j.attempted ?? rows.length,
+        deleted_before_import: (j as { deleted_before_import?: number }).deleted_before_import ?? 0,
         present_after_import: j.present_after_import ?? rows.length,
         matcher: j.matcher ?? null,
         matcher_error: j.matcher_error ?? null,
@@ -322,6 +345,29 @@ export function ImportWizard({
             </p>
           </div>
 
+          <div className="rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] p-3">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={replaceExisting}
+                onChange={(e) => setReplaceExisting(e.target.checked)}
+                className="mt-0.5 h-4 w-4 cursor-pointer accent-[oklch(78%_0.155_234)]"
+              />
+              <div>
+                <div className="text-[12px] font-semibold text-[var(--shell-text)]">
+                  Replace existing rows from previous imports
+                </div>
+                <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+                  {existingCount > 0 ? (
+                    <>This project already has <b className="text-[var(--shell-text-2)]">{existingCount}</b> {source.replace("_", " ")} row{existingCount === 1 ? "" : "s"}. With this on, we delete them before importing the {rows.length} from this CSV — so edits / deletions in the new file actually take effect. Uncheck only if you want to merge into the previous imports.</>
+                  ) : (
+                    <>No previous rows yet. This toggle takes effect on future imports — keep it on if you want each new CSV to fully replace the prior one.</>
+                  )}
+                </div>
+              </div>
+            </label>
+          </div>
+
           <PreviewTable rows={rows.slice(0, 5)} addressColumn={addressColumn} statusColumn={statusColumn} />
 
           {error && <p className="text-[12px] text-[oklch(68%_0.21_25)]">{error}</p>}
@@ -355,9 +401,14 @@ export function ImportWizard({
           <div className="font-display text-[16px] font-extrabold">Import complete</div>
           <div className="text-[12px] text-[var(--shell-text-2)]">
             {result.attempted} rows in this CSV · {result.present_after_import} now stored for this project
-            {result.attempted > result.present_after_import && (
+            {result.deleted_before_import > 0 && (
+              <div className="mt-0.5 font-mono text-[11px] text-[var(--shell-text-muted)]">
+                replaced {result.deleted_before_import} row{result.deleted_before_import === 1 ? "" : "s"} from previous imports
+              </div>
+            )}
+            {result.attempted > result.present_after_import && result.deleted_before_import === 0 && (
               <span className="ml-1 text-[var(--shell-text-muted)]">
-                ({result.attempted - result.present_after_import} were already imported and were skipped)
+                ({result.attempted - result.present_after_import} skipped as duplicates of rows already stored)
               </span>
             )}
           </div>
