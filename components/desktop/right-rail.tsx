@@ -18,6 +18,7 @@ import type { ChatMessage } from "@/lib/queries/chat";
 import type { StatusRow } from "./left-rail";
 import type { HourBucket, DowBucket } from "@/lib/queries/analytics";
 import { CatalogDrawer } from "@/components/desktop/catalog-drawer";
+import { FeatureInspector } from "@/components/desktop/feature-inspector";
 import { getCardById } from "@/lib/analyses/registry";
 import { AddAnalysisModal } from "@/components/analyses/add-analysis-modal";
 import { AnalysesList } from "@/components/analyses/analyses-list";
@@ -67,6 +68,9 @@ type Props = {
   activeViewCards?: string[];
   /** M7.2: called when user pins an analysis result from the SettingsDrawer. */
   onPin?: (cardId: string, cardName: string, settings: Record<string, unknown>, result: unknown) => void;
+  /** Phase 5: id of the currently selected map feature. Drives the Inspect
+   * tab and triggers an auto-switch to it on click. */
+  selectedId?: string | null;
 };
 
 export function DesktopRightRail({
@@ -78,8 +82,16 @@ export function DesktopRightRail({
   savedViewNames = ["Default", "Coverage", "QC", "Health-equity", "Velocity"],
   activeViewCards,
   onPin,
+  selectedId = null,
 }: Props) {
   const [tab, setTab] = useState<RightRailTab>("pulse");
+
+  // Phase 5 — clicking a map feature should pop the inspector into view.
+  // Tab auto-switches every time a new feature is selected, but the user
+  // can always navigate away and the tab stays where they last put it.
+  useEffect(() => {
+    if (selectedId) setTab("inspect");
+  }, [selectedId]);
   const [catalogOpen, setCatalogOpen] = useState(false);
 
   const isAdmin = userRole === "owner" || userRole === "admin";
@@ -183,7 +195,9 @@ export function DesktopRightRail({
             ? <ChatPanel projectId={projectId} currentUserId={currentUserId} members={chatMembers} initial={initialChat} canWrite={canWriteChat} />
             : <Placeholder label="Sign in to chat" />
         )}
-        {tab === "inspect" && <Placeholder label="Click a pin on the map to inspect it" />}
+        {tab === "inspect" && (
+          <FeatureInspector projectId={projectId} selectedId={selectedId} />
+        )}
       </div>
 
       {/* GeoChatBot placeholder slot — bottom-right (locked decision Q8). */}

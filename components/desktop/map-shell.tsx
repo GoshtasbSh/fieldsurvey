@@ -407,6 +407,7 @@ export function MapShell(props: Props) {
             userRole={role}
             savedViewNames={savedViewNames}
             activeViewCards={activeViewCards}
+            selectedId={selectedId}
             onPin={(cardId, cardName, settings, result) => {
               void pinAnalysisLayer({
                 cardId,
