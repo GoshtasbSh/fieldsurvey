@@ -93,7 +93,30 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
-def run_match(project_id: str, address_suffix_override: str = ""):
+def _write_progress(import_id: str, step: str, done: int, total: int):
+    """Best-effort progress write — never raises. The wizard polls
+    survey_imports rows to render a real progress bar instead of an
+    opaque spinner."""
+    if not import_id:
+        return
+    try:
+        _sb(
+            "/survey_imports",
+            method="PATCH",
+            params={"id": f"eq.{import_id}"},
+            body={
+                "processing_step": step,
+                "processing_done": done,
+                "processing_total": total,
+                "processing_at": "now()",
+            },
+        )
+    except Exception:
+        # Progress is advisory; a failed write must not break the run.
+        pass
+
+
+def run_match(project_id: str, address_suffix_override: str = "", import_id: str = ""):
     # Project settings → radius + address suffix
     settings = _sb(
         "/project_settings",
@@ -112,28 +135,33 @@ def run_match(project_id: str, address_suffix_override: str = ""):
             "select": "id,address_used,raw_data",
         },
     )
+    total_geo = len(to_geo)
+    _write_progress(import_id, "geocoding", 0, total_geo)
     geocoded = 0
-    for r in to_geo:
+    for idx, r in enumerate(to_geo):
         addr = r.get("address_used")
-        if not addr:
-            continue
-        g = census_geocode(addr, suffix)
-        if not g or g.get("lat") is None:
-            continue
-        _sb(
-            "/survey_responses",
-            method="PATCH",
-            params={"id": f"eq.{r['id']}"},
-            body={
-                "geocoded_lat": g["lat"],
-                "geocoded_lon": g["lon"],
-                "geocode_source": "census",
-                "address_used": g.get("matched_address") or addr,
-            },
-        )
-        geocoded += 1
+        if addr:
+            g = census_geocode(addr, suffix)
+            if g and g.get("lat") is not None:
+                _sb(
+                    "/survey_responses",
+                    method="PATCH",
+                    params={"id": f"eq.{r['id']}"},
+                    body={
+                        "geocoded_lat": g["lat"],
+                        "geocoded_lon": g["lon"],
+                        "geocode_source": "census",
+                        "address_used": g.get("matched_address") or addr,
+                    },
+                )
+                geocoded += 1
+        # Write progress every 10 rows (and on the final row) so the wizard
+        # can poll for a smooth bar without flooding Supabase.
+        if total_geo > 0 and ((idx + 1) % 10 == 0 or idx + 1 == total_geo):
+            _write_progress(import_id, "geocoding", idx + 1, total_geo)
 
     # 2. Match unmatched responses to points within radius
+    _write_progress(import_id, "matching", 0, 0)
     unmatched = _sb(
         "/survey_responses",
         params={
@@ -154,8 +182,10 @@ def run_match(project_id: str, address_suffix_override: str = ""):
         },
     )
 
+    total_match = len(unmatched)
+    _write_progress(import_id, "matching", 0, total_match)
     matched_now = 0
-    for r in unmatched:
+    for idx, r in enumerate(unmatched):
         best_id, best_d = None, None
         rlat, rlon = r["geocoded_lat"], r["geocoded_lon"]
         for p in points:
@@ -178,6 +208,8 @@ def run_match(project_id: str, address_suffix_override: str = ""):
             matched_now += 1
             # take that point out of the candidate pool
             points = [p for p in points if p["id"] != best_id]
+        if total_match > 0 and ((idx + 1) % 10 == 0 or idx + 1 == total_match):
+            _write_progress(import_id, "matching", idx + 1, total_match)
 
     # 3. Re-pull counts from the view for the summary
     counts = _sb(
@@ -207,12 +239,13 @@ class handler(BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             project_id = (q.get("project_id") or [""])[0]
             suffix_override = (q.get("address_suffix") or [""])[0]
+            import_id = (q.get("import_id") or [""])[0]
             if not project_id:
                 self.send_response(400)
                 self.end_headers()
                 self.wfile.write(b'{"error":"project_id required"}')
                 return
-            result = run_match(project_id, suffix_override)
+            result = run_match(project_id, suffix_override, import_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()

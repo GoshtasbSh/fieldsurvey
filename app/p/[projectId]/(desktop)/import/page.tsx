@@ -14,7 +14,7 @@ export default async function ImportPage({ params }: { params: Promise<{ project
   const sbAny = sb as any;
   const { data: settings } = await sbAny
     .from("project_settings")
-    .select("geocode_address_suffix,response_address_column,external_id_column")
+    .select("geocode_address_suffix,response_address_column,external_id_column,response_status_column")
     .eq("project_id", projectId)
     .maybeSingle();
 
@@ -35,6 +35,7 @@ export default async function ImportPage({ params }: { params: Promise<{ project
           defaultAddressSuffix={settings?.geocode_address_suffix ?? ""}
           defaultAddressColumn={settings?.response_address_column ?? ""}
           defaultExternalIdColumn={settings?.external_id_column ?? ""}
+          defaultStatusColumn={settings?.response_status_column ?? ""}
         />
       </div>
     </main>

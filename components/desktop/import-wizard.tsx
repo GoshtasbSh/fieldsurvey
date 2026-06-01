@@ -1,29 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Upload, Loader2, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type Step = "upload" | "configure" | "preview" | "running" | "done";
 type Row = Record<string, string | number | boolean | null>;
 
-/**
- * Two-step wizard:
- *   1. Upload CSV → parse client-side
- *   2. Pick the address column (REQUIRED — we never trust response lat/lon),
- *      optional external-id column for de-dup
- *   3. Confirm → POST /api/responses/import → server matches via Python
- */
+type MatcherResult = {
+  geocoded: number;
+  matched_now: number;
+  m1_count: number;
+  f1_count: number;
+  r1_count: number;
+};
+
+type Progress = {
+  status: "processing" | "completed" | "failed";
+  processing_step: string | null;
+  processing_done: number;
+  processing_total: number;
+  matched_count: number;
+  field_only_count: number;
+  response_only_count: number;
+  row_count: number;
+};
+
 export function ImportWizard({
   projectId,
   defaultAddressSuffix = "",
   defaultAddressColumn = "",
   defaultExternalIdColumn = "",
+  defaultStatusColumn = "",
 }: {
   projectId: string;
   defaultAddressSuffix?: string;
   defaultAddressColumn?: string;
   defaultExternalIdColumn?: string;
+  defaultStatusColumn?: string;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
@@ -32,18 +46,54 @@ export function ImportWizard({
   const [rows, setRows] = useState<Row[]>([]);
   const [addressColumn, setAddressColumn] = useState(defaultAddressColumn);
   const [externalIdColumn, setExternalIdColumn] = useState<string>(defaultExternalIdColumn);
-  // Project-level suffix the user must confirm before each geocode run.
-  // Pre-filled with the project's last-used value, but the user always sees
-  // the input and re-confirms — never silent.
+  const [statusColumn, setStatusColumn] = useState<string>(defaultStatusColumn);
+  // Project-level suffix. Pre-filled with the project's last-used value. The
+  // user sees it and only edits if it's wrong — no rewriting required.
   const [addressSuffix, setAddressSuffix] = useState<string>(defaultAddressSuffix);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [activeImportId, setActiveImportId] = useState<string | null>(null);
   const [result, setResult] = useState<{
-    inserted: number;
-    matcher: { geocoded: number; matched_now: number; m1_count: number; f1_count: number; r1_count: number } | null;
+    attempted: number;
+    present_after_import: number;
+    matcher: MatcherResult | null;
     matcher_error: string | null;
   } | null>(null);
+
+  // Live poll the survey_imports row while the matcher is running so the
+  // progress bar can show real "Geocoding 142 / 317" counts instead of an
+  // opaque spinner.
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!activeImportId || (step !== "running" && !rerunning)) {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/projects/${projectId}/import-progress?import_id=${activeImportId}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as Progress;
+        if (cancelled) return;
+        setProgress(j);
+        if (j.status !== "processing") {
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+      } catch { /* transient errors ignored — next tick retries */ }
+    };
+    tick();
+    pollTimerRef.current = setInterval(tick, 1000);
+    return () => {
+      cancelled = true;
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    };
+  }, [activeImportId, step, rerunning, projectId]);
 
   async function onFile(f: File) {
     setError(null);
@@ -53,8 +103,6 @@ export function ImportWizard({
     if (!parsed.rows.length) { setError("CSV has no rows"); return; }
     setHeaders(parsed.headers);
     setRows(parsed.rows);
-    // Heuristic: pick the column with "address" in its name — only if the
-    // user hasn't already locked one in from project defaults.
     if (!addressColumn) {
       const guess = parsed.headers.find((h) => /address|street|location/i.test(h)) ?? "";
       setAddressColumn(guess);
@@ -63,16 +111,27 @@ export function ImportWizard({
       const idGuess = parsed.headers.find((h) => /response.*id|external.*id|^id$/i.test(h)) ?? "";
       setExternalIdColumn(idGuess);
     }
+    if (!statusColumn) {
+      const sGuess = parsed.headers.find((h) => /attempt|status|outcome|disposition|result/i.test(h)) ?? "";
+      setStatusColumn(sGuess);
+    }
     setStep("configure");
   }
 
   async function onCommit() {
     if (!addressColumn) { setError("Pick the address column."); return; }
     const suffix = addressSuffix.trim();
-    if (!suffix) { setError("Type the city, state, ZIP (or any locality) to append to every address. Census can't resolve street-only addresses."); return; }
+    if (!suffix) { setError("Confirm the city, state, ZIP to append (or edit if the suggestion is wrong)."); return; }
     setBusy(true);
+    setProgress(null);
+    setActiveImportId(null);
     setStep("running");
     try {
+      // Poll for the active import row even before the POST resolves: the
+      // matcher inserts a survey_imports row immediately and starts writing
+      // progress, so the bar can update during Census calls.
+      pollLatestImportUntilStarted();
+
       const r = await fetch("/api/responses/import", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -81,19 +140,24 @@ export function ImportWizard({
           filename,
           address_column: addressColumn,
           external_id_column: externalIdColumn || null,
+          response_status_column: statusColumn || null,
           geocode_address_suffix: suffix,
           rows,
         }),
       });
       const j = (await r.json()) as {
-        inserted?: number;
+        import_id?: string;
+        attempted?: number;
+        present_after_import?: number;
         error?: string;
-        matcher?: { geocoded: number; matched_now: number; m1_count: number; f1_count: number; r1_count: number } | null;
+        matcher?: MatcherResult | null;
         matcher_error?: string | null;
       };
       if (!r.ok) throw new Error(j.error ?? `import failed (${r.status})`);
+      if (j.import_id) setActiveImportId(j.import_id);
       setResult({
-        inserted: j.inserted ?? rows.length,
+        attempted: j.attempted ?? rows.length,
+        present_after_import: j.present_after_import ?? rows.length,
         matcher: j.matcher ?? null,
         matcher_error: j.matcher_error ?? null,
       });
@@ -106,9 +170,29 @@ export function ImportWizard({
     }
   }
 
+  // Best-effort: between hitting Commit and the POST resolving, peek at the
+  // latest survey_imports row for this project so we can show progress
+  // immediately. This is a one-shot — the useEffect picks up steady polling
+  // once we have a concrete activeImportId.
+  async function pollLatestImportUntilStarted() {
+    const start = Date.now();
+    while (Date.now() - start < 5000) {
+      try {
+        const r = await fetch(`/api/projects/${projectId}/import-progress`, { cache: "no-store" });
+        if (r.ok) {
+          const j = (await r.json()) as Progress & { id?: string };
+          if (j?.processing_step === "geocoding" || j?.processing_step === "matching" || j?.processing_step === "inserting") {
+            if (j.id) setActiveImportId(j.id);
+            setProgress(j);
+            return;
+          }
+        }
+      } catch { /* ignore */ }
+      await new Promise((res) => setTimeout(res, 400));
+    }
+  }
+
   async function onRerunMatch() {
-    // Re-confirm the suffix every time. Use the wizard's current value
-    // (which mirrors the project default unless the user edited it).
     const fresh = window.prompt(
       "Confirm the city, state, ZIP (or any locality) to append to every street address before geocoding.\n" +
       "Census needs more than the street to resolve the location.",
@@ -119,12 +203,18 @@ export function ImportWizard({
     if (!suffix) { setResult((p) => p ? { ...p, matcher_error: "Suffix is required for geocoding." } : p); return; }
     setAddressSuffix(suffix);
     setRerunning(true);
+    setProgress(null);
+    // The /api/match shim doesn't create a survey_imports row, so the
+    // progress poll has to use the latest survey_imports row for this
+    // project. The matcher writes processing_step="geocoding" on the
+    // most recent one when given import_id.
+    void pollLatestImportUntilStarted();
     try {
       const r = await fetch(
         `/api/match?project_id=${encodeURIComponent(projectId)}&address_suffix=${encodeURIComponent(suffix)}`,
         { method: "POST" },
       );
-      const j = (await r.json()) as { error?: string; geocoded?: number; matched_now?: number; m1_count?: number; f1_count?: number; r1_count?: number };
+      const j = (await r.json()) as { error?: string } & Partial<MatcherResult>;
       if (!r.ok) throw new Error(j.error ?? `match failed (${r.status})`);
       setResult((prev) => prev ? {
         ...prev,
@@ -150,7 +240,7 @@ export function ImportWizard({
         <DropZone
           onFile={onFile}
           accept=".csv,text/csv"
-          label="Drop a Qualtrics or Google Forms CSV, or click to choose"
+          label="Drop a Qualtrics, Google Forms, or canvassing-log CSV — or click to choose"
         />
       )}
 
@@ -174,25 +264,13 @@ export function ImportWizard({
               {headers.map((h) => (<option key={h} value={h}>{h}</option>))}
             </select>
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
-              We re-geocode this column via the U.S. Census geocoder. The response&apos;s own latitude/longitude (e.g. <span className="font-mono">LocationLatitude</span>) is <b>discarded</b> — it&apos;s where the survey was filled, not where the house is.
+              We re-geocode this column via the U.S. Census geocoder. Any response-side latitude/longitude (e.g. <span className="font-mono">LocationLatitude</span>) is <b>discarded</b> — that&apos;s where the survey was filled, not where the house is.
             </p>
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">External ID column (optional, for de-duplication)</label>
-            <select
-              value={externalIdColumn}
-              onChange={(e) => setExternalIdColumn(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[13px]"
-            >
-              <option value="">— none —</option>
-              {headers.map((h) => (<option key={h} value={h}>{h}</option>))}
-            </select>
-          </div>
-
-          <div>
             <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">
-              City, state, ZIP to append to every address <span className="text-[oklch(68%_0.21_25)]">required</span>
+              City, state, ZIP to append to every address
             </label>
             <input
               type="text"
@@ -202,15 +280,49 @@ export function ImportWizard({
               className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 font-mono text-[12px]"
             />
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
-              The Census geocoder can&apos;t resolve street-only addresses like &ldquo;6116 Harvard Avenue&rdquo; — Harvard Avenue exists in every state. We append this to every row before geocoding. {defaultAddressSuffix ? (
-                <span className="text-[var(--shell-text-2)]">Pre-filled from this project&apos;s last import; edit it if this CSV is from a different area.</span>
+              {defaultAddressSuffix ? (
+                <>This is what we used last time on this project. <b>If it&apos;s still right, leave it alone.</b> Edit only if this CSV is from a different area.</>
               ) : (
-                <span>Required on the first import. We&apos;ll save it on the project so future imports default to the same value (but you can always change it).</span>
+                <>Census can&apos;t resolve street-only addresses like &ldquo;6116 Harvard Avenue&rdquo; — Harvard Avenue exists in every state. Type the city / state / ZIP once and we&apos;ll remember it on the project for next time.</>
               )}
             </p>
           </div>
 
-          <PreviewTable rows={rows.slice(0, 5)} addressColumn={addressColumn} />
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">
+              Which column is the canvassing status / outcome? <span className="text-[var(--shell-text-muted)] normal-case font-normal tracking-normal">(optional, but recommended)</span>
+            </label>
+            <select
+              value={statusColumn}
+              onChange={(e) => setStatusColumn(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[13px]"
+            >
+              <option value="">— none —</option>
+              {headers.map((h) => (<option key={h} value={h}>{h}</option>))}
+            </select>
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+              For canvassing logs, pick the column that records what happened at each door (e.g. <span className="font-mono">First attempt</span>). We color the R1 markers on the map by this value so &ldquo;completed survey&rdquo; doors look different from &ldquo;Gated, inaccessible&rdquo; doors. Leave as <i>none</i> if your CSV has no status field — all R1 markers will be uniform purple.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--shell-text-muted)]">
+              Unique-row ID column <span className="text-[var(--shell-text-muted)] normal-case font-normal tracking-normal">(optional)</span>
+            </label>
+            <select
+              value={externalIdColumn}
+              onChange={(e) => setExternalIdColumn(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--shell-border)] bg-[var(--shell-2)] px-3 py-2 text-[13px]"
+            >
+              <option value="">— none —</option>
+              {headers.map((h) => (<option key={h} value={h}>{h}</option>))}
+            </select>
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--shell-text-muted)]">
+              If your CSV has a per-row unique ID (Qualtrics calls it <span className="font-mono">ResponseId</span>), pick it so re-uploading the same file won&apos;t create duplicates. <b>Most field-collected CSVs don&apos;t have one — that&apos;s fine.</b> If you leave this on <i>none</i>, we dedup by row content automatically (same address + same answers ⇒ same row).
+            </p>
+          </div>
+
+          <PreviewTable rows={rows.slice(0, 5)} addressColumn={addressColumn} statusColumn={statusColumn} />
 
           {error && <p className="text-[12px] text-[oklch(68%_0.21_25)]">{error}</p>}
 
@@ -234,18 +346,21 @@ export function ImportWizard({
       )}
 
       {step === "running" && (
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-[oklch(78%_0.155_234)]" />
-          <div className="font-display text-[14px] font-bold">Importing and matching…</div>
-          <div className="text-[11px] text-[var(--shell-text-muted)]">Geocoding each address via the U.S. Census, then snapping responses to field points within 30 meters.</div>
-        </div>
+        <ProgressView progress={progress} />
       )}
 
       {step === "done" && result && (
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle2 className="h-10 w-10 text-[oklch(76%_0.16_158)]" />
           <div className="font-display text-[16px] font-extrabold">Import complete</div>
-          <div className="text-[12px] text-[var(--shell-text-2)]">{result.inserted} responses imported.</div>
+          <div className="text-[12px] text-[var(--shell-text-2)]">
+            {result.attempted} rows in this CSV · {result.present_after_import} now stored for this project
+            {result.attempted > result.present_after_import && (
+              <span className="ml-1 text-[var(--shell-text-muted)]">
+                ({result.attempted - result.present_after_import} were already imported and were skipped)
+              </span>
+            )}
+          </div>
           {result.matcher && (
             <div className="text-[12px] text-[var(--shell-text-2)]">
               {result.matcher.geocoded} geocoded this run · {result.matcher.matched_now} newly matched to field points
@@ -258,6 +373,11 @@ export function ImportWizard({
             <div className="rounded-lg border border-[oklch(68%_0.21_25/0.4)] bg-[oklch(68%_0.21_25/0.08)] px-3 py-2 text-[11px] text-[oklch(68%_0.21_25)]">
               Matcher reported an issue: {result.matcher_error}
               <div className="mt-1 text-[var(--shell-text-muted)]">Click &ldquo;Re-run matching&rdquo; below to retry; the matcher is idempotent.</div>
+            </div>
+          )}
+          {rerunning && progress && (
+            <div className="w-full max-w-md">
+              <ProgressBar progress={progress} />
             </div>
           )}
           <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
@@ -278,6 +398,56 @@ export function ImportWizard({
   );
 }
 
+function ProgressView({ progress }: { progress: Progress | null }) {
+  const step = progress?.processing_step ?? "preparing";
+  return (
+    <div className="flex flex-col items-center gap-4 py-8 text-center">
+      <Loader2 className="h-8 w-8 animate-spin text-[oklch(78%_0.155_234)]" />
+      <div className="font-display text-[14px] font-bold capitalize">{labelForStep(step)}</div>
+      <div className="w-full max-w-md">
+        <ProgressBar progress={progress} />
+      </div>
+      <div className="text-[11px] text-[var(--shell-text-muted)]">
+        {step === "geocoding" && "Sending each address to the U.S. Census geocoder (~200 ms per row)."}
+        {step === "matching" && "Snapping geocoded responses to field points within 30 meters."}
+        {step === "inserting" && "Storing rows and computing dedup hashes."}
+        {(!step || step === "preparing") && "Setting up the import…"}
+        {step === "done" && "Wrapping up…"}
+      </div>
+    </div>
+  );
+}
+
+function ProgressBar({ progress }: { progress: Progress | null }) {
+  const done = progress?.processing_done ?? 0;
+  const total = progress?.processing_total ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--shell-2)]">
+        <div
+          className="h-full bg-[oklch(78%_0.155_234)] transition-[width] duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between font-mono text-[11px] text-[var(--shell-text-muted)]">
+        <span>{progress?.processing_step ?? "—"}</span>
+        <span>{total > 0 ? `${done} / ${total}` : "preparing…"}</span>
+      </div>
+    </div>
+  );
+}
+
+function labelForStep(step: string): string {
+  switch (step) {
+    case "inserting": return "Storing rows…";
+    case "geocoding": return "Geocoding addresses…";
+    case "matching":  return "Matching to field points…";
+    case "done":      return "Finishing…";
+    default:          return "Preparing…";
+  }
+}
+
 function DropZone({ onFile, accept, label }: { onFile: (f: File) => void; accept: string; label: string }) {
   return (
     <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[var(--shell-border)] bg-[var(--shell-2)] py-16 text-center transition hover:border-[oklch(78%_0.155_234/0.5)]">
@@ -288,7 +458,7 @@ function DropZone({ onFile, accept, label }: { onFile: (f: File) => void; accept
   );
 }
 
-function PreviewTable({ rows, addressColumn }: { rows: Row[]; addressColumn: string }) {
+function PreviewTable({ rows, addressColumn, statusColumn }: { rows: Row[]; addressColumn: string; statusColumn: string }) {
   if (!rows.length) return null;
   const headers = Object.keys(rows[0]);
   return (
@@ -297,7 +467,7 @@ function PreviewTable({ rows, addressColumn }: { rows: Row[]; addressColumn: str
         <thead className="bg-[var(--shell-2)]">
           <tr>
             {headers.map((h) => (
-              <th key={h} className={`whitespace-nowrap px-2 py-1.5 text-left font-bold ${h === addressColumn ? "text-[oklch(78%_0.155_234)]" : "text-[var(--shell-text-muted)]"}`}>
+              <th key={h} className={`whitespace-nowrap px-2 py-1.5 text-left font-bold ${h === addressColumn ? "text-[oklch(78%_0.155_234)]" : h === statusColumn ? "text-[oklch(76%_0.16_158)]" : "text-[var(--shell-text-muted)]"}`}>
                 {h}
               </th>
             ))}
@@ -307,7 +477,7 @@ function PreviewTable({ rows, addressColumn }: { rows: Row[]; addressColumn: str
           {rows.map((r, i) => (
             <tr key={i} className="border-t border-[var(--shell-border)]">
               {headers.map((h) => (
-                <td key={h} className={`whitespace-nowrap px-2 py-1.5 ${h === addressColumn ? "text-[var(--shell-text)]" : "text-[var(--shell-text-2)]"}`}>
+                <td key={h} className={`whitespace-nowrap px-2 py-1.5 ${h === addressColumn || h === statusColumn ? "text-[var(--shell-text)]" : "text-[var(--shell-text-2)]"}`}>
                   {String(r[h] ?? "")}
                 </td>
               ))}
@@ -319,7 +489,6 @@ function PreviewTable({ rows, addressColumn }: { rows: Row[]; addressColumn: str
   );
 }
 
-/** Tiny CSV parser — handles quoted fields with embedded commas/newlines. */
 function parseCsv(text: string): { headers: string[]; rows: Row[] } {
   const lines: string[][] = [];
   let cur: string[] = [];
@@ -345,7 +514,7 @@ function parseCsv(text: string): { headers: string[]; rows: Row[] } {
   const rows: Row[] = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
-    if (line.length === 1 && line[0] === "") continue; // empty row
+    if (line.length === 1 && line[0] === "") continue;
     const r: Row = {};
     for (let j = 0; j < headers.length; j++) r[headers[j]] = line[j] ?? "";
     rows.push(r);

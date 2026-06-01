@@ -291,6 +291,7 @@ export function MapShell(props: Props) {
             symbology={symbology}
             boundaries={props.boundaries ?? null}
             featureColors={colorizer.featureColors}
+            responseStatuses={props.statuses.map((s) => ({ label: s.label, color: s.color }))}
           />
 
           {/* A0 colorizer — pick a survey response column to repaint the map */}

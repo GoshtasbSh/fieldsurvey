@@ -52,6 +52,14 @@ type Props = {
   symbology?: SymbologyMap;
   /** Optional project-boundary polygons (M6). Rendered under the points. */
   boundaries?: GeoJSON.FeatureCollection | null;
+  /**
+   * Project status palette for matching R1 markers' free-form status text
+   * (e.g. "completed survey", "Gated, inaccessible; left flier") to the
+   * project's defined statuses. Case-insensitive substring matching;
+   * unmatched values get a stable hashed color so visually-distinct values
+   * stay visually distinct.
+   */
+  responseStatuses?: Array<{ label: string; color: string }>;
 };
 
 const SYMB_DEFAULTS = { size: 8, fill_opacity: 0.85, outline_px: 1.5 };
@@ -129,6 +137,7 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
     symbology,
     boundaries,
     featureColors,
+    responseStatuses,
   },
   ref,
 ) {
@@ -144,8 +153,8 @@ export const MaplibreMap = forwardRef<MapHandle, Props>(function MaplibreMap(
   // Two GeoJSON FeatureCollections so heatmap/points can stay un-clustered
   // while clusters use a separate clustered source.
   const fcRaw = useMemo(
-    () => toGeoJSON(features, statusColors, featureColors ?? null),
-    [features, statusColors, featureColors],
+    () => toGeoJSON(features, statusColors, featureColors ?? null, responseStatuses ?? null),
+    [features, statusColors, featureColors, responseStatuses],
   );
 
   useImperativeHandle(ref, () => ({
@@ -597,10 +606,52 @@ function applyLayerVisibility(map: Map, layers: LayerVisibility) {
   setVis("ms-boundary-line", layers.boundary !== false);
 }
 
+// Stable palette for R1 status_labels that don't match any project status.
+// Keeps "Gated, inaccessible" and "completed survey" visually distinct even
+// when the project hasn't defined either as a typed status.
+const R1_PALETTE = [
+  "#a855f7", // purple (the legacy R1 fallback — first slot is the default)
+  "#ef4444", // red
+  "#f59e0b", // amber
+  "#10b981", // emerald
+  "#06b6d4", // cyan
+  "#3b82f6", // blue
+  "#ec4899", // pink
+  "#84cc16", // lime
+  "#f97316", // orange
+  "#6366f1", // indigo
+];
+
+function hashColor(label: string): string {
+  let h = 0;
+  for (let i = 0; i < label.length; i++) h = ((h << 5) - h + label.charCodeAt(i)) | 0;
+  return R1_PALETTE[Math.abs(h) % R1_PALETTE.length];
+}
+
+function r1ColorFor(
+  label: string | null | undefined,
+  responseStatuses: Array<{ label: string; color: string }> | null,
+): string {
+  const t = (label ?? "").trim();
+  if (!t) return R1_PALETTE[0];
+  if (responseStatuses && responseStatuses.length) {
+    const lo = t.toLowerCase();
+    // Substring match against project_statuses labels (case-insensitive).
+    // Lets "completed survey" and "completed_survey" both resolve to the
+    // project's "Completed" status color.
+    for (const s of responseStatuses) {
+      const sl = s.label.toLowerCase();
+      if (lo.includes(sl) || sl.includes(lo)) return s.color;
+    }
+  }
+  return hashColor(t.toLowerCase());
+}
+
 function toGeoJSON(
   features: MatchStatusRow[],
   statusColors: StatusColorMap,
   featureColors: Record<string, string> | null,
+  responseStatuses: Array<{ label: string; color: string }> | null,
 ): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -608,10 +659,12 @@ function toGeoJSON(
       .filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lon))
       .map((f) => {
         const id = f.point_id ?? f.response_id;
-        // A0 colorizer override has highest precedence; preserve F1 yellow
-        // tint via the caller by NOT supplying an override for F1 rows.
         const override = featureColors?.[id ?? ""];
-        const fallback = f.status_id ? statusColors[f.status_id] : "#a855f7";
+        const fallback = f.status_id
+          ? statusColors[f.status_id]
+          : f.match_status === "R1"
+            ? r1ColorFor(f.status_label, responseStatuses)
+            : "#a855f7";
         return {
           type: "Feature",
           geometry: { type: "Point", coordinates: [f.lon, f.lat] },
@@ -619,6 +672,7 @@ function toGeoJSON(
             id,
             match_status: f.match_status,
             status_id: f.status_id ?? null,
+            status_label: f.status_label ?? null,
             color: override ?? fallback,
           },
         };
