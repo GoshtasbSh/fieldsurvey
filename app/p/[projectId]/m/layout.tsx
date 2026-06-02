@@ -2,9 +2,7 @@ import "./shell.css";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { getProjectRole, type ProjectRole } from "@/lib/mobile/role-gate";
-import { isSurfaceAllowed } from "@/lib/mobile/tabs";
-import type { MobileSurface } from "@/lib/mobile/surface-map";
+import { getProjectRole } from "@/lib/mobile/role-gate";
 import { readGuestSession } from "@/lib/auth/guest-session";
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper";
 
@@ -88,17 +86,5 @@ export default async function MobileShellLayout({
   );
 }
 
-/**
- * Page-side surface assertion. Call at the top of every /m/<surface>/page.tsx
- * server component so a guest hitting /m/analysis (URL-guessed) gets 404
- * instead of a half-rendered admin screen.
- */
-export async function assertSurfaceAllowed(
-  projectId: string,
-  surface: MobileSurface,
-): Promise<ProjectRole> {
-  const role = await getProjectRole(projectId);
-  if (!role) redirect(`/sign-in?next=/p/${projectId}/m/${surface}`);
-  if (!isSurfaceAllowed(role, surface)) notFound();
-  return role;
-}
+// `assertSurfaceAllowed` lives in lib/mobile/role-gate.ts — layout.tsx files
+// in Next.js may not export named helpers other than the framework allowlist.

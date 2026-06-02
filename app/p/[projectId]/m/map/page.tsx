@@ -1,4 +1,4 @@
-import { assertSurfaceAllowed } from "../layout";
+import { assertSurfaceAllowed } from "@/lib/mobile/role-gate";
 
 /**
  * S2 placeholder for the mobile Map tab. The real map (MapLibre + pins +

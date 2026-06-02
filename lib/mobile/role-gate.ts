@@ -1,5 +1,8 @@
+import { notFound, redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { readGuestSession } from "@/lib/auth/guest-session";
+import { isSurfaceAllowed } from "@/lib/mobile/tabs";
+import type { MobileSurface } from "@/lib/mobile/surface-map";
 
 export type ProjectRole = "admin" | "member" | "guest";
 
@@ -34,4 +37,22 @@ export async function getProjectRole(projectId: string): Promise<ProjectRole | n
 
   if (!row) return null;
   return row.role === "admin" ? "admin" : "member";
+}
+
+/**
+ * Page-side surface assertion. Call at the top of every /m/<surface>/page.tsx
+ * server component so a guest hitting /m/analysis (URL-guessed) gets 404
+ * instead of a half-rendered admin screen.
+ *
+ * Lives here (not in the layout file) because Next.js layout files cannot
+ * export anything other than `default` + a fixed allowlist of named exports.
+ */
+export async function assertSurfaceAllowed(
+  projectId: string,
+  surface: MobileSurface,
+): Promise<ProjectRole> {
+  const role = await getProjectRole(projectId);
+  if (!role) redirect(`/sign-in?next=/p/${projectId}/m/${surface}`);
+  if (!isSurfaceAllowed(role, surface)) notFound();
+  return role;
 }
