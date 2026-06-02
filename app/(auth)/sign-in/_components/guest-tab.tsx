@@ -34,7 +34,7 @@ export function GuestTab() {
           setError(body.error ?? "Invalid or expired code");
           return;
         }
-        router.replace(`/p/${body.projectId}/field`);
+        router.replace(`/p/${body.projectId}/m/map`);
       } catch {
         setError("Network error — try again");
       }
