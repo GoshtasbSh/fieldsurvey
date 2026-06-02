@@ -6,6 +6,10 @@ export type OS = "ios" | "android" | "macos" | "windows" | "other";
 const MOBILE_UA = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Mobile/i;
 const DEVICE_COOKIE = "fs_device_pref";
 
+/** Cookie expiry — 30 days. Long enough to be sticky across a survey project, */
+/* short enough that a stale "force desktop" from months ago can't haunt a user forever. */
+const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
 export function isMobileUserAgent(ua: string): boolean {
   return MOBILE_UA.test(ua);
 }
@@ -55,3 +59,43 @@ export function detectDeviceClient(): DeviceClass {
 }
 
 export const DEVICE_PREF_COOKIE = DEVICE_COOKIE;
+
+/**
+ * Read the request's User-Agent and headers without doing the cookie lookup.
+ * Used by middleware which has its own headers object — re-reading via
+ * next/headers would double the work and miss the request being routed.
+ */
+export function detectDeviceFromRequest(
+  ua: string | null,
+  chMobile: string | null,
+  prefCookie: string | null,
+): DeviceClass {
+  if (prefCookie === "desktop" || prefCookie === "mobile") return prefCookie;
+  if (chMobile === "?1") return "mobile";
+  if (chMobile === "?0") return "desktop";
+  return MOBILE_UA.test(ua ?? "") ? "mobile" : "desktop";
+}
+
+/**
+ * Persist a device preference. Used by:
+ *   - /api/device-pref to honor an explicit "view as mobile/desktop" toggle
+ *   - the More menu's "Switch to desktop view" action
+ *
+ * Pass null to clear (returns the user to UA-driven detection).
+ */
+export async function setDevicePreference(
+  device: DeviceClass | null,
+): Promise<void> {
+  const jar = await cookies();
+  if (device === null) {
+    jar.delete(DEVICE_COOKIE);
+    return;
+  }
+  jar.set(DEVICE_COOKIE, device, {
+    httpOnly: false, // intentionally readable by client device.client.ts
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: DEVICE_COOKIE_MAX_AGE,
+  });
+}

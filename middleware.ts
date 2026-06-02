@@ -1,5 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { detectDeviceFromRequest, DEVICE_PREF_COOKIE } from "@/lib/device";
+import { targetForDevice } from "@/lib/mobile/surface-map";
 
 /**
  * FieldSurvey middleware.
@@ -144,6 +146,22 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
 }
 
 export async function middleware(request: NextRequest) {
+  // Device-class routing — runs first so we don't pay the Supabase session
+  // cost on a request that's about to be redirected. We use the surface-map
+  // helper which is the single source of truth for desktop↔mobile routes;
+  // adding a new surface only requires updating lib/mobile/surface-map.ts.
+  const device = detectDeviceFromRequest(
+    request.headers.get("user-agent"),
+    request.headers.get("sec-ch-ua-mobile"),
+    request.cookies.get(DEVICE_PREF_COOKIE)?.value ?? null,
+  );
+  const target = targetForDevice(request.nextUrl.pathname, device);
+  if (target) {
+    const redirectUrl = new URL(target, request.url);
+    redirectUrl.search = request.nextUrl.search;
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 307));
+  }
+
   let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

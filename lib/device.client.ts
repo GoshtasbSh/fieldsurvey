@@ -16,8 +16,13 @@ export function detectDeviceClient(): DeviceClass {
   const isStandalone =
     nav.standalone === true ||
     window.matchMedia?.("(display-mode: standalone)").matches;
-  if (isStandalone) return "mobile";
   const isMobileUA = MOBILE_UA.test(window.navigator.userAgent);
+  // Standalone alone isn't enough — Chrome on macOS/Windows can install
+  // PWAs in standalone mode too, and we don't want a MacBook admin to be
+  // dropped into the mobile shell with no escape. Require a mobile UA
+  // *and* standalone to short-circuit; otherwise fall through to the
+  // narrow+touch heuristics below.
+  if (isStandalone && isMobileUA) return "mobile";
   const isNarrow = window.innerWidth < 768;
   const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   return isMobileUA || (isNarrow && isTouch) ? "mobile" : "desktop";
