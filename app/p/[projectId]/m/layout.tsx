@@ -1,10 +1,28 @@
 import "./shell.css";
+import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getProjectRole } from "@/lib/mobile/role-gate";
 import { readGuestSession } from "@/lib/auth/guest-session";
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper";
+
+// PWA viewport — viewport-fit=cover lets the topbar absorb safe-area-inset-top.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0d1117",
+};
+
+export const metadata: Metadata = {
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "FieldSurvey",
+  },
+};
 
 /**
  * Mobile project shell — wraps every /p/[id]/m/<surface> page with the

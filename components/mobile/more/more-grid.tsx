@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Icon, type IconKey } from "@/components/mobile/icons/icons";
+import { InstallInstructions } from "@/components/mobile/install/install-instructions";
 
 type Tile = {
   href: string;
@@ -128,6 +129,26 @@ export function MobileMoreGrid({ projectId }: Props) {
           </Link>
         ))}
       </div>
+
+      <section id="install" style={{ marginTop: 28 }}>
+        <h2
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "var(--m-ink-2)",
+            marginBottom: 6,
+          }}
+        >
+          Install on this device
+        </h2>
+        <p style={{ fontSize: 12.5, color: "var(--m-ink-2)", lineHeight: 1.5 }}>
+          Get a FieldSurvey icon on your home screen so it launches like an
+          app and works offline for the map shell.
+        </p>
+        <InstallInstructions />
+      </section>
     </div>
   );
 }
