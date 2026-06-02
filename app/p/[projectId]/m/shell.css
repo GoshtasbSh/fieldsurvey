@@ -1,0 +1,79 @@
+/* Mobile shell tokens. Mirror KeyStone's dark/light palette so users
+ * coming from KeyStone feel at home. The shell lives under [data-theme] on
+ * <html> — set by the topbar's theme toggle and persisted in fs_theme. */
+
+[data-theme="dark"] {
+  --m-bg:       #0d1117;
+  --m-bg-2:     #161b22;
+  --m-card:     #1c2128;
+  --m-line:     rgba(255, 255, 255, 0.09);
+  --m-line-2:   rgba(255, 255, 255, 0.14);
+  --m-ink:      #e6edf3;
+  --m-ink-2:    #8b949e;
+  --m-ink-3:    #6b7280;
+  --m-accent:        #38bdf8;
+  --m-accent-on:     #0d1117;
+  --m-accent-dim:    rgba(56, 189, 248, 0.16);
+  --m-accent-bdr:    rgba(56, 189, 248, 0.28);
+  --m-danger:        #ef4444;
+  --m-warn:          #f97316;
+  --m-success:       #10b981;
+  --m-info:          #3b82f6;
+}
+
+[data-theme="light"] {
+  --m-bg:       #f0f2f5;
+  --m-bg-2:     #ffffff;
+  --m-card:     #ffffff;
+  --m-line:     #e4e6eb;
+  --m-line-2:   #d4d6db;
+  --m-ink:      #050505;
+  --m-ink-2:    #65676b;
+  --m-ink-3:    #8a8d91;
+  --m-accent:        #1877f2;
+  --m-accent-on:     #ffffff;
+  --m-accent-dim:    rgba(24, 119, 242, 0.08);
+  --m-accent-bdr:    rgba(24, 119, 242, 0.25);
+  --m-danger:        #dc2626;
+  --m-warn:          #ea580c;
+  --m-success:       #059669;
+  --m-info:          #2563eb;
+}
+
+/* Layout sizes — referenced by topbar / tabbar / FAB / safe-area math */
+.m-shell {
+  --m-tabbar-h:  72px;
+  --m-topbar-h:  56px;
+  --m-fab-size:  60px;
+  --m-touch-min: 44px;
+  --m-safe-top:    env(safe-area-inset-top, 0px);
+  --m-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --m-safe-left:   env(safe-area-inset-left, 0px);
+  --m-safe-right:  env(safe-area-inset-right, 0px);
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--m-bg);
+  color: var(--m-ink);
+  font-family: -apple-system, "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+}
+
+.m-shell__main {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  /* Topbar already absorbs --m-safe-top; do not double-count it here. */
+}
+
+.m-shell__main > * {
+  height: 100%;
+}
+
+/* Hide scrollbar on bottom-sheets / lists but keep scroll */
+.m-no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.m-no-scrollbar::-webkit-scrollbar { display: none; }
