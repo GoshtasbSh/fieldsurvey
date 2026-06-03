@@ -77,6 +77,15 @@ export default async function MobileMapPage({
     .gte("collected_at", new Date().toISOString().slice(0, 10));
   const todayDelta = todayCount ?? 0;
 
+  const statusRowsForAdd = statuses.map((s) => ({
+    id: s.id,
+    label: s.label,
+    color: s.color,
+    icon: s.icon ?? null,
+    count: s.count,
+    pct: s.pct,
+  }));
+
   return (
     <MobileMapView
       projectId={projectId}
@@ -92,6 +101,7 @@ export default async function MobileMapPage({
         color: s.color,
         count: s.count,
       }))}
+      statusRowsForAdd={statusRowsForAdd}
       features={safeFeatures}
       boundaries={boundaries}
       myToday={myToday}

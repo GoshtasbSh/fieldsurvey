@@ -1,10 +1,17 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Icon } from "@/components/mobile/icons/icons";
 import { MobileFab } from "@/components/mobile/shell/mobile-fab";
-import { BASEMAPS, type BasemapKey, type StatusColorMap } from "@/components/map/maplibre-map";
+import { MobileAddSheet } from "@/components/mobile/add-sheet";
+import {
+  BASEMAPS,
+  type BasemapKey,
+  type StatusColorMap,
+} from "@/components/map/maplibre-map";
+import type { StatusRow as DesktopStatusRow } from "@/components/desktop/left-rail";
 import type { MatchStatusRow } from "@/lib/match/status";
 import type { ProjectRole } from "@/lib/mobile/role-gate";
 
@@ -25,33 +32,37 @@ type Props = {
   role: ProjectRole;
   center: { lat: number; lon: number; zoom: number };
   statuses: StatusRow[];
+  /** Full status rows with icon + pct (needed for AddPointForm select). */
+  statusRowsForAdd: DesktopStatusRow[];
   features: MatchStatusRow[];
   boundaries?: GeoJSON.FeatureCollection | null;
-  /** Live count of points the current user has placed (Map tab stat strip). */
   myToday?: number;
   myTotal?: number;
-  /** Total project KPIs (admin/member). */
   totalPoints: number;
   todayDelta: number;
   doneCount: number;
-  /** Offline-queue depth — driven by parent; mobile shell's FAB badge. */
   offlineCount?: number;
 };
 
 /**
- * Mobile Map tab — full-bleed MapLibre with overlays:
- *  - Compass + locate-me + basemap toggle (top-right)
- *  - Status filter chip strip (bottom, swipes horizontally)
- *  - Collapsible stat strip above the tab bar
- *  - KeyStone "＋" FAB linking to /m/add (place-mode add)
+ * Mobile Map tab — tap-to-place add point (KeyStone parity, matches desktop):
  *
- * Sits INSIDE MobileShell — does not render its own topbar/tabbar.
+ *   FAB tap → enter place mode (cursor crosshair, hint banner shown).
+ *   Tap map → captures clicked lat/lon, opens add-sheet pre-filled with
+ *             those coords. NEVER uses navigator.geolocation; the user's
+ *             current GPS is irrelevant to which house they're recording.
+ *   FAB tap during place mode → cancel.
+ *   Escape (hardware/keyboard) → cancel place mode.
+ *
+ * This intentionally mirrors components/desktop/map-shell.tsx handleStartPlace
+ * / handleMapPlace flow.
  */
 export function MobileMapView({
   projectId,
   role,
   center,
   statuses,
+  statusRowsForAdd,
   features,
   boundaries = null,
   myToday = 0,
@@ -61,10 +72,16 @@ export function MobileMapView({
   doneCount,
   offlineCount = 0,
 }: Props) {
+  const router = useRouter();
   const [basemap, setBasemap] = useState<BasemapKey>("satellite");
   const [basemapOpen, setBasemapOpen] = useState(false);
   const [activeStatusIds, setActiveStatusIds] = useState<Set<string>>(new Set());
   const [strip, setStrip] = useState<"open" | "closed">("open");
+
+  // Tap-to-place state — desktop-parity.
+  const [placingMode, setPlacingMode] = useState(false);
+  const [placeCoords, setPlaceCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   const statusColors: StatusColorMap = useMemo(
     () => Object.fromEntries(statuses.map((s) => [s.id, s.color])),
@@ -85,6 +102,37 @@ export function MobileMapView({
     });
   }
 
+  function handleStartPlace() {
+    setPlacingMode(true);
+  }
+  function handleCancelPlace() {
+    setPlacingMode(false);
+  }
+  function handleMapPlace(c: { lat: number; lon: number }) {
+    setPlacingMode(false);
+    setPlaceCoords(c);
+    setAddOpen(true);
+  }
+  function handleAddClose() {
+    setAddOpen(false);
+    setPlaceCoords(null);
+  }
+  function handleSaved() {
+    setAddOpen(false);
+    setPlaceCoords(null);
+    router.refresh();
+  }
+
+  // ESC cancels place mode (keyboard accessibility + external Bluetooth keyboard).
+  useEffect(() => {
+    if (!placingMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlacingMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [placingMode]);
+
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <MaplibreMap
@@ -96,7 +144,52 @@ export function MobileMapView({
         onSelect={() => {}}
         basemap={basemap}
         boundaries={boundaries}
+        placingMode={placingMode}
+        onPlace={handleMapPlace}
       />
+
+      {/* Place-mode hint banner — covers the top of the map while active */}
+      {placingMode ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            right: 60, // leaves room for the utility column
+            zIndex: 5,
+            background: "var(--m-accent)",
+            color: "var(--m-accent-on)",
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontSize: 13,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
+          }}
+        >
+          <span>Tap the map where the point should go.</span>
+          <button
+            type="button"
+            onClick={handleCancelPlace}
+            aria-label="Cancel place mode"
+            style={{
+              background: "rgba(0,0,0,0.15)",
+              color: "inherit",
+              border: "none",
+              borderRadius: 6,
+              padding: "4px 10px",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
 
       {/* Top-right utility column */}
       <div
@@ -120,7 +213,6 @@ export function MobileMapView({
         </UtilityButton>
       </div>
 
-      {/* Basemap sheet — slides up from above the filter strip */}
       {basemapOpen ? (
         <BasemapSheet
           active={basemap}
@@ -132,7 +224,6 @@ export function MobileMapView({
         />
       ) : null}
 
-      {/* Status filter chips — KeyStone-parity */}
       <FilterStrip
         statuses={statuses}
         active={activeStatusIds}
@@ -140,7 +231,6 @@ export function MobileMapView({
         bottomOffset={strip === "open" && role !== "guest" ? 56 : 8}
       />
 
-      {/* Collapsible stat strip (admin/member only) */}
       {role !== "guest" ? (
         <StatStrip
           open={strip === "open"}
@@ -154,12 +244,21 @@ export function MobileMapView({
         />
       ) : null}
 
-      {/* FAB — Add point */}
+      {/* FAB — toggles place mode (desktop parity). Active state visible. */}
       <MobileFab
-        href={`/p/${projectId}/m/add`}
+        onClick={() => (placingMode ? handleCancelPlace() : handleStartPlace())}
         badge={offlineCount}
         bottomOffset={role !== "guest" && strip === "open" ? 116 : 76}
-        ariaLabel="Add point"
+        ariaLabel={placingMode ? "Cancel adding point" : "Add point"}
+      />
+
+      <MobileAddSheet
+        open={addOpen}
+        projectId={projectId}
+        statuses={statusRowsForAdd}
+        initialCoords={placeCoords ?? undefined}
+        onClose={handleAddClose}
+        onSaved={handleSaved}
       />
     </div>
   );
@@ -449,11 +548,7 @@ function StatStrip({
       <Divider />
       <Stat n={`+${todayDelta}`} l="Today" />
       <Divider />
-      {role === "admin" ? (
-        <Stat n={doneCount} l="Done" />
-      ) : (
-        <Stat n={myTotal} l="Mine" />
-      )}
+      {role === "admin" ? <Stat n={doneCount} l="Done" /> : <Stat n={myTotal} l="Mine" />}
       {role !== "admin" ? null : (
         <>
           <Divider />

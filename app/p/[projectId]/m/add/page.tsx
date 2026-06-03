@@ -1,33 +1,19 @@
-import { assertSurfaceAllowed } from "@/lib/mobile/role-gate";
-import { getStatusBreakdown } from "@/lib/queries/points";
-import { MobileAddPointPage } from "@/components/mobile/map/add-point-page";
+import { permanentRedirect } from "next/navigation";
 
 /**
- * Mobile add-point full-screen page. Reached from the Map FAB. All three
- * roles can add (admin/member/guest) — the API layer handles the role-
- * specific write path (guest uses /api/points/guest with the fs_guest
- * cookie; member/admin use the standard signed-in RLS).
+ * /m/add was a brief intermediate (S4) — a full-screen add form that
+ * auto-captured the user's GPS. That's wrong: surveyors record the
+ * location of the door they knocked on, not their own location. The
+ * Map tab now uses tap-to-place mode (FAB → tap map → bottom sheet
+ * pre-filled with the clicked coords), mirroring the desktop flow.
+ *
+ * This redirect keeps any stale link or cached bookmark working.
  */
-export default async function MobileAddPage({
+export default async function MobileAddRedirect({
   params,
 }: {
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  await assertSurfaceAllowed(projectId, "add");
-
-  const statuses = await getStatusBreakdown(projectId);
-  return (
-    <MobileAddPointPage
-      projectId={projectId}
-      statuses={statuses.map((s) => ({
-        id: s.id,
-        label: s.label,
-        color: s.color,
-        icon: s.icon ?? null,
-        count: s.count,
-        pct: s.pct,
-      }))}
-    />
-  );
+  permanentRedirect(`/p/${projectId}/m/map`);
 }
