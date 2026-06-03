@@ -123,7 +123,11 @@ export default async function MobileReportsPage({
                     {r.title}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--m-ink-3)", marginTop: 1 }}>
-                    {(r.guest_name ?? "Guest") + " · " + relTime(r.created_at)}
+                    {(r.guest_name ?? "Guest")}
+                    {" · "}
+                    <time dateTime={r.created_at} suppressHydrationWarning>
+                      {relTime(r.created_at)}
+                    </time>
                   </div>
                 </div>
                 <StatusBadge status={r.status} />

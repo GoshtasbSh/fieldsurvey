@@ -21,6 +21,10 @@ import { createAdminSupabase } from "@/lib/supabase/admin";
  * Service role insert (RLS denies anonymous writes). Photo uploads use the
  * guest-reports bucket with path = <project_id>/<report_id>/<uuid>.<ext>.
  */
+/** Per-session rate limit — 20 reports per hour, keyed on guest.sessionId. */
+const RATE_WINDOW_MS = 60 * 60 * 1000;
+const RATE_MAX = 20;
+
 export async function POST(req: Request) {
   const guest = await readGuestSession();
   if (!guest) {
@@ -77,6 +81,25 @@ export async function POST(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = createAdminSupabase() as any;
 
+  // Rate limit: count this session's reports inside the rolling window
+  // and reject if at-or-above cap. Uses the existing index on
+  // (project_id, created_at). Race-safe enough for nuisance prevention;
+  // a determined attacker could squeeze through with a burst, but the
+  // budget (20/h) is too small to cause damage.
+  const windowStart = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
+  const { count: recentCount } = await sb
+    .from("guest_reports")
+    .select("id", { head: true, count: "exact" })
+    .eq("project_id", guest.projectId)
+    .eq("guest_session_id", guest.sessionId)
+    .gte("created_at", windowStart);
+  if ((recentCount ?? 0) >= RATE_MAX) {
+    return NextResponse.json(
+      { ok: false, error: "Rate limit reached. Please try again later." },
+      { status: 429 },
+    );
+  }
+
   const { data: inserted, error: insertErr } = await sb.from("guest_reports")
     .insert({
       project_id: guest.projectId,
@@ -117,17 +140,35 @@ export async function POST(req: Request) {
       .from("guest-reports")
       .upload(photoPath, photo, { contentType: photo.type, upsert: false });
     if (upErr) {
-      // Keep the row but report the photo upload failure to the client.
+      // Log internal error, return generic message — Supabase storage
+      // messages can leak bucket names / internal paths.
+      console.error("[guest-report] photo upload failed", {
+        reportId: inserted.id,
+        err: upErr.message,
+      });
       return NextResponse.json(
         {
           ok: true,
           id: inserted.id,
-          warning: `Report saved but photo upload failed: ${upErr.message}`,
+          warning: "Report saved but the photo could not be attached.",
         },
         { status: 200 },
       );
     }
-    await sb.from("guest_reports").update({ photo_path: photoPath }).eq("id", inserted.id);
+    const { error: updErr } = await sb
+      .from("guest_reports")
+      .update({ photo_path: photoPath })
+      .eq("id", inserted.id);
+    if (updErr) {
+      // Storage object is now orphaned; admin can still read the row.
+      // Log so we can sweep these later. Don't fail the request — the
+      // report itself was saved.
+      console.error("[guest-report] update photo_path failed (orphan)", {
+        reportId: inserted.id,
+        photoPath,
+        err: updErr.message,
+      });
+    }
   }
 
   return NextResponse.json({ ok: true, id: inserted.id, photoPath });

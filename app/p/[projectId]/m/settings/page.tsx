@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { assertSurfaceAllowed } from "@/lib/mobile/role-gate";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -11,11 +12,14 @@ export default async function MobileSettingsPage({
   await assertSurfaceAllowed(projectId, "settings");
 
   const sb = await createServerSupabase();
+  // maybeSingle (not single) — if the project disappears between the role
+  // gate and this read, return 404 instead of a 500 PGRST116 error.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: project } = await (sb.from("projects") as any)
     .select("name, description, center_lat, center_lon, default_zoom")
     .eq("id", projectId)
-    .single();
+    .maybeSingle();
+  if (!project) notFound();
 
   return (
     <div
